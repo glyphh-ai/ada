@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic-settings
+email-validator
+psycopg[binary]
+pgvector
+numpy
+alembic
+openai

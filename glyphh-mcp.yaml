@@ -1,0 +1,85 @@
+name: glyphh-runtime
+version: 0.1.0
+description: MCP tools for Glyphh runtime deployments.
+tools:
+  - name: nl_query
+    description: Natural language query over a deployed Glyphh model.
+    input_schema:
+      type: object
+      properties:
+        model_id: { type: string }
+        text: { type: string }
+      required: [model_id, text]
+    output_schema:
+      type: object
+  - name: find_by_properties
+    description: Find glyphs by property constraints.
+    input_schema:
+      type: object
+      properties:
+        model_id: { type: string }
+        constraints:
+          type: array
+          items:
+            type: object
+            properties:
+              role: { type: string }
+              value: { type: string }
+            required: [role, value]
+      required: [model_id, constraints]
+    output_schema:
+      type: object
+  - name: similar_to
+    description: Find glyphs similar to a glyph or input text.
+    input_schema:
+      type: object
+      properties:
+        model_id: { type: string }
+        glyph_name: { type: string }
+        top_k: { type: integer, default: 5 }
+      required: [model_id, glyph_name]
+    output_schema:
+      type: object
+  - name: explain_link
+    description: Explain why two glyphs are linked.
+    input_schema:
+      type: object
+      properties:
+        model_id: { type: string }
+        source: { type: string }
+        target: { type: string }
+      required: [model_id, source, target]
+    output_schema:
+      type: object
+  - name: trend_role
+    description: Query trend data for a role.
+    input_schema:
+      type: object
+      properties:
+        model_id: { type: string }
+        role: { type: string }
+      required: [model_id, role]
+    output_schema:
+      type: object
+  - name: predict_next
+    description: Predict the next value for a role/segment.
+    input_schema:
+      type: object
+      properties:
+        model_id: { type: string }
+        role: { type: string }
+      required: [model_id, role]
+    output_schema:
+      type: object
+  - name: what_if_modify
+    description: Run a what-if modification against a model.
+    input_schema:
+      type: object
+      properties:
+        model_id: { type: string }
+        glyph_name: { type: string }
+        patch:
+          type: object
+      required: [model_id, glyph_name, patch]
+    output_schema:
+      type: object
