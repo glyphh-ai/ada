@@ -79,8 +79,8 @@ async def control_listener(
 @router.post("/listeners/{listener_id}/import-data")
 async def import_listener_data(
     listener_id: str,
-    payload: list[dict] = Body(...),
     request: Request,
+    payload: list[dict] = Body(...),
 ):
     manager: ListenerManager = request.app.state.listener_manager
     if not manager:
