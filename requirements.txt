@@ -8,4 +8,4 @@ pgvector
 numpy
 alembic
 openai
-git+https://x-access-token:${GLYPH_GITHUB_TOKEN}@github.com/glyphh-ai/glyphh-ai.git@main#subdirectory=glyphh-sdk
+${GLYPH_SDK_WHEEL_URL}
