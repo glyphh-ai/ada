@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     # Database URL should include ?sslmode=require on Heroku
     database_url: str = Field(
         default="postgresql+psycopg://localhost:5432/glyph_ai",
-        validation_alias=("GLYPH_DATABASE_URL", "DATABASE_URL"),
+        validation_alias=AliasChoices("GLYPH_DATABASE_URL", "DATABASE_URL"),
     )
     app_name: str = "glyph-ai-service"
     jwt_secret: str = "change-me"
