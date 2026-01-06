@@ -3,7 +3,17 @@ set -euo pipefail
 
 if [[ -n "${GLYPH_SDK_WHEEL_URL:-}" ]]; then
   echo "Installing Glyphh SDK from wheel..."
-  pip install --no-cache-dir "$GLYPH_SDK_WHEEL_URL"
+  WHEEL_PATH="/tmp/glyphh-sdk.whl"
+  if [[ -n "${GLYPH_GITHUB_TOKEN:-}" ]]; then
+    curl -sSfL \
+      -H "Authorization: token ${GLYPH_GITHUB_TOKEN}" \
+      -H "Accept: application/octet-stream" \
+      "${GLYPH_SDK_WHEEL_URL}" \
+      -o "${WHEEL_PATH}"
+    pip install --no-cache-dir "${WHEEL_PATH}"
+  else
+    pip install --no-cache-dir "${GLYPH_SDK_WHEEL_URL}"
+  fi
 else
   echo "GLYPH_SDK_WHEEL_URL not set; skipping SDK wheel install."
 fi
