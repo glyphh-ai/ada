@@ -8,4 +8,3 @@ pgvector
 numpy
 alembic
 openai
-${GLYPH_SDK_WHEEL_URL}

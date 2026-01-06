@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -n "${GLYPH_SDK_WHEEL_URL:-}" ]]; then
+  echo "Installing Glyphh SDK from wheel..."
+  pip install --no-cache-dir "$GLYPH_SDK_WHEEL_URL"
+else
+  echo "GLYPH_SDK_WHEEL_URL not set; skipping SDK wheel install."
+fi
