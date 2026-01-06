@@ -65,7 +65,7 @@ def enforce_runtime_token(request: Request, settings) -> dict:
 def build_runtime_auth_middleware(settings):
     async def runtime_auth_middleware(request: Request, call_next):
         if (
-            request.url.path in ("/health", "/openapi.json")
+            request.url.path in ("/health", "/api/v1/health", "/openapi.json")
             or request.url.path.startswith("/docs")
             or request.url.path.startswith("/redoc")
         ):
