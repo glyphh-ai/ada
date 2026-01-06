@@ -67,16 +67,23 @@ def _run_migrations() -> None:
     try:
         from alembic import command
         from alembic.config import Config
+        from api.core.db import engine
 
         alembic_ini_candidates = [
             ROOT / "alembic.ini",
             ROOT / "glyphh-runtime" / "alembic.ini",
         ]
         alembic_ini = next((path for path in alembic_ini_candidates if path.exists()), None)
-        if not alembic_ini:
-            raise RuntimeError("alembic.ini not found in runtime package")
-        config = Config(str(alembic_ini))
-        command.upgrade(config, "head")
+        if alembic_ini:
+            config = Config(str(alembic_ini))
+            command.upgrade(config, "head")
+        else:
+            config = Config()
+            config.set_main_option("script_location", str(ROOT / "migrations"))
+            config.set_main_option("sqlalchemy.url", settings.database_url)
+            with engine.connect() as connection:
+                config.attributes["connection"] = connection
+                command.upgrade(config, "head")
         logger.info("runtime migrations applied")
     except Exception:
         logger.exception("runtime migrations failed")
