@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 from fastapi import FastAPI
@@ -59,8 +60,25 @@ app.state.listener_manager = listener_manager
 app.state.usage_tracker = None
 
 
+def _run_migrations() -> None:
+    if os.getenv("GLYPH_RUN_MIGRATIONS", "true").lower() not in {"1", "true", "yes"}:
+        logger.info("runtime migrations disabled")
+        return
+    try:
+        from alembic import command
+        from alembic.config import Config
+
+        alembic_ini = ROOT / "glyphh-runtime" / "alembic.ini"
+        config = Config(str(alembic_ini))
+        command.upgrade(config, "head")
+        logger.info("runtime migrations applied")
+    except Exception:
+        logger.exception("runtime migrations failed")
+
+
 @app.on_event("startup")
 async def startup_listener_manager() -> None:
+    _run_migrations()
     Base.metadata.create_all(bind=engine)
     await listener_manager.start()
     if settings.usage_metrics_enabled and settings.platform_api_base and settings.runtime_token:
