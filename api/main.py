@@ -68,7 +68,13 @@ def _run_migrations() -> None:
         from alembic import command
         from alembic.config import Config
 
-        alembic_ini = ROOT / "glyphh-runtime" / "alembic.ini"
+        alembic_ini_candidates = [
+            ROOT / "alembic.ini",
+            ROOT / "glyphh-runtime" / "alembic.ini",
+        ]
+        alembic_ini = next((path for path in alembic_ini_candidates if path.exists()), None)
+        if not alembic_ini:
+            raise RuntimeError("alembic.ini not found in runtime package")
         config = Config(str(alembic_ini))
         command.upgrade(config, "head")
         logger.info("runtime migrations applied")
