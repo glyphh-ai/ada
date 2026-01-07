@@ -22,6 +22,7 @@ from .routes import charts as charts_routes
 from .routes import health as health_routes
 from .routes import ingest as ingest_routes
 from .routes import listeners as listener_routes
+from .routes import mcp as mcp_routes
 from .routes import model_tools as model_tools_routes
 from .routes import nl as nl_routes
 from .routes import query as query_routes
@@ -47,6 +48,7 @@ app.include_router(bundle_routes.router, prefix="/api/v1")
 app.include_router(health_routes.router, prefix="/api/v1")
 app.include_router(ingest_routes.router, prefix="/api/v1")
 app.include_router(listener_routes.router, prefix="/api/v1")
+app.include_router(mcp_routes.router, prefix="/api/v1")
 app.include_router(model_tools_routes.router, prefix="/api/v1")
 app.include_router(nl_routes.router, prefix="/api/v1")
 app.include_router(query_routes.router, prefix="/api/v1")
