@@ -12,10 +12,11 @@ GLYPHH_SDK_ROOT = ROOT / "glyphh-sdk"
 if GLYPHH_SDK_ROOT.exists() and str(GLYPHH_SDK_ROOT) not in sys.path:
     sys.path.insert(0, str(GLYPHH_SDK_ROOT))
 
-from .api.main import health, query
-from .core import models
-from .core.db import SessionLocal
-from .core.schemas import QueryRequest
+from sqlalchemy import select
+
+from api.core import models
+from api.core.db import SessionLocal
+from api.core.schemas import QueryRequest, GlyphSummary, QueryResult
 from glyphh import Encoder, Glyph, GlyphMemory
 from glyphh import reasoning as glyphh_reasoning
 from glyphh import vector as glyphh_vector
@@ -93,6 +94,46 @@ def _nl_glyphs(rows: Iterable[models.Glyph]) -> List[NLInferenceGlyph]:
 
 
 class MCPServer:
+    def _health(self) -> Dict[str, Any]:
+        return {"status": "ok"}
+
+    def _similar_to(self, payload: Dict[str, Any], db: SessionLocal) -> Dict[str, Any]:
+        req = QueryRequest(
+            model_id=payload["model_id"],
+            glyph_name=payload["glyph_name"],
+            top_k=payload.get("top_k", 5),
+        )
+        model = db.get(models.Model, req.model_id)
+        if not model:
+            return {"error": "model_not_found"}
+
+        emb_row = db.get(models.Embedding, req.glyph_name)
+        if not emb_row:
+            return {"error": "glyph_embedding_not_found"}
+
+        query_vec = np.array(emb_row.embedding, dtype=float).tolist()
+        stmt = (
+            select(models.Glyph)
+            .join(models.Embedding, models.Glyph.name == models.Embedding.glyph_name)
+            .where(models.Glyph.model_id == req.model_id)
+            .order_by(models.Embedding.embedding.l2_distance(query_vec))
+            .limit(req.top_k)
+        )
+        glyphs = db.execute(stmt).scalars().all()
+        if not glyphs:
+            return {"error": "no_glyphs_for_model"}
+
+        summaries = [
+            GlyphSummary(
+                name=row.name,
+                node_type=row.node_type,
+                semantic=row.semantic,
+                model_id=model.id,
+            )
+            for row in glyphs
+        ]
+        return QueryResult(matches=summaries).model_dump()
+
     def handle_tool(self, tool: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         db = SessionLocal()
         try:
@@ -133,13 +174,7 @@ class MCPServer:
                     ]
                 }
             if tool == "similar_to":
-                req = QueryRequest(
-                    model_id=payload["model_id"],
-                    glyph_name=payload["glyph_name"],
-                    top_k=payload.get("top_k", 5),
-                )
-                result = query(req, db=db)
-                return result.model_dump()
+                return self._similar_to(payload, db)
             if tool == "explain_link":
                 model = db.get(models.Model, payload["model_id"])
                 if not model:
@@ -229,7 +264,7 @@ class MCPServer:
                     "note": "not_persisted",
                 }
             if tool == "health":
-                return health()
+                return self._health()
             return {"error": "unknown_tool", "tool": tool}
         finally:
             db.close()
