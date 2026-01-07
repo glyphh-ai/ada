@@ -97,3 +97,30 @@ async def import_listener_data(
     except Exception:
         raise HTTPException(status_code=500, detail="Import failed")
     return {"status": "ok", "processed": processed}
+
+
+@router.post("/listeners/{listener_id}/ingest")
+async def ingest_listener_data(
+    listener_id: str,
+    request: Request,
+    payload: dict | list[dict] = Body(...),
+):
+    manager: ListenerManager = request.app.state.listener_manager
+    if not manager:
+        raise HTTPException(status_code=500, detail="Listener manager unavailable")
+    try:
+        if isinstance(payload, list):
+            records = payload
+        elif isinstance(payload, dict):
+            records = payload.get("records") if isinstance(payload.get("records"), list) else [payload]
+        else:
+            raise HTTPException(status_code=400, detail="Payload must be an object or array of records")
+        config = manager.refresh_listener_config(listener_id, include_disabled=True)
+        if not config:
+            raise HTTPException(status_code=404, detail="Listener not found")
+        processed = manager.import_records(listener_id, records)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Ingest failed")
+    return {"status": "ok", "processed": processed}
