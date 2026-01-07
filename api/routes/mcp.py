@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import Body, HTTPException
 from pydantic import BaseModel
 
-from ...server.mcp_server import MCPServer
+from server.mcp_server import MCPServer
 from .router import api_router
 
 
