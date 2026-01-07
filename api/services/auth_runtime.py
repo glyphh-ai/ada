@@ -70,6 +70,11 @@ def build_runtime_auth_middleware(settings):
             or request.url.path.startswith("/redoc")
         ):
             return await call_next(request)
+        if request.url.path.startswith("/api/v1/listeners") and request.headers.get("x-api-key"):
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "API keys are not accepted on listener endpoints"},
+            )
         try:
             enforce_runtime_token(request, settings)
         except HTTPException as exc:
