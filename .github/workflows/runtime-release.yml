@@ -22,8 +22,8 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           TAG="${GITHUB_REF_NAME}"
-          git archive --prefix="glyphh-runtime/" -o "dist/glyphh-runtime-${TAG}.tar.gz" "${TAG}"
-          git archive --format=zip --prefix="glyphh-runtime/" -o "dist/glyphh-runtime-${TAG}.zip" "${TAG}"
+          git archive --prefix="glyphh-runtime/" -o "dist/glyphh-runtime-${TAG}.tar.gz" HEAD
+          git archive --format=zip --prefix="glyphh-runtime/" -o "dist/glyphh-runtime-${TAG}.zip" HEAD
 
       - name: Upload release artifacts
         uses: softprops/action-gh-release@v2
