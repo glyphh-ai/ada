@@ -9,7 +9,15 @@ permissions:
 
 jobs:
   build-runtime-artifacts:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform_tag: manylinux_2_24_x86_64
+          - os: macos-14
+            platform_tag: macosx_11_0_arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,18 +25,66 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Prepare artifacts
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build runtime bundle
+        env:
+          PLATFORM_TAG: ${{ matrix.platform_tag }}
+          RUNTIME_SDK_REF: ${{ vars.RUNTIME_SDK_REF }}
         run: |
           set -euo pipefail
           mkdir -p dist
           TAG="${GITHUB_REF_NAME}"
-          git archive --prefix="glyphh-runtime/" -o "dist/glyphh-runtime-${TAG}.tar.gz" HEAD
-          git archive --format=zip --prefix="glyphh-runtime/" -o "dist/glyphh-runtime-${TAG}.zip" HEAD
+          SDK_REF="${RUNTIME_SDK_REF:-main}"
+          WORK_DIR="$(pwd)"
+          BUILD_DIR="${WORK_DIR}/dist/glyphh-runtime-${TAG}-${PLATFORM_TAG}"
+          mkdir -p "${BUILD_DIR}"
+
+          python -m venv --copies "${BUILD_DIR}/venv"
+          "${BUILD_DIR}/venv/bin/python" -m pip install --upgrade pip
+          "${BUILD_DIR}/venv/bin/python" -m pip install maturin
+
+          git clone --depth 1 --branch "${SDK_REF}" https://github.com/glyphh-ai/glyphh-sdk.git "${BUILD_DIR}/glyphh-sdk"
+          (
+            cd "${BUILD_DIR}/glyphh-sdk"
+            "${BUILD_DIR}/venv/bin/python" -m maturin build --release --strip -o "${BUILD_DIR}/wheels"
+          )
+
+          "${BUILD_DIR}/venv/bin/python" -m pip install -r requirements.txt
+          "${BUILD_DIR}/venv/bin/python" -m pip install "${BUILD_DIR}/wheels/"*.whl
+
+          rsync -a \
+            --exclude ".git" \
+            --exclude "__pycache__" \
+            --exclude "dist" \
+            --exclude "node_modules" \
+            --exclude "venv" \
+            "${WORK_DIR}/" "${BUILD_DIR}/app/"
+
+          cat > "${BUILD_DIR}/run.sh" << 'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          source "${ROOT_DIR}/venv/bin/activate"
+          export GLYPH_RUNTIME_PORT="${GLYPH_RUNTIME_PORT:-8080}"
+          exec python -m uvicorn api.main:app --host 0.0.0.0 --port "${GLYPH_RUNTIME_PORT}"
+          EOF
+          chmod +x "${BUILD_DIR}/run.sh"
+
+          tar -czf "dist/glyphh-runtime-${TAG}-${PLATFORM_TAG}.tar.gz" -C "dist" "glyphh-runtime-${TAG}-${PLATFORM_TAG}"
+          (cd dist && zip -r "glyphh-runtime-${TAG}-${PLATFORM_TAG}.zip" "glyphh-runtime-${TAG}-${PLATFORM_TAG}")
 
       - name: Mirror release to glyphh-runtime-releases
         env:
           GH_TOKEN: ${{ secrets.RUNTIME_RELEASES_TOKEN }}
           RELEASES_REPO: glyphh-ai/glyphh-runtime-releases
+          PLATFORM_TAG: ${{ matrix.platform_tag }}
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
@@ -40,7 +96,9 @@ jobs:
               --title "${TAG}" \
               --notes-file "${NOTES_FILE}"
           fi
-          gh release upload "${TAG}" dist/glyphh-runtime-"${TAG}".tar.gz dist/glyphh-runtime-"${TAG}".zip \
+          gh release upload "${TAG}" \
+            dist/glyphh-runtime-"${TAG}"-"${PLATFORM_TAG}".tar.gz \
+            dist/glyphh-runtime-"${TAG}"-"${PLATFORM_TAG}".zip \
             --repo "${RELEASES_REPO}" \
             --clobber
 
