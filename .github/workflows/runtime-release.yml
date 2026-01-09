@@ -37,6 +37,7 @@ jobs:
         env:
           PLATFORM_TAG: ${{ matrix.platform_tag }}
           RUNTIME_SDK_REF: ${{ vars.RUNTIME_SDK_REF }}
+          SDK_REPO_TOKEN: ${{ secrets.RUNTIME_SDK_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -50,7 +51,13 @@ jobs:
           "${BUILD_DIR}/venv/bin/python" -m pip install --upgrade pip
           "${BUILD_DIR}/venv/bin/python" -m pip install maturin
 
-          git clone --depth 1 --branch "${SDK_REF}" https://github.com/glyphh-ai/glyphh-sdk.git "${BUILD_DIR}/glyphh-sdk"
+          if [ -z "${SDK_REPO_TOKEN}" ]; then
+            echo "Missing SDK_REPO_TOKEN secret for glyphh-sdk access." >&2
+            exit 1
+          fi
+          git clone --depth 1 --branch "${SDK_REF}" \
+            "https://x-access-token:${SDK_REPO_TOKEN}@github.com/glyphh-ai/glyphh-sdk.git" \
+            "${BUILD_DIR}/glyphh-sdk"
           (
             cd "${BUILD_DIR}/glyphh-sdk"
             "${BUILD_DIR}/venv/bin/python" -m maturin build --release --strip -o "${BUILD_DIR}/wheels"
