@@ -18,6 +18,8 @@ jobs:
             platform_tag: manylinux_2_24_x86_64
           - os: macos-14
             platform_tag: macosx_11_0_arm64
+          - os: windows-latest
+            platform_tag: win_amd64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,6 +36,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build runtime bundle
+        shell: bash
         env:
           PLATFORM_TAG: ${{ matrix.platform_tag }}
           RUNTIME_SDK_REF: ${{ vars.RUNTIME_SDK_REF }}
@@ -48,23 +51,29 @@ jobs:
           mkdir -p "${BUILD_DIR}"
 
           python -m venv --copies "${BUILD_DIR}/venv"
-          "${BUILD_DIR}/venv/bin/python" -m pip install --upgrade pip
-          "${BUILD_DIR}/venv/bin/python" -m pip install maturin
+          VENV_PY="${BUILD_DIR}/venv/bin/python"
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            VENV_PY="${BUILD_DIR}/venv/Scripts/python.exe"
+          fi
+          "${VENV_PY}" -m pip install --upgrade pip
+          "${VENV_PY}" -m pip install maturin
 
           if [ -z "${SDK_REPO_TOKEN}" ]; then
             echo "Missing SDK_REPO_TOKEN secret for glyphh-sdk access." >&2
             exit 1
           fi
+          SDK_BUILD_DIR="$(mktemp -d)"
           git clone --depth 1 --branch "${SDK_REF}" \
             "https://x-access-token:${SDK_REPO_TOKEN}@github.com/glyphh-ai/glyphh-sdk.git" \
-            "${BUILD_DIR}/glyphh-sdk"
+            "${SDK_BUILD_DIR}"
           (
-            cd "${BUILD_DIR}/glyphh-sdk"
-            "${BUILD_DIR}/venv/bin/python" -m maturin build --release --strip -o "${BUILD_DIR}/wheels"
+            cd "${SDK_BUILD_DIR}"
+            "${VENV_PY}" -m maturin build --release --strip -o "${BUILD_DIR}/wheels"
           )
+          rm -rf "${SDK_BUILD_DIR}"
 
-          "${BUILD_DIR}/venv/bin/python" -m pip install -r requirements.txt
-          "${BUILD_DIR}/venv/bin/python" -m pip install "${BUILD_DIR}/wheels/"*.whl
+          "${VENV_PY}" -m pip install -r requirements.txt
+          "${VENV_PY}" -m pip install "${BUILD_DIR}/wheels/"*.whl
 
           rsync -a \
             --exclude ".git" \
@@ -72,6 +81,7 @@ jobs:
             --exclude "dist" \
             --exclude "node_modules" \
             --exclude "venv" \
+            --exclude "glyphh-sdk" \
             "${WORK_DIR}/" "${BUILD_DIR}/app/"
 
           cat > "${BUILD_DIR}/run.sh" << 'EOF'
