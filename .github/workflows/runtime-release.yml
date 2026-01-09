@@ -97,10 +97,10 @@ jobs:
           tar -czf "dist/glyphh-runtime-${TAG}-${PLATFORM_TAG}.tar.gz" -C "dist" "glyphh-runtime-${TAG}-${PLATFORM_TAG}"
           (cd dist && zip -r "glyphh-runtime-${TAG}-${PLATFORM_TAG}.zip" "glyphh-runtime-${TAG}-${PLATFORM_TAG}")
 
-      - name: Mirror release to glyphh-runtime-releases
+      - name: Mirror release to glyphh-releases
         env:
           GH_TOKEN: ${{ secrets.RUNTIME_RELEASES_TOKEN }}
-          RELEASES_REPO: glyphh-ai/glyphh-runtime-releases
+          RELEASES_REPO: glyphh-ai/glyphh-releases
           PLATFORM_TAG: ${{ matrix.platform_tag }}
         run: |
           set -euo pipefail

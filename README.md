@@ -13,7 +13,7 @@ Internal dev setup is documented in `glyphh-platform/README.md`.
 
 Local/offline install instructions live in the public releases repo:
 
-- https://github.com/glyphh-ai/glyphh-runtime-releases
+- https://github.com/glyphh-ai/glyphh-releases
 
 Refer to that README for download, configuration, licensing, and startup steps.
 
