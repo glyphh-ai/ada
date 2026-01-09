@@ -1,0 +1,30 @@
+name: Runtime Release Artifacts
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-runtime-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          TAG="${GITHUB_REF_NAME}"
+          git archive --prefix="glyphh-runtime/" -o "dist/glyphh-runtime-${TAG}.tar.gz" "${GITHUB_SHA}:."
+          git archive --format=zip --prefix="glyphh-runtime/" -o "dist/glyphh-runtime-${TAG}.zip" "${GITHUB_SHA}:."
+
+      - name: Upload release artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/glyphh-runtime-*.tar.gz
+            dist/glyphh-runtime-*.zip
