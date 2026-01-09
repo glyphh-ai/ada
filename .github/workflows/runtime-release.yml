@@ -25,6 +25,25 @@ jobs:
           git archive --prefix="glyphh-runtime/" -o "dist/glyphh-runtime-${TAG}.tar.gz" HEAD
           git archive --format=zip --prefix="glyphh-runtime/" -o "dist/glyphh-runtime-${TAG}.zip" HEAD
 
+      - name: Mirror release to glyphh-runtime-releases
+        env:
+          GH_TOKEN: ${{ secrets.RUNTIME_RELEASES_TOKEN }}
+          RELEASES_REPO: glyphh-ai/glyphh-runtime-releases
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          NOTES_FILE="dist/release-notes.md"
+          gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json body -q .body > "${NOTES_FILE}"
+          if ! gh release view "${TAG}" --repo "${RELEASES_REPO}" >/dev/null 2>&1; then
+            gh release create "${TAG}" \
+              --repo "${RELEASES_REPO}" \
+              --title "${TAG}" \
+              --notes-file "${NOTES_FILE}"
+          fi
+          gh release upload "${TAG}" dist/glyphh-runtime-"${TAG}".tar.gz dist/glyphh-runtime-"${TAG}".zip \
+            --repo "${RELEASES_REPO}" \
+            --clobber
+
       - name: Upload release artifacts
         uses: softprops/action-gh-release@v2
         with:
