@@ -1,4 +1,4 @@
-name: Runtime Release Artifacts
+name: Runtime Release Artifact
 
 on:
   release:
