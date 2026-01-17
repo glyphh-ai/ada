@@ -151,6 +151,8 @@ def _renew_license(settings, license_file: dict) -> dict | None:
         "device_fingerprint": device_fingerprint,
         "runtime_secret": runtime_secret,
     }
+    if settings.runtime_endpoint_url:
+        payload["endpoint_url"] = settings.runtime_endpoint_url
     response = _post_json(renew_url, payload)
     return response if isinstance(response, dict) else None
 
@@ -198,6 +200,8 @@ def ensure_runtime_license(settings) -> None:
         "device_fingerprint": fingerprint,
         "activation_key": activation_key,
     }
+    if settings.runtime_endpoint_url:
+        payload["endpoint_url"] = settings.runtime_endpoint_url
 
     response = _post_json(activation_url, payload)
     license_file = response.get("license")

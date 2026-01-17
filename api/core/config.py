@@ -43,6 +43,10 @@ class Settings(BaseSettings):
         default=86400,
         validation_alias=AliasChoices("GLYPH_RUNTIME_LICENSE_CHECK_SECONDS", "RUNTIME_LICENSE_CHECK_SECONDS"),
     )
+    runtime_endpoint_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GLYPH_RUNTIME_ENDPOINT_URL", "RUNTIME_ENDPOINT_URL"),
+    )
 
     class Config:
         env_file = Path(__file__).resolve().parents[2] / ".env"

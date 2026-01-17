@@ -62,6 +62,7 @@ def main() -> int:
     parser.add_argument("--org-id", required=True)
     parser.add_argument("--runtime-id", required=True)
     parser.add_argument("--activation-key", required=True)
+    parser.add_argument("--endpoint-url", default=None)
     parser.add_argument("--device-fingerprint", default=None)
     parser.add_argument(
         "--license-path",
@@ -85,6 +86,8 @@ def main() -> int:
         "device_fingerprint": fingerprint,
         "activation_key": args.activation_key,
     }
+    if args.endpoint_url:
+        payload["endpoint_url"] = args.endpoint_url
 
     try:
         response = _post_json(activation_url, payload)
