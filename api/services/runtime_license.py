@@ -82,6 +82,26 @@ def _license_expired(license_file: dict, now: dt.datetime | None = None) -> bool
     return now_ts > expires_at + (grace_days * 86400)
 
 
+def load_license_file(settings) -> dict | None:
+    return _read_json(Path(settings.runtime_license_path))
+
+
+def license_status(settings, license_file: dict | None = None) -> tuple[bool, str]:
+    license_file = license_file or load_license_file(settings)
+    if not license_file:
+        return False, "missing"
+    payload = license_file.get("payload") if isinstance(license_file, dict) else None
+    if not isinstance(payload, dict):
+        return False, "invalid"
+    if _license_expired(license_file):
+        return False, "expired"
+    return True, "active"
+
+
+def license_is_valid(settings, license_file: dict | None = None) -> bool:
+    return license_status(settings, license_file)[0]
+
+
 def _license_expires_at(license_file: dict) -> int | None:
     payload = license_file.get("payload") if isinstance(license_file, dict) else None
     if not isinstance(payload, dict):
