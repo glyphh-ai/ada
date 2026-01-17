@@ -17,6 +17,18 @@ Local/offline install instructions live in the public releases repo:
 
 Refer to that README for download, configuration, licensing, and startup steps.
 
+## Activation Key (CLI)
+
+For local activation during development, use:
+
+```bash
+python3 glyphh-runtime/scripts/activate_runtime.py \
+  --platform-url https://api.glyphh.ai/api/v1 \
+  --org-id ORG_ID \
+  --runtime-id RUNTIME_ID \
+  --activation-key gk_...
+```
+
 ## Notes
 
 - The runtime expects Postgres + pgvector.

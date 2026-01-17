@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
@@ -29,6 +30,7 @@ from .routes import query as query_routes
 from .routes import trends as trends_routes
 from .routes import viewer as viewer_routes
 from .services.auth_runtime import build_runtime_auth_middleware
+from .services.runtime_license import ensure_runtime_license
 
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,7 @@ app.middleware("http")(build_runtime_auth_middleware(settings))
 listener_manager = ListenerManager()
 app.state.listener_manager = listener_manager
 app.state.usage_tracker = None
+app.state.license_task = None
 
 
 def _run_migrations() -> None:
@@ -93,6 +96,7 @@ def _run_migrations() -> None:
 
 @app.on_event("startup")
 async def startup_listener_manager() -> None:
+    ensure_runtime_license(settings)
     _run_migrations()
     Base.metadata.create_all(bind=engine)
     await listener_manager.start()
@@ -112,6 +116,7 @@ async def startup_listener_manager() -> None:
             logger.info("runtime usage metrics enabled")
         except Exception:
             logger.exception("failed to start runtime usage metrics")
+    app.state.license_task = asyncio.create_task(_license_renew_loop())
 
 
 @app.on_event("shutdown")
@@ -120,3 +125,15 @@ async def shutdown_listener_manager() -> None:
     tracker = getattr(app.state, "usage_tracker", None)
     if tracker:
         tracker.stop()
+    license_task = getattr(app.state, "license_task", None)
+    if license_task:
+        license_task.cancel()
+
+
+async def _license_renew_loop() -> None:
+    while True:
+        await asyncio.sleep(settings.runtime_license_check_seconds)
+        try:
+            ensure_runtime_license(settings)
+        except Exception:
+            logger.exception("runtime license renewal check failed")

@@ -27,6 +27,22 @@ class Settings(BaseSettings):
     runtime_version: str = "dev"
     usage_metrics_enabled: bool = False
     usage_metrics_flush_seconds: int = 60
+    runtime_license_path: str = Field(
+        default=".glyphh/license.json",
+        validation_alias=AliasChoices("GLYPH_RUNTIME_LICENSE_PATH", "RUNTIME_LICENSE_PATH"),
+    )
+    runtime_secret_path: str = Field(
+        default=".glyphh/runtime_secret",
+        validation_alias=AliasChoices("GLYPH_RUNTIME_SECRET_PATH", "RUNTIME_SECRET_PATH"),
+    )
+    runtime_license_renew_days: int = Field(
+        default=7,
+        validation_alias=AliasChoices("GLYPH_RUNTIME_LICENSE_RENEW_DAYS", "RUNTIME_LICENSE_RENEW_DAYS"),
+    )
+    runtime_license_check_seconds: int = Field(
+        default=86400,
+        validation_alias=AliasChoices("GLYPH_RUNTIME_LICENSE_CHECK_SECONDS", "RUNTIME_LICENSE_CHECK_SECONDS"),
+    )
 
     class Config:
         env_file = Path(__file__).resolve().parents[2] / ".env"
