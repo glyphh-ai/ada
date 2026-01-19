@@ -137,7 +137,11 @@ def ingest_concepts(model: models.Model, concepts: List[ConceptInput], clear_exi
             continue
         seen_names.add(concept.name)
 
-        glyph = encoder.encode(concept.name, concept.attributes, node_type=concept.node_type)
+        attributes = dict(concept.attributes or {})
+        if "observed_at" not in attributes:
+            attributes["observed_at"] = dt.datetime.utcnow().isoformat()
+
+        glyph = encoder.encode(concept.name, attributes, node_type=concept.node_type)
         if concept.taxonomy:
             glyph.semantic = dict(glyph.semantic)
             glyph.semantic["taxonomy"] = concept.taxonomy
@@ -180,7 +184,7 @@ def ingest_concepts(model: models.Model, concepts: List[ConceptInput], clear_exi
                         vec=seg_vec.tobytes(),
                     )
                 )
-        for role_name, raw_value in concept.attributes.items():
+        for role_name, raw_value in attributes.items():
             slot = encoder.role_to_slot.get(role_name)
             if slot is None:
                 continue
