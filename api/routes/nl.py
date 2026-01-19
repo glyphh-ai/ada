@@ -24,6 +24,7 @@ from ..services.nl_pipeline import (
     plan_intent,
     render_execution_response,
 )
+from ..services.temporal_sidecar import TEMPORAL_SIDECAR_MODEL_ID, ensure_temporal_sidecar_model
 from .router import api_router
 from glyphh.nl.configs import run_nl_query
 from glyphh.nl.chat import generate_response
@@ -46,9 +47,20 @@ async def nl_query(
         raise HTTPException(status_code=404, detail="Model not found")
     nl_configs = build_nl_configs(model, db)
     capabilities = build_capabilities_payload(nl_configs, model.roles_config or {})
+    sidecar_model = ensure_temporal_sidecar_model(db)
+    sidecar_configs = build_nl_configs(sidecar_model, db)
+    sidecar_caps = build_capabilities_payload(sidecar_configs, sidecar_model.roles_config or {})
+    sidecar_intents = {intent.get("name") for intent in sidecar_caps.get("intents") or [] if intent.get("name")}
+    merged_caps = {
+        **capabilities,
+        "intents": (capabilities.get("intents") or [])
+        + [intent for intent in (sidecar_caps.get("intents") or []) if intent.get("name") not in {i.get("name") for i in (capabilities.get("intents") or [])}],
+        "fields": (capabilities.get("fields") or [])
+        + [field for field in (sidecar_caps.get("fields") or []) if field.get("name") not in {f.get("name") for f in (capabilities.get("fields") or [])}],
+    }
     plan_text = payload.text or ""
     try:
-        plan = await plan_intent(text=plan_text, capabilities=capabilities, settings=settings)
+        plan = await plan_intent(text=plan_text, capabilities=merged_caps, settings=settings)
     except (ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=500, detail=f"planner error: {exc}")
     clarifications = plan.get("needs_clarification")
@@ -66,8 +78,13 @@ async def nl_query(
     intent_name = plan.get("intent")
     if not intent_name:
         raise HTTPException(status_code=400, detail="Planner did not resolve an intent")
+    active_model = model
+    active_caps = capabilities
+    if plan.get("intent") in sidecar_intents:
+        active_model = sidecar_model
+        active_caps = sidecar_caps
     try:
-        execution_payload = execute_ir(ir=plan, model=model, db=db, capabilities=capabilities)
+        execution_payload = execute_ir(ir=plan, model=active_model, db=db, capabilities=active_caps)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     final_text = await render_execution_response(
