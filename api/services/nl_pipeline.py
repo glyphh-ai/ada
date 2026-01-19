@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import re
 from typing import Any, Dict, List, Sequence
 
 import numpy as np
@@ -327,10 +328,8 @@ def _resolve_timeframe(slots: Dict[str, Any], metadata: Dict[str, Any]) -> str |
 
 
 def _parse_time_range_slot(value: Any) -> tuple[dt.datetime | None, dt.datetime | None] | None:
-    if not isinstance(value, dict):
+    if value is None:
         return None
-    start_raw = value.get("start")
-    end_raw = value.get("end")
 
     def _parse(value_inner: Any) -> dt.datetime | None:
         if not value_inner:
@@ -356,11 +355,56 @@ def _parse_time_range_slot(value: Any) -> tuple[dt.datetime | None, dt.datetime 
                 return None
         return None
 
-    start = _parse(start_raw)
-    end = _parse(end_raw)
-    if not start and not end:
+    def _parse_relative_range(raw: str) -> tuple[dt.datetime | None, dt.datetime | None] | None:
+        token = raw.strip().lower()
+        if not token:
+            return None
+        if token.startswith("last_"):
+            token = token.replace("_", " ")
+        match = re.match(r"^(last|past)\s*(\d+)\s*(day|days|month|months|year|years)$", token)
+        if not match:
+            return None
+        _, count_raw, unit = match.groups()
+        try:
+            count = int(count_raw)
+        except ValueError:
+            return None
+        now = dt.datetime.utcnow()
+        if unit.startswith("day"):
+            delta = dt.timedelta(days=count)
+        elif unit.startswith("month"):
+            delta = dt.timedelta(days=count * 30)
+        else:
+            delta = dt.timedelta(days=count * 365)
+        return (now - delta, now)
+
+    if isinstance(value, str):
+        range_match = _parse_relative_range(value)
+        if range_match:
+            return range_match
+        for separator in ("..", " to ", " - "):
+            if separator in value:
+                start_raw, end_raw = value.split(separator, 1)
+                start = _parse(start_raw)
+                end = _parse(end_raw)
+                if start or end:
+                    return (start, end)
         return None
-    return (start, end)
+
+    if isinstance(value, dict):
+        start_raw = value.get("start")
+        end_raw = value.get("end")
+        if isinstance(start_raw, str):
+            range_match = _parse_relative_range(start_raw)
+            if range_match and not end_raw:
+                return range_match
+        start = _parse(start_raw)
+        end = _parse(end_raw)
+        if not start and not end:
+            return None
+        return (start, end)
+
+    return None
 
 
 def _parse_timestamp(raw: Any) -> dt.datetime | None:
