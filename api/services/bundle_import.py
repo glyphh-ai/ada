@@ -11,6 +11,7 @@ from ..core import models
 from ..core.schemas import ConceptInput, SampleImportResponse, SampleImportResult, SampleUploadBundle
 from ..core.vector_space import build_vector_space_metadata
 from ..services.ingest import ingest_concepts
+from ..services.roles_config_helpers import validate_roles_config
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,7 @@ def import_bundle(
     for entry in payload.roles_configs:
         try:
             data = _bundle_entry_content(entry.content)
+            validate_roles_config(data)
             model = _create_model_from_roles(db, data, payload.model or {})
             results.append(
                 SampleImportResult(
