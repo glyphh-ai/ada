@@ -9,13 +9,17 @@ from sqlalchemy.orm import Session
 from ..core import models
 from ..core.db import get_db
 from ..core.schemas import (
+    ConceptInput,
     ModelTestsPayload,
     ModelTestsResponse,
     ModelTestsRunResponse,
+    SimilarityIngestRequest,
     SimilarityReportRequest,
     SimilarityReportResponse,
 )
 from ..services.similarity import build_similarity_report
+from ..services.temporal_sidecar import ensure_temporal_sidecar_model
+from ..services.ingest import ingest_concepts
 from ..services.nl_helpers import build_nl_configs, to_nl_glyphs, to_simple_glyphs
 from .router import api_router
 from glyphh.encoder import Encoder
@@ -148,3 +152,43 @@ def model_similarity_report(
         enforce_single_space=payload.enforce_single_space,
     )
     return SimilarityReportResponse(**report)
+
+
+@router.post("/models/{model_id}/similarity/ingest")
+def ingest_similarity_sidecar(
+    model_id: str,
+    payload: SimilarityIngestRequest,
+    db: Session = Depends(get_db),
+):
+    primary_model = db.get(models.Model, model_id)
+    if not primary_model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    sidecar_model = ensure_temporal_sidecar_model(db)
+    concepts = []
+    for entry in payload.entries:
+        ts = entry.timestamp
+        if isinstance(ts, dt.datetime):
+            ts_value = ts.isoformat()
+        else:
+            ts_value = str(ts)
+        name = f"{model_id}:{entry.test_name}:{ts_value}"
+        attributes = {
+            "model_id": model_id,
+            "test_name": entry.test_name,
+            "timestamp": ts_value,
+            "cortex_similarity": entry.cortex_similarity,
+        }
+        if entry.role:
+            attributes["role"] = entry.role
+        if entry.segment:
+            attributes["segment"] = entry.segment
+        if entry.layer_similarity is not None:
+            attributes["layer_similarity"] = entry.layer_similarity
+        if entry.segment_similarity is not None:
+            attributes["segment_similarity"] = entry.segment_similarity
+        if entry.intent_name:
+            attributes["intent_name"] = entry.intent_name
+        if entry.notes:
+            attributes["notes"] = entry.notes
+        concepts.append(ConceptInput(name=name, attributes=attributes, node_type="similarity"))
+    return ingest_concepts(sidecar_model, concepts, payload.clear_existing, db)

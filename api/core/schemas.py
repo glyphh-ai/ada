@@ -179,6 +179,23 @@ class SimilarityReportResponse(BaseModel):
     space: dict | None = None
 
 
+class SimilarityIngestEntry(BaseModel):
+    test_name: str
+    role: str | None = None
+    segment: str | None = None
+    timestamp: dt.datetime | str
+    cortex_similarity: float
+    layer_similarity: float | None = None
+    segment_similarity: float | None = None
+    intent_name: str | None = None
+    notes: str | None = None
+
+
+class SimilarityIngestRequest(BaseModel):
+    entries: List[SimilarityIngestEntry]
+    clear_existing: bool = False
+
+
 class ClarificationEntry(BaseModel):
     question: str
 
