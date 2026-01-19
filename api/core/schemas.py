@@ -79,11 +79,19 @@ class QueryResult(BaseModel):
     total: int | None = None
 
 
+class EdgeInput(BaseModel):
+    target: str
+    type: str
+    weight: float = 1.0
+    layer: int | None = None
+
+
 class ConceptInput(BaseModel):
     name: str
     attributes: Dict[str, Any]
     node_type: str = "concept"
     taxonomy: List[str] | None = None
+    edges: List[EdgeInput] | None = None
 
 
 class IngestRequest(BaseModel):

@@ -37,6 +37,9 @@ def _clear_model_glyphs(model: models.Model, db: Session) -> None:
     chunk_size = 1000
     for i in range(0, len(glyph_names), chunk_size):
         chunk = glyph_names[i : i + chunk_size]
+        db.query(models.Edge).filter(models.Edge.source.in_(chunk)).delete(
+            synchronize_session=False
+        )
         db.query(models.Embedding).filter(models.Embedding.glyph_name.in_(chunk)).delete(
             synchronize_session=False
         )
@@ -148,6 +151,7 @@ def ingest_concepts(model: models.Model, concepts: List[ConceptInput], clear_exi
 
         existing = db.get(models.Glyph, concept.name)
         if existing:
+            db.query(models.Edge).filter(models.Edge.source == concept.name).delete()
             db.query(models.Embedding).filter(models.Embedding.glyph_name == concept.name).delete()
             db.query(models.Segment).filter(models.Segment.glyph_name == concept.name).delete()
             db.delete(existing)
@@ -182,6 +186,17 @@ def ingest_concepts(model: models.Model, concepts: List[ConceptInput], clear_exi
                         layer=li,
                         seg_index=si,
                         vec=seg_vec.tobytes(),
+                    )
+                )
+        if concept.edges:
+            for edge in concept.edges:
+                db.add(
+                    models.Edge(
+                        source=concept.name,
+                        target=edge.target,
+                        type=edge.type,
+                        weight=edge.weight,
+                        layer=edge.layer,
                     )
                 )
         for role_name, raw_value in attributes.items():

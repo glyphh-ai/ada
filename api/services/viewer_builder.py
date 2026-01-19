@@ -134,6 +134,7 @@ def build_viewer_payload(
     semantic_edges: list[dict[str, Any]] = []
     hierarchy_edges: list[dict[str, Any]] = []
     neural_edges: list[dict[str, Any]] = []
+    temporal_edges: list[dict[str, Any]] = []
 
     sem_pair_weight: dict[tuple[str, str], float] = {}
     for i, gi in enumerate(glyph_rows):
@@ -241,6 +242,26 @@ def build_viewer_payload(
                     }
                 )
 
+    temporal_edge_types = {"state_change", "sequence_next", "supersedes"}
+    glyph_names = {g.name for g in glyph_rows}
+    if glyph_names:
+        edge_rows = (
+            db.query(models.Edge)
+            .filter(models.Edge.source.in_(glyph_names))
+            .filter(models.Edge.type.in_(temporal_edge_types))
+            .all()
+        )
+        temporal_edges = [
+            {
+                "source": edge.source,
+                "target": edge.target,
+                "kind": edge.type,
+                "weight": float(edge.weight),
+                "layer": edge.layer,
+            }
+            for edge in edge_rows
+        ]
+
     cfg_neural = roles_config.get("neural_edges", {}) if isinstance(roles_config, dict) else {}
     neural_top_n = cfg_neural.get("top_n", NEURAL_EDGES_TOP_N)
     neural_min_sim = cfg_neural.get("min_similarity", NEURAL_EDGES_MIN_SIM)
@@ -289,6 +310,7 @@ def build_viewer_payload(
             "semantic": semantic_edges,
             "neural": neural_edges,
             "hierarchy": hierarchy_edges,
+            "temporal": temporal_edges,
         },
         "roles_config": roles_config,
     }
