@@ -198,6 +198,7 @@ def _collect_intents(
                     "type": intent.get("type"),
                     "description": intent.get("description"),
                     "metadata": dict(intent.get("metadata") or {}),
+                    "time_filters": intent.get("time_filters"),
                     "templates": [],
                     "examples": [],
                     "required_slots": set[str](),
@@ -205,6 +206,8 @@ def _collect_intents(
             )
             entry["type"] = entry["type"] or intent.get("type")
             entry["metadata"].update(intent.get("metadata") or {})
+            if intent.get("time_filters") and not entry.get("time_filters"):
+                entry["time_filters"] = intent.get("time_filters")
             patterns = _clean_templates(intent.get("patterns") or [])
             entry["templates"].extend(p for p in patterns if p not in entry["templates"])
             for example in intent.get("examples", []) or []:
@@ -816,6 +819,17 @@ def execute_ir(
     executor = EXECUTOR_MAP[intent]
     alias_map = capabilities.get("aliases") or {}
     slots = _normalize_slots(ir.get("slots") or {}, alias_map)
+    intent_cfg = None
+    for candidate in capabilities.get("intents") or []:
+        if candidate.get("name") == intent:
+            intent_cfg = candidate
+            break
+    if intent_cfg and not slots.get("time_range"):
+        time_filters = intent_cfg.get("time_filters") or {}
+        if time_filters.get("range"):
+            slots["time_range"] = time_filters.get("range")
+        if time_filters.get("date_field") and not slots.get("date_field"):
+            slots["date_field"] = time_filters.get("date_field")
     metadata = ir.get("metadata") or {}
     execution = executor(model, db, slots, metadata)
     return {
