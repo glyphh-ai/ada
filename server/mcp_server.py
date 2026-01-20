@@ -416,6 +416,66 @@ class MCPServer:
 
         return facts, citations, reasons
 
+    def _build_trend_role_facts(
+        self, payload: Dict[str, Any], result: Dict[str, Any]
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+        facts: List[Dict[str, Any]] = []
+        citations: List[Dict[str, Any]] = []
+        reasons: List[str] = []
+
+        role = result.get("role") or payload.get("role")
+        entries = result.get("entries") or []
+        if role:
+            facts.append(
+                {
+                    "id": "trend_role",
+                    "text": f"Trend series for role '{role}' with {len(entries)} entries",
+                    "type": "metric",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "trend_role",
+                            "snippet": role,
+                        }
+                    ],
+                }
+            )
+
+        for idx, entry in enumerate(entries):
+            timestamp = entry.get("timestamp")
+            value = entry.get("value")
+            source = entry.get("source")
+            layer = entry.get("layer")
+            segment_index = entry.get("segment_index")
+            facts.append(
+                {
+                    "id": f"trend_entry_{idx}",
+                    "text": f"{timestamp}: {value}",
+                    "type": "metric",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": f"trend_entry_{idx}",
+                            "snippet": f"source={source} layer={layer} segment={segment_index}",
+                        }
+                    ],
+                }
+            )
+            citations.append(
+                {
+                    "source_type": "glyphh",
+                    "source_id": f"trend_entry_{idx}",
+                    "title": role,
+                    "url": None,
+                    "snippet": f"{timestamp} value={value} source={source}",
+                    "hash": None,
+                }
+            )
+
+        return facts, citations, reasons
+
     def _wrap_response(
         self,
         *,
@@ -438,6 +498,8 @@ class MCPServer:
             facts, citations, reasons = self._build_similar_to_facts(payload, result)
         elif tool == "explain_link" and status == "ok":
             facts, citations, reasons = self._build_explain_link_facts(payload, result)
+        elif tool == "trend_role" and status == "ok":
+            facts, citations, reasons = self._build_trend_role_facts(payload, result)
         return {
             "version": "1.0",
             "status": status,
