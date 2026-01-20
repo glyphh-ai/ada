@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from ..core import models
@@ -28,6 +28,7 @@ from ..services.temporal_sidecar import TEMPORAL_SIDECAR_MODEL_ID, ensure_tempor
 from .router import api_router
 from glyphh.nl.configs import run_nl_query
 from glyphh.nl.chat import generate_response
+from ..services.auth_runtime import enforce_model_access, require_scopes
 
 
 router = api_router(tags=["nl"])
@@ -38,8 +39,12 @@ settings = get_settings()
 async def nl_query(
     model_id: str,
     payload: NLQueryPayload,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> NLQueryResponse:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["nl:read"])
+    enforce_model_access(claims, model_id)
     if not settings.openai_api_key:
         raise HTTPException(status_code=400, detail="OpenAI key missing")
     model = db.get(models.Model, model_id)
@@ -103,8 +108,12 @@ async def nl_query(
 async def nl_chat(
     model_id: str,
     payload: NLChatPayload,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> NLChatResponse:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["nl:read"])
+    enforce_model_access(claims, model_id)
     if not settings.openai_api_key:
         raise HTTPException(status_code=400, detail="OpenAI key missing")
     model = db.get(models.Model, model_id)

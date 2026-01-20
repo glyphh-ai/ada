@@ -11,6 +11,33 @@ from fastapi.responses import JSONResponse
 
 from .runtime_license import license_status
 
+
+def _parse_scopes(payload: dict) -> set[str]:
+    raw = payload.get("scopes") or payload.get("scope") or []
+    if isinstance(raw, str):
+        return {s.strip() for s in raw.split() if s.strip()}
+    if isinstance(raw, list):
+        return {str(s).strip() for s in raw if str(s).strip()}
+    return set()
+
+
+def require_scopes(payload: dict, required: list[str]) -> None:
+    if not required:
+        return
+    scopes = _parse_scopes(payload)
+    missing = [scope for scope in required if scope not in scopes]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Missing scopes: {', '.join(missing)}",
+        )
+
+
+def enforce_model_access(payload: dict, model_id: str) -> None:
+    claim = payload.get("model_id")
+    if claim and claim != model_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Model access denied")
+
 def decode_jwt(token: str, secret: str, algorithm: str) -> dict:
     if algorithm != "HS256":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unsupported token algorithm")
@@ -86,9 +113,10 @@ def build_runtime_auth_middleware(settings):
                 content={"detail": "API keys are not accepted on runtime endpoints"},
             )
         try:
-            enforce_runtime_token(request, settings)
+            claims = enforce_runtime_token(request, settings)
         except HTTPException as exc:
             return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        request.state.runtime_claims = claims
         return await call_next(request)
 
     return runtime_auth_middleware

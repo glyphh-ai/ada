@@ -9,7 +9,12 @@ from ..core import models
 from ..core.config import get_settings
 from ..core.db import get_db, SessionLocal
 from ..core.schemas import ConceptInput, IngestRequest, ModelIngestRequest, ModelRefreshResponse, QueryResult
-from ..services.auth_runtime import decode_jwt, parse_license_expiry
+from ..services.auth_runtime import (
+    decode_jwt,
+    parse_license_expiry,
+    enforce_model_access,
+    require_scopes,
+)
 from ..services.ingest import ingest_concepts, refresh_model_data
 from ..services.usage_runtime import record_usage
 from .router import api_router
@@ -25,6 +30,10 @@ def ingest(
     request: Request,
     db: Session = Depends(get_db),
 ) -> QueryResult:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["ingest:write"])
+    if payload.model_id:
+        enforce_model_access(claims, payload.model_id)
     model = db.get(models.Model, payload.model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -39,6 +48,9 @@ def ingest_for_model(
     request: Request,
     db: Session = Depends(get_db),
 ) -> QueryResult:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["ingest:write"])
+    enforce_model_access(claims, model_id)
     model = db.get(models.Model, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -52,8 +64,12 @@ def ingest_for_model(
 @router.post("/models/{model_id}/refresh", response_model=ModelRefreshResponse)
 def refresh_model_endpoint(
     model_id: str,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> ModelRefreshResponse:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["ingest:write"])
+    enforce_model_access(claims, model_id)
     model = db.get(models.Model, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -77,6 +93,8 @@ async def ingest_stream(model_id: str, websocket: WebSocket):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="License expired")
         if payload.get("token_type") != "runtime":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid runtime token")
+        require_scopes(payload, ["ingest:write"])
+        enforce_model_access(payload, model_id)
     except HTTPException:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
