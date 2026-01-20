@@ -47,6 +47,29 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("GLYPH_RUNTIME_ENDPOINT_URL", "RUNTIME_ENDPOINT_URL"),
     )
+    metrics_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("GLYPH_METRICS_ENABLED", "METRICS_ENABLED"),
+    )
+    metrics_path: str = Field(
+        default="/metrics",
+        validation_alias=AliasChoices("GLYPH_METRICS_PATH", "METRICS_PATH"),
+    )
+    tracing_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("GLYPH_TRACING_ENABLED", "TRACING_ENABLED"),
+    )
+    otel_exporter_otlp_endpoint: str = Field(
+        default="http://localhost:4318/v1/traces",
+        validation_alias=AliasChoices(
+            "GLYPH_OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+        ),
+    )
+    otel_service_name: str = Field(
+        default="glyphh-runtime",
+        validation_alias=AliasChoices("GLYPH_OTEL_SERVICE_NAME", "OTEL_SERVICE_NAME"),
+    )
     audit_log_path: str = Field(
         default=".glyphh/audit.log.jsonl",
         validation_alias=AliasChoices("GLYPH_AUDIT_LOG_PATH", "AUDIT_LOG_PATH"),

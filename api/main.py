@@ -19,6 +19,7 @@ from .core.db import Base, SessionLocal, engine
 from .services.listener_runtime import ListenerManager
 from .services.temporal_sidecar import ensure_temporal_sidecar_model
 from .services.usage_metrics import UsageTracker
+from .services.monitoring import setup_monitoring
 from .routes import bundles as bundle_routes
 from .routes import charts as charts_routes
 from .routes import health as health_routes
@@ -45,6 +46,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+setup_monitoring(app, settings)
 
 app.include_router(charts_routes.router, prefix="/api/v1")
 app.include_router(bundle_routes.router, prefix="/api/v1")
