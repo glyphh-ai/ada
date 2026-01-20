@@ -1110,7 +1110,14 @@ class MCPServer:
             },
             "constraints_applied": constraints_applied,
             "data_provenance": data_provenance,
-            "redactions": {"pii_removed": False, "fields": []},
+            "redactions": {
+                "pii_removed": bool(settings.redactions_enabled),
+                "fields": [
+                    field.strip()
+                    for field in (settings.redacted_fields or "").split(",")
+                    if field.strip()
+                ],
+            },
             "traceability": {
                 "request_id": request_id,
                 "runtime_id": None,

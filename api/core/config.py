@@ -59,6 +59,14 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("GLYPH_RECORD_HASH_CHAIN", "RECORD_HASH_CHAIN"),
     )
+    redactions_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("GLYPH_REDACTIONS_ENABLED", "REDACTIONS_ENABLED"),
+    )
+    redacted_fields: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GLYPH_REDACTED_FIELDS", "REDACTED_FIELDS"),
+    )
     metrics_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("GLYPH_METRICS_ENABLED", "METRICS_ENABLED"),
