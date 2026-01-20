@@ -105,6 +105,115 @@ def _nl_glyphs(
 
 
 class MCPServer:
+    def _build_nl_facts(
+        self, payload: Dict[str, Any], result: Dict[str, Any]
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+        facts: List[Dict[str, Any]] = []
+        citations: List[Dict[str, Any]] = []
+        reasons: List[str] = []
+
+        intent_name = result.get("intent") or result.get("name")
+        if not intent_name and isinstance(result.get("aggregate"), dict):
+            intent_name = result["aggregate"].get("metric")
+        intent_source = result.get("intent_source") or "rules"
+        intent_score = result.get("intent_score")
+        if intent_name:
+            facts.append(
+                {
+                    "id": "intent",
+                    "text": f"Intent inferred as '{intent_name}'",
+                    "type": "decision",
+                    "confidence": float(intent_score) if intent_score is not None else 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": intent_source,
+                            "snippet": f"intent_source={intent_source}",
+                        }
+                    ],
+                }
+            )
+            reasons.append(f"intent_source={intent_source}")
+
+        matched_glyph = result.get("matched_glyph")
+        if matched_glyph:
+            facts.append(
+                {
+                    "id": "matched_glyph",
+                    "text": f"Matched glyph '{matched_glyph}'",
+                    "type": "decision",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": matched_glyph,
+                            "snippet": "matched_glyph",
+                        }
+                    ],
+                }
+            )
+            citations.append(
+                {
+                    "source_type": "glyphh",
+                    "source_id": matched_glyph,
+                    "title": matched_glyph,
+                    "url": None,
+                    "snippet": "matched_glyph",
+                    "hash": None,
+                }
+            )
+
+        aggregate = result.get("aggregate")
+        if isinstance(aggregate, dict):
+            value = aggregate.get("value")
+            count = aggregate.get("count")
+            facts.append(
+                {
+                    "id": "aggregate",
+                    "text": f"Aggregate value {value} across {count} contributors",
+                    "type": "metric",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "aggregate",
+                            "snippet": "aggregate_result",
+                        }
+                    ],
+                }
+            )
+            reasons.append("aggregate computed from contributor glyphs")
+
+        for edge in result.get("semantic_edges") or []:
+            target = edge.get("target")
+            if target:
+                citations.append(
+                    {
+                        "source_type": "glyphh",
+                        "source_id": target,
+                        "title": target,
+                        "url": None,
+                        "snippet": f"semantic_edge:{edge.get('kind') or edge.get('type')}",
+                        "hash": None,
+                    }
+                )
+
+        for edge in result.get("neural_edges") or []:
+            target = edge.get("target")
+            if target:
+                citations.append(
+                    {
+                        "source_type": "glyphh",
+                        "source_id": target,
+                        "title": target,
+                        "url": None,
+                        "snippet": "neural_edge",
+                        "hash": None,
+                    }
+                )
+
+        return facts, citations, reasons
+
     def _wrap_response(
         self,
         *,
@@ -116,14 +225,19 @@ class MCPServer:
         model_id = payload.get("model_id")
         request_id = payload.get("request_id")
         text = json.dumps(result, ensure_ascii=True)
+        facts: List[Dict[str, Any]] = []
+        citations: List[Dict[str, Any]] = []
+        reasons: List[str] = []
+        if tool == "nl_query" and status == "ok":
+            facts, citations, reasons = self._build_nl_facts(payload, result)
         return {
             "version": "1.0",
             "status": status,
             "answer": {"text": text, "format": "json"},
-            "facts": [],
-            "reasons": [],
+            "facts": facts,
+            "reasons": reasons,
             "grounding": {"mode": "glyphh_only", "score": 1.0, "strict": True},
-            "citations": [],
+            "citations": citations,
             "freshness": {"as_of": None, "max_age_seconds": 0, "policy": "best_effort"},
             "constraints_applied": {
                 "roles": [],
