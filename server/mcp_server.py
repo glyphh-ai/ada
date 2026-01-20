@@ -274,6 +274,76 @@ class MCPServer:
 
         return facts, citations, reasons
 
+    def _build_similar_to_facts(
+        self, payload: Dict[str, Any], result: Dict[str, Any]
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+        facts: List[Dict[str, Any]] = []
+        citations: List[Dict[str, Any]] = []
+        reasons: List[str] = []
+
+        glyph_name = payload.get("glyph_name")
+        if glyph_name:
+            facts.append(
+                {
+                    "id": "query_glyph",
+                    "text": f"Similarity query glyph '{glyph_name}'",
+                    "type": "decision",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": glyph_name,
+                            "snippet": "embedding_source",
+                        }
+                    ],
+                }
+            )
+            citations.append(
+                {
+                    "source_type": "glyphh",
+                    "source_id": glyph_name,
+                    "title": glyph_name,
+                    "url": None,
+                    "snippet": "embedding_source",
+                    "hash": None,
+                }
+            )
+
+        reasons.append("distance_metric=l2")
+
+        matches = result.get("matches") or []
+        for idx, match in enumerate(matches):
+            name = match.get("name")
+            if not name:
+                continue
+            facts.append(
+                {
+                    "id": f"similar_match_{idx}",
+                    "text": f"Similar glyph '{name}' rank {idx + 1}",
+                    "type": "decision",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": name,
+                            "snippet": "similar_to_match",
+                        }
+                    ],
+                }
+            )
+            citations.append(
+                {
+                    "source_type": "glyphh",
+                    "source_id": name,
+                    "title": name,
+                    "url": None,
+                    "snippet": "similar_to_match",
+                    "hash": None,
+                }
+            )
+
+        return facts, citations, reasons
+
     def _wrap_response(
         self,
         *,
@@ -292,6 +362,8 @@ class MCPServer:
             facts, citations, reasons = self._build_nl_facts(payload, result)
         elif tool == "find_by_properties" and status == "ok":
             facts, citations, reasons = self._build_find_by_properties_facts(payload, result)
+        elif tool == "similar_to" and status == "ok":
+            facts, citations, reasons = self._build_similar_to_facts(payload, result)
         return {
             "version": "1.0",
             "status": status,
