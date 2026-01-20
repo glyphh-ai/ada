@@ -214,6 +214,66 @@ class MCPServer:
 
         return facts, citations, reasons
 
+    def _build_find_by_properties_facts(
+        self, payload: Dict[str, Any], result: Dict[str, Any]
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+        facts: List[Dict[str, Any]] = []
+        citations: List[Dict[str, Any]] = []
+        reasons: List[str] = []
+
+        constraints = payload.get("constraints") or []
+        if constraints:
+            reasons.append("constraints_applied")
+            facts.append(
+                {
+                    "id": "constraints",
+                    "text": "Constraints applied to property search",
+                    "type": "decision",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "constraints",
+                            "snippet": json.dumps(constraints, ensure_ascii=True),
+                        }
+                    ],
+                }
+            )
+
+        matches = result.get("matches") or []
+        for idx, match in enumerate(matches):
+            name = match.get("name")
+            score = match.get("score")
+            if not name:
+                continue
+            facts.append(
+                {
+                    "id": f"match_{idx}",
+                    "text": f"Match '{name}' score {score}",
+                    "type": "decision",
+                    "confidence": float(score) if score is not None else 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": name,
+                            "snippet": "find_by_properties_match",
+                        }
+                    ],
+                }
+            )
+            citations.append(
+                {
+                    "source_type": "glyphh",
+                    "source_id": name,
+                    "title": name,
+                    "url": None,
+                    "snippet": "find_by_properties_match",
+                    "hash": None,
+                }
+            )
+
+        return facts, citations, reasons
+
     def _wrap_response(
         self,
         *,
@@ -230,6 +290,8 @@ class MCPServer:
         reasons: List[str] = []
         if tool == "nl_query" and status == "ok":
             facts, citations, reasons = self._build_nl_facts(payload, result)
+        elif tool == "find_by_properties" and status == "ok":
+            facts, citations, reasons = self._build_find_by_properties_facts(payload, result)
         return {
             "version": "1.0",
             "status": status,
