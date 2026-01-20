@@ -104,6 +104,51 @@ def _nl_glyphs(
 
 
 class MCPServer:
+    def _wrap_response(
+        self,
+        *,
+        tool: str,
+        payload: Dict[str, Any],
+        result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        status = "error" if result.get("error") else "ok"
+        model_id = payload.get("model_id")
+        request_id = payload.get("request_id")
+        text = json.dumps(result, ensure_ascii=True)
+        return {
+            "version": "1.0",
+            "status": status,
+            "answer": {"text": text, "format": "json"},
+            "facts": [],
+            "reasons": [],
+            "grounding": {"mode": "glyphh_only", "score": 1.0, "strict": True},
+            "citations": [],
+            "freshness": {"as_of": None, "max_age_seconds": 0, "policy": "best_effort"},
+            "constraints_applied": {
+                "roles": [],
+                "segments": [],
+                "time_window": None,
+                "allowlist_sources": [],
+            },
+            "data_provenance": {
+                "origin": "runtime",
+                "pipeline_id": None,
+                "dataset_version": None,
+            },
+            "redactions": {"pii_removed": False, "fields": []},
+            "traceability": {
+                "request_id": request_id,
+                "runtime_id": None,
+                "model_id": model_id,
+                "pipeline_id": None,
+                "glyph_ids": [],
+                "filters": {"role": None, "segment": None, "time_window": None},
+                "temporal_edges": [],
+                "path_edges": [],
+                "sources": [],
+            },
+        }
+
     def _health(self) -> Dict[str, Any]:
         return {"status": "ok"}
 
@@ -144,158 +189,160 @@ class MCPServer:
         ]
         return QueryResult(matches=summaries).model_dump()
 
+    def _run_tool(self, tool: str, payload: Dict[str, Any], db: SessionLocal) -> Dict[str, Any]:
+        if tool == "nl_query":
+            model = db.get(models.Model, payload["model_id"])
+            if not model:
+                return {"error": "model_not_found"}
+            base_cfg = model.nl_config.config if model.nl_config else None
+            nl_configs = resolve_nl_configs(base_cfg, _NullConfigSource())
+            glyph_rows = (
+                db.query(models.Glyph)
+                .filter(models.Glyph.model_id == model.id)
+                .all()
+            )
+            seg_rows = (
+                db.query(models.Segment)
+                .filter(models.Segment.glyph_name.in_([g.name for g in glyph_rows]))
+                .all()
+            )
+            seg_map: dict[tuple[str, int, int], bytes] = {}
+            for seg in seg_rows:
+                seg_map[(seg.glyph_name, seg.layer, seg.seg_index)] = seg.vec
+            result = run_nl_query(
+                payload["text"],
+                nl_configs,
+                model.roles_config or {},
+                _nl_glyphs(glyph_rows, seg_map),
+            )
+            if result:
+                return result
+            inferred = infer_intent_with_model(payload["text"], list(nl_configs))
+            if inferred:
+                intent_name, score = inferred
+                return {
+                    "query": payload["text"],
+                    "matched_glyph": None,
+                    "intent": intent_name,
+                    "intent_score": score,
+                    "intent_source": "model_fallback",
+                }
+            return {"query": payload["text"], "matched_glyph": None}
+        if tool == "find_by_properties":
+            model = db.get(models.Model, payload["model_id"])
+            if not model:
+                return {"error": "model_not_found"}
+            constraints = [
+                (c["role"], c["value"])
+                for c in payload.get("constraints", [])
+                if isinstance(c, dict) and c.get("role") and c.get("value")
+            ]
+            memory, encoder, _ = _build_memory(model, db)
+            results = glyphh_reasoning.find_by_properties(
+                memory, encoder, constraints, top_k=payload.get("top_k", 5)
+            )
+            return {
+                "matches": [{"name": g.name, "score": score} for g, score in results]
+            }
+        if tool == "similar_to":
+            return self._similar_to(payload, db)
+        if tool == "explain_link":
+            model = db.get(models.Model, payload["model_id"])
+            if not model:
+                return {"error": "model_not_found"}
+            memory, _encoder, glyph_map = _build_memory(model, db)
+            src = glyph_map.get(payload["source"])
+            tgt = glyph_map.get(payload["target"])
+            if not src or not tgt:
+                return {"error": "glyph_not_found"}
+            if src.global_cortex is None or tgt.global_cortex is None:
+                return {"error": "missing_cortex_vectors"}
+            similarity = glyphh_vector.similarity(src.global_cortex, tgt.global_cortex)
+            shared = {
+                k: v
+                for k, v in (src.semantic or {}).items()
+                if (tgt.semantic or {}).get(k) == v
+            }
+            return {"similarity": similarity, "shared_semantic": shared}
+        if tool == "trend_role":
+            rows = (
+                db.query(models.GlyphTrend)
+                .filter(
+                    models.GlyphTrend.model_id == payload["model_id"],
+                    models.GlyphTrend.role == payload["role"],
+                )
+                .order_by(models.GlyphTrend.timestamp.desc())
+                .limit(payload.get("limit", 50))
+                .all()
+            )
+            return {
+                "role": payload["role"],
+                "entries": [
+                    {
+                        "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                        "value": row.attribute_value,
+                        "source": row.source,
+                        "layer": row.layer,
+                        "segment_index": row.segment_index,
+                    }
+                    for row in rows
+                ],
+            }
+        if tool == "predict_next":
+            rows = (
+                db.query(models.GlyphTrend)
+                .filter(
+                    models.GlyphTrend.model_id == payload["model_id"],
+                    models.GlyphTrend.role == payload["role"],
+                )
+                .order_by(models.GlyphTrend.timestamp.desc())
+                .all()
+            )
+            prediction = next((r for r in rows if r.source == "prediction"), None)
+            fallback = rows[0] if rows else None
+            row = prediction or fallback
+            if not row:
+                return {"status": "no_data"}
+            return {
+                "role": payload["role"],
+                "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                "value": row.attribute_value,
+                "source": row.source,
+            }
+        if tool == "what_if_modify":
+            model = db.get(models.Model, payload["model_id"])
+            if not model:
+                return {"error": "model_not_found"}
+            memory, encoder, glyph_map = _build_memory(model, db)
+            target = glyph_map.get(payload["glyph_name"])
+            if not target:
+                return {"error": "glyph_not_found"}
+            patch = payload.get("patch") or {}
+            updated = dict(target.semantic or {})
+            updated.update(patch)
+            new_glyph = encoder.encode(
+                name=target.name,
+                attrs=updated,
+                node_type=target.node_type,
+            )
+            similarity = glyphh_vector.similarity(
+                new_glyph.global_cortex, target.global_cortex
+            )
+            return {
+                "glyph": target.name,
+                "semantic": updated,
+                "similarity": similarity,
+                "note": "not_persisted",
+            }
+        if tool == "health":
+            return self._health()
+        return {"error": "unknown_tool", "tool": tool}
+
     def handle_tool(self, tool: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         db = SessionLocal()
         try:
-            if tool == "nl_query":
-                model = db.get(models.Model, payload["model_id"])
-                if not model:
-                    return {"error": "model_not_found"}
-                base_cfg = model.nl_config.config if model.nl_config else None
-                nl_configs = resolve_nl_configs(base_cfg, _NullConfigSource())
-                glyph_rows = (
-                    db.query(models.Glyph)
-                    .filter(models.Glyph.model_id == model.id)
-                    .all()
-                )
-                seg_rows = (
-                    db.query(models.Segment)
-                    .filter(models.Segment.glyph_name.in_([g.name for g in glyph_rows]))
-                    .all()
-                )
-                seg_map: dict[tuple[str, int, int], bytes] = {}
-                for seg in seg_rows:
-                    seg_map[(seg.glyph_name, seg.layer, seg.seg_index)] = seg.vec
-                result = run_nl_query(
-                    payload["text"],
-                    nl_configs,
-                    model.roles_config or {},
-                    _nl_glyphs(glyph_rows, seg_map),
-                )
-                if result:
-                    return result
-                inferred = infer_intent_with_model(payload["text"], list(nl_configs))
-                if inferred:
-                    intent_name, score = inferred
-                    return {
-                        "query": payload["text"],
-                        "matched_glyph": None,
-                        "intent": intent_name,
-                        "intent_score": score,
-                        "intent_source": "model_fallback",
-                    }
-                return {"query": payload["text"], "matched_glyph": None}
-            if tool == "find_by_properties":
-                model = db.get(models.Model, payload["model_id"])
-                if not model:
-                    return {"error": "model_not_found"}
-                constraints = [
-                    (c["role"], c["value"])
-                    for c in payload.get("constraints", [])
-                    if isinstance(c, dict) and c.get("role") and c.get("value")
-                ]
-                memory, encoder, _ = _build_memory(model, db)
-                results = glyphh_reasoning.find_by_properties(
-                    memory, encoder, constraints, top_k=payload.get("top_k", 5)
-                )
-                return {
-                    "matches": [
-                        {"name": g.name, "score": score} for g, score in results
-                    ]
-                }
-            if tool == "similar_to":
-                return self._similar_to(payload, db)
-            if tool == "explain_link":
-                model = db.get(models.Model, payload["model_id"])
-                if not model:
-                    return {"error": "model_not_found"}
-                memory, _encoder, glyph_map = _build_memory(model, db)
-                src = glyph_map.get(payload["source"])
-                tgt = glyph_map.get(payload["target"])
-                if not src or not tgt:
-                    return {"error": "glyph_not_found"}
-                if src.global_cortex is None or tgt.global_cortex is None:
-                    return {"error": "missing_cortex_vectors"}
-                similarity = glyphh_vector.similarity(src.global_cortex, tgt.global_cortex)
-                shared = {
-                    k: v
-                    for k, v in (src.semantic or {}).items()
-                    if (tgt.semantic or {}).get(k) == v
-                }
-                return {"similarity": similarity, "shared_semantic": shared}
-            if tool == "trend_role":
-                rows = (
-                    db.query(models.GlyphTrend)
-                    .filter(
-                        models.GlyphTrend.model_id == payload["model_id"],
-                        models.GlyphTrend.role == payload["role"],
-                    )
-                    .order_by(models.GlyphTrend.timestamp.desc())
-                    .limit(payload.get("limit", 50))
-                    .all()
-                )
-                return {
-                    "role": payload["role"],
-                    "entries": [
-                        {
-                            "timestamp": row.timestamp.isoformat() if row.timestamp else None,
-                            "value": row.attribute_value,
-                            "source": row.source,
-                            "layer": row.layer,
-                            "segment_index": row.segment_index,
-                        }
-                        for row in rows
-                    ],
-                }
-            if tool == "predict_next":
-                rows = (
-                    db.query(models.GlyphTrend)
-                    .filter(
-                        models.GlyphTrend.model_id == payload["model_id"],
-                        models.GlyphTrend.role == payload["role"],
-                    )
-                    .order_by(models.GlyphTrend.timestamp.desc())
-                    .all()
-                )
-                prediction = next((r for r in rows if r.source == "prediction"), None)
-                fallback = rows[0] if rows else None
-                row = prediction or fallback
-                if not row:
-                    return {"status": "no_data"}
-                return {
-                    "role": payload["role"],
-                    "timestamp": row.timestamp.isoformat() if row.timestamp else None,
-                    "value": row.attribute_value,
-                    "source": row.source,
-                }
-            if tool == "what_if_modify":
-                model = db.get(models.Model, payload["model_id"])
-                if not model:
-                    return {"error": "model_not_found"}
-                memory, encoder, glyph_map = _build_memory(model, db)
-                target = glyph_map.get(payload["glyph_name"])
-                if not target:
-                    return {"error": "glyph_not_found"}
-                patch = payload.get("patch") or {}
-                updated = dict(target.semantic or {})
-                updated.update(patch)
-                new_glyph = encoder.encode(
-                    name=target.name,
-                    attrs=updated,
-                    node_type=target.node_type,
-                )
-                similarity = glyphh_vector.similarity(
-                    new_glyph.global_cortex, target.global_cortex
-                )
-                return {
-                    "glyph": target.name,
-                    "semantic": updated,
-                    "similarity": similarity,
-                    "note": "not_persisted",
-                }
-            if tool == "health":
-                return self._health()
-            return {"error": "unknown_tool", "tool": tool}
+            result = self._run_tool(tool, payload, db)
+            return self._wrap_response(tool=tool, payload=payload, result=result)
         finally:
             db.close()
 
