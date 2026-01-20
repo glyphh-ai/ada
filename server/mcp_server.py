@@ -794,6 +794,44 @@ class MCPServer:
                     ],
                 }
             )
+        uncertainty = {
+            "metric": None,
+            "interval": None,
+            "distribution": None,
+        }
+        if tool == "predict_next" and result.get("value") is not None:
+            uncertainty["metric"] = "prediction_point"
+            uncertainty["interval"] = {
+                "lower": None,
+                "upper": None,
+                "confidence_level": None,
+            }
+        elif tool == "similar_to":
+            matches = result.get("matches") or []
+            scores = [m.get("score") for m in matches if isinstance(m.get("score"), (int, float))]
+            if scores:
+                uncertainty["metric"] = "similarity_scores"
+                uncertainty["distribution"] = {
+                    "min": min(scores),
+                    "max": max(scores),
+                    "mean": sum(scores) / len(scores),
+                }
+        if uncertainty["metric"]:
+            facts.append(
+                {
+                    "id": "uncertainty",
+                    "text": "Uncertainty metadata attached",
+                    "type": "metric",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "uncertainty",
+                            "snippet": json.dumps(uncertainty, ensure_ascii=True),
+                        }
+                    ],
+                }
+            )
         base_facts = list(facts)
         base_citations = list(citations)
         base_reasons = list(reasons)
