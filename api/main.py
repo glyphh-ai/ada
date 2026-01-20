@@ -22,6 +22,7 @@ from .services.usage_metrics import UsageTracker
 from .services.monitoring import setup_monitoring
 from .routes import bundles as bundle_routes
 from .routes import charts as charts_routes
+from .routes import auth as auth_routes
 from .routes import health as health_routes
 from .routes import ingest as ingest_routes
 from .routes import listeners as listener_routes
@@ -49,6 +50,7 @@ app.add_middleware(
 setup_monitoring(app, settings)
 
 app.include_router(charts_routes.router, prefix="/api/v1")
+app.include_router(auth_routes.router, prefix="/api/v1")
 app.include_router(bundle_routes.router, prefix="/api/v1")
 app.include_router(health_routes.router, prefix="/api/v1")
 app.include_router(ingest_routes.router, prefix="/api/v1")

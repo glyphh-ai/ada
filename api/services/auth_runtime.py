@@ -5,6 +5,7 @@ import datetime as dt
 import hashlib
 import hmac
 import json
+from pathlib import Path
 
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -57,6 +58,25 @@ def decode_jwt(token: str, secret: str, algorithm: str) -> dict:
         return json.loads(payload_json)
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+
+
+def encode_jwt(payload: dict, secret: str, algorithm: str) -> str:
+    if algorithm != "HS256":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unsupported token algorithm")
+    header = {"alg": algorithm, "typ": "JWT"}
+    header_b64 = base64.urlsafe_b64encode(json.dumps(header).encode("utf-8")).rstrip(b"=")
+    payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).rstrip(b"=")
+    signing_input = header_b64 + b"." + payload_b64
+    sig = hmac.new(secret.encode(), signing_input, hashlib.sha256).digest()
+    sig_b64 = base64.urlsafe_b64encode(sig).rstrip(b"=")
+    return b".".join([header_b64, payload_b64, sig_b64]).decode("utf-8")
+
+
+def load_runtime_secret(settings) -> str | None:
+    path = Path(settings.runtime_secret_path)
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8").strip() or None
 
 
 def parse_license_expiry(value: str | None) -> dt.datetime | None:

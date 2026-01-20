@@ -233,6 +233,37 @@ class NLChatPayload(BaseModel):
     previous_response_id: str | None = None
 
 
+class AuthTokenCreateRequest(BaseModel):
+    name: str | None = None
+    scopes: list[str] = []
+
+
+class AuthTokenCreateResponse(BaseModel):
+    id: str
+    token: str
+    scopes: list[str]
+    created_at: str
+
+
+class AuthTokenListResponse(BaseModel):
+    items: list[dict]
+
+
+class AuthTokenExchangeRequest(BaseModel):
+    token: str
+    org_id: str | None = None
+    runtime_id: str | None = None
+    model_id: str | None = None
+    expires_in_minutes: int | None = 60
+
+
+class AuthTokenExchangeResponse(BaseModel):
+    access_token: str
+    token_type: str
+    expires_at: str
+    scopes: list[str]
+
+
 class GlyphEdgeSummary(BaseModel):
     matched_glyph: str | None = None
     primary_edge: dict | None = None

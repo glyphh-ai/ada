@@ -59,6 +59,10 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("GLYPH_RECORD_HASH_CHAIN", "RECORD_HASH_CHAIN"),
     )
+    api_token_store_path: str = Field(
+        default=".glyphh/runtime_tokens.json",
+        validation_alias=AliasChoices("GLYPH_API_TOKEN_STORE_PATH", "API_TOKEN_STORE_PATH"),
+    )
     redactions_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("GLYPH_REDACTIONS_ENABLED", "REDACTIONS_ENABLED"),
