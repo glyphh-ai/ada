@@ -535,6 +535,83 @@ class MCPServer:
 
         return facts, citations, reasons
 
+    def _build_what_if_modify_facts(
+        self, payload: Dict[str, Any], result: Dict[str, Any]
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+        facts: List[Dict[str, Any]] = []
+        citations: List[Dict[str, Any]] = []
+        reasons: List[str] = []
+
+        glyph_name = result.get("glyph") or payload.get("glyph_name")
+        patch = payload.get("patch") or {}
+        similarity = result.get("similarity")
+        note = result.get("note") or "not_persisted"
+
+        if glyph_name:
+            citations.append(
+                {
+                    "source_type": "glyphh",
+                    "source_id": glyph_name,
+                    "title": glyph_name,
+                    "url": None,
+                    "snippet": "what_if_modify_target",
+                    "hash": None,
+                }
+            )
+
+        facts.append(
+            {
+                "id": "what_if_patch",
+                "text": f"Applied patch {patch}",
+                "type": "decision",
+                "confidence": 1.0,
+                "evidence": [
+                    {
+                        "source_type": "glyphh",
+                        "source_id": "what_if_patch",
+                        "snippet": json.dumps(patch, ensure_ascii=True),
+                    }
+                ],
+            }
+        )
+
+        if similarity is not None:
+            facts.append(
+                {
+                    "id": "what_if_similarity",
+                    "text": f"Similarity after patch: {similarity}",
+                    "type": "metric",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "what_if_similarity",
+                            "snippet": "what_if_modify",
+                        }
+                    ],
+                }
+            )
+            reasons.append("similarity computed on updated glyph vs original")
+
+        if note:
+            facts.append(
+                {
+                    "id": "what_if_note",
+                    "text": note,
+                    "type": "decision",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "what_if_note",
+                            "snippet": note,
+                        }
+                    ],
+                }
+            )
+
+        return facts, citations, reasons
+
     def _wrap_response(
         self,
         *,
@@ -561,6 +638,8 @@ class MCPServer:
             facts, citations, reasons = self._build_trend_role_facts(payload, result)
         elif tool == "predict_next" and status == "ok":
             facts, citations, reasons = self._build_predict_next_facts(payload, result)
+        elif tool == "what_if_modify" and status == "ok":
+            facts, citations, reasons = self._build_what_if_modify_facts(payload, result)
         return {
             "version": "1.0",
             "status": status,
