@@ -476,6 +476,65 @@ class MCPServer:
 
         return facts, citations, reasons
 
+    def _build_predict_next_facts(
+        self, payload: Dict[str, Any], result: Dict[str, Any]
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+        facts: List[Dict[str, Any]] = []
+        citations: List[Dict[str, Any]] = []
+        reasons: List[str] = []
+
+        role = result.get("role") or payload.get("role")
+        timestamp = result.get("timestamp")
+        value = result.get("value")
+        source = result.get("source") or "unknown"
+
+        if role:
+            facts.append(
+                {
+                    "id": "predict_role",
+                    "text": f"Prediction for role '{role}'",
+                    "type": "metric",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "predict_next",
+                            "snippet": role,
+                        }
+                    ],
+                }
+            )
+
+        if timestamp or value is not None:
+            facts.append(
+                {
+                    "id": "predict_value",
+                    "text": f"{timestamp}: {value}",
+                    "type": "metric",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "predict_next",
+                            "snippet": f"source={source}",
+                        }
+                    ],
+                }
+            )
+            citations.append(
+                {
+                    "source_type": "glyphh",
+                    "source_id": "predict_next",
+                    "title": role,
+                    "url": None,
+                    "snippet": f"{timestamp} value={value} source={source}",
+                    "hash": None,
+                }
+            )
+            reasons.append(f"prediction_source={source}")
+
+        return facts, citations, reasons
+
     def _wrap_response(
         self,
         *,
@@ -500,6 +559,8 @@ class MCPServer:
             facts, citations, reasons = self._build_explain_link_facts(payload, result)
         elif tool == "trend_role" and status == "ok":
             facts, citations, reasons = self._build_trend_role_facts(payload, result)
+        elif tool == "predict_next" and status == "ok":
+            facts, citations, reasons = self._build_predict_next_facts(payload, result)
         return {
             "version": "1.0",
             "status": status,
