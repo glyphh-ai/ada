@@ -10,9 +10,27 @@ COPY glyphh-sdk /app/glyphh-sdk
 COPY glyphh-runtime /app/glyphh-runtime
 
 ARG GLYPH_SDK_WHEEL_URL
+ARG HF_TOKEN
+ENV HUGGINGFACE_HUB_TOKEN=$HF_TOKEN
 RUN pip install --no-cache-dir -r /app/glyphh-runtime/requirements.txt \
   && if [ -n "$GLYPH_SDK_WHEEL_URL" ]; then pip install --no-cache-dir "$GLYPH_SDK_WHEEL_URL"; fi \
-  && pip install --no-cache-dir -e /app/glyphh-sdk
+  && pip install --no-cache-dir -e /app/glyphh-sdk \
+  && pip install --no-cache-dir "huggingface_hub>=0.22.0" \
+  && python - <<'PY'
+import os
+from huggingface_hub import snapshot_download
+
+repo_id = "sentence-transformers/all-MiniLM-L6-v2"
+local_dir = "/app/glyphh-runtime/models/intent/all-MiniLM-L6-v2"
+token = os.environ.get("HUGGINGFACE_HUB_TOKEN")
+
+snapshot_download(
+    repo_id=repo_id,
+    local_dir=local_dir,
+    local_dir_use_symlinks=False,
+    token=token,
+)
+PY
 
 ENV PYTHONPATH=/app/glyphh-runtime
 

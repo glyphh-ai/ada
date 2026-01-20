@@ -41,6 +41,7 @@ jobs:
           PLATFORM_TAG: ${{ matrix.platform_tag }}
           RUNTIME_SDK_REF: ${{ vars.RUNTIME_SDK_REF }}
           SDK_REPO_TOKEN: ${{ secrets.RUNTIME_SDK_TOKEN }}
+          HUGGINGFACE_HUB_TOKEN: ${{ secrets.HUGGINGFACE_HUB_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -74,6 +75,7 @@ jobs:
 
           "${VENV_PY}" -m pip install -r requirements.txt
           "${VENV_PY}" -m pip install "${BUILD_DIR}/wheels/"*.whl
+          "${VENV_PY}" -m pip install "huggingface_hub>=0.22.0"
 
           rsync -a \
             --exclude ".git" \
@@ -83,6 +85,22 @@ jobs:
             --exclude "venv" \
             --exclude "glyphh-sdk" \
             "${WORK_DIR}/" "${BUILD_DIR}/app/"
+
+          export MODEL_DIR="${BUILD_DIR}/app/models/intent/all-MiniLM-L6-v2"
+          mkdir -p "${MODEL_DIR}"
+          "${VENV_PY}" - << 'PY'
+          import os
+          from huggingface_hub import snapshot_download
+
+          repo_id = "sentence-transformers/all-MiniLM-L6-v2"
+          local_dir = os.environ["MODEL_DIR"]
+
+          snapshot_download(
+              repo_id=repo_id,
+              local_dir=local_dir,
+              local_dir_use_symlinks=False,
+          )
+          PY
 
           cat > "${BUILD_DIR}/run.sh" << 'EOF'
           #!/usr/bin/env bash
