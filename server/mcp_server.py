@@ -344,6 +344,78 @@ class MCPServer:
 
         return facts, citations, reasons
 
+    def _build_explain_link_facts(
+        self, payload: Dict[str, Any], result: Dict[str, Any]
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+        facts: List[Dict[str, Any]] = []
+        citations: List[Dict[str, Any]] = []
+        reasons: List[str] = []
+
+        source = payload.get("source")
+        target = payload.get("target")
+        if source:
+            citations.append(
+                {
+                    "source_type": "glyphh",
+                    "source_id": source,
+                    "title": source,
+                    "url": None,
+                    "snippet": "link_source",
+                    "hash": None,
+                }
+            )
+        if target:
+            citations.append(
+                {
+                    "source_type": "glyphh",
+                    "source_id": target,
+                    "title": target,
+                    "url": None,
+                    "snippet": "link_target",
+                    "hash": None,
+                }
+            )
+
+        similarity = result.get("similarity")
+        if similarity is not None:
+            facts.append(
+                {
+                    "id": "link_similarity",
+                    "text": f"Similarity between '{source}' and '{target}' is {similarity}",
+                    "type": "metric",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "similarity",
+                            "snippet": "global_cortex_similarity",
+                        }
+                    ],
+                }
+            )
+            reasons.append("similarity computed on global_cortex vectors")
+
+        shared = result.get("shared_semantic") or {}
+        if shared:
+            keys = ", ".join(sorted(shared.keys()))
+            facts.append(
+                {
+                    "id": "shared_semantic",
+                    "text": f"Shared semantic keys: {keys}",
+                    "type": "decision",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "shared_semantic",
+                            "snippet": keys,
+                        }
+                    ],
+                }
+            )
+
+        return facts, citations, reasons
+
     def _wrap_response(
         self,
         *,
@@ -364,6 +436,8 @@ class MCPServer:
             facts, citations, reasons = self._build_find_by_properties_facts(payload, result)
         elif tool == "similar_to" and status == "ok":
             facts, citations, reasons = self._build_similar_to_facts(payload, result)
+        elif tool == "explain_link" and status == "ok":
+            facts, citations, reasons = self._build_explain_link_facts(payload, result)
         return {
             "version": "1.0",
             "status": status,
