@@ -85,22 +85,22 @@ jobs:
             "${WORK_DIR}/" "${BUILD_DIR}/app/"
 
           cat > "${BUILD_DIR}/run.sh" << 'EOF'
-          #!/usr/bin/env bash
-          set -euo pipefail
-          ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-          source "${ROOT_DIR}/venv/bin/activate"
-          export GLYPH_RUNTIME_PORT="${GLYPH_RUNTIME_PORT:-8080}"
-          exec python -m uvicorn api.main:app --host 0.0.0.0 --port "${GLYPH_RUNTIME_PORT}"
-          EOF
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${ROOT_DIR}/venv/bin/activate"
+export GLYPH_RUNTIME_PORT="${GLYPH_RUNTIME_PORT:-8080}"
+exec python -m uvicorn api.main:app --host 0.0.0.0 --port "${GLYPH_RUNTIME_PORT}"
+EOF
           chmod +x "${BUILD_DIR}/run.sh"
 
           if [ "${RUNNER_OS}" = "Windows" ]; then
             cat > "${BUILD_DIR}/run.ps1" << 'EOF'
-            $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-            & "$Root\\venv\\Scripts\\Activate.ps1"
-            if (-not $env:GLYPH_RUNTIME_PORT) { $env:GLYPH_RUNTIME_PORT = "8080" }
-            python -m uvicorn api.main:app --host 0.0.0.0 --port $env:GLYPH_RUNTIME_PORT
-            EOF
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+& "$Root\\venv\\Scripts\\Activate.ps1"
+if (-not $env:GLYPH_RUNTIME_PORT) { $env:GLYPH_RUNTIME_PORT = "8080" }
+python -m uvicorn api.main:app --host 0.0.0.0 --port $env:GLYPH_RUNTIME_PORT
+EOF
           fi
 
           tar -czf "dist/glyphh-runtime-${TAG}-${PLATFORM_TAG}.tar.gz" -C "dist" "glyphh-runtime-${TAG}-${PLATFORM_TAG}"
