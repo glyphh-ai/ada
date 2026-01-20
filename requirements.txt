@@ -8,3 +8,4 @@ pgvector
 numpy
 alembic
 openai
+sentence-transformers

@@ -22,6 +22,7 @@ from glyphh import reasoning as glyphh_reasoning
 from glyphh import vector as glyphh_vector
 from glyphh.nl.configs import resolve_nl_configs, run_nl_query
 from glyphh.nl.inference import SimpleGlyph as NLInferenceGlyph
+from api.services.intent_inference import infer_intent_with_model
 
 
 class _NullConfigSource:
@@ -154,7 +155,19 @@ class MCPServer:
                     model.roles_config or {},
                     _nl_glyphs(glyph_rows),
                 )
-                return result or {"query": payload["text"], "matched_glyph": None}
+                if result:
+                    return result
+                inferred = infer_intent_with_model(payload["text"], list(nl_configs))
+                if inferred:
+                    intent_name, score = inferred
+                    return {
+                        "query": payload["text"],
+                        "matched_glyph": None,
+                        "intent": intent_name,
+                        "intent_score": score,
+                        "intent_source": "model_fallback",
+                    }
+                return {"query": payload["text"], "matched_glyph": None}
             if tool == "find_by_properties":
                 model = db.get(models.Model, payload["model_id"])
                 if not model:

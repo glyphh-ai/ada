@@ -27,6 +27,8 @@ services:
     build:
       context: ..
       dockerfile: glyphh-runtime/Dockerfile
+      args:
+        HF_TOKEN: ${GLYPH_HF_TOKEN:-}
     environment:
       GLYPH_DATABASE_URL: postgresql+psycopg://glyphh:glyphh@db_runtime:5432/glyphh_runtime
     ports:
