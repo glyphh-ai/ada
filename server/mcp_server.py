@@ -23,8 +23,11 @@ from glyphh import vector as glyphh_vector
 from glyphh.nl.configs import resolve_nl_configs, run_nl_query
 from glyphh.nl.inference import SimpleGlyph as NLInferenceGlyph
 from api.services.intent_inference import infer_intent_with_model
+from api.core.config import get_settings
 from .mcp_schema import format_validation_error, validate_mcp_response
 
+
+settings = get_settings()
 
 class _NullConfigSource:
     def fetch_nl_config(self, identifier: str) -> Dict[str, Any] | None:
@@ -646,6 +649,154 @@ class MCPServer:
         facts: List[Dict[str, Any]] = []
         citations: List[Dict[str, Any]] = []
         reasons: List[str] = []
+        data_provenance = {
+            "origin": "runtime",
+            "pipeline_id": settings.data_pipeline_id,
+            "dataset_version": settings.dataset_version,
+        }
+        if settings.record_hash_chain:
+            data_provenance["record_hash_chain"] = settings.record_hash_chain
+        if settings.data_pipeline_id or settings.dataset_version or settings.record_hash_chain:
+            facts.append(
+                {
+                    "id": "data_lineage",
+                    "text": "Data lineage metadata attached",
+                    "type": "decision",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "data_lineage",
+                            "snippet": json.dumps(data_provenance, ensure_ascii=True),
+                        }
+                    ],
+                }
+            )
+        computation_trace = {
+            "tool": tool,
+            "filters": None,
+            "ranking": None,
+            "parameters": {},
+        }
+        if tool == "find_by_properties":
+            computation_trace["filters"] = payload.get("constraints") or []
+            computation_trace["ranking"] = "glyphh_reasoning.find_by_properties"
+            computation_trace["parameters"] = {"top_k": payload.get("top_k", 5)}
+        elif tool == "similar_to":
+            computation_trace["filters"] = {
+                "glyph_name": payload.get("glyph_name"),
+                "model_id": payload.get("model_id"),
+            }
+            computation_trace["ranking"] = "embedding_l2_distance"
+            computation_trace["parameters"] = {"top_k": payload.get("top_k", 5)}
+        elif tool == "nl_query":
+            computation_trace["filters"] = {
+                "model_id": payload.get("model_id"),
+                "intent": result.get("intent") or result.get("name"),
+            }
+            computation_trace["ranking"] = "nl_rules_or_semantic_fallback"
+            computation_trace["parameters"] = {
+                "intent_source": result.get("intent_source") or "rules",
+            }
+        elif tool == "trend_role":
+            computation_trace["filters"] = {
+                "model_id": payload.get("model_id"),
+                "role": payload.get("role"),
+            }
+            computation_trace["ranking"] = "timestamp_desc"
+            computation_trace["parameters"] = {"limit": payload.get("limit", 50)}
+        elif tool == "predict_next":
+            computation_trace["filters"] = {
+                "model_id": payload.get("model_id"),
+                "role": payload.get("role"),
+            }
+            computation_trace["ranking"] = "prediction_source_preferred"
+            computation_trace["parameters"] = {}
+        elif tool == "explain_link":
+            computation_trace["filters"] = {
+                "source": payload.get("source"),
+                "target": payload.get("target"),
+            }
+            computation_trace["ranking"] = "global_cortex_similarity"
+            computation_trace["parameters"] = {}
+        elif tool == "what_if_modify":
+            computation_trace["filters"] = {
+                "glyph_name": payload.get("glyph_name"),
+            }
+            computation_trace["ranking"] = "similarity_after_patch"
+            computation_trace["parameters"] = {"patch": payload.get("patch") or {}}
+        elif tool == "health":
+            computation_trace["filters"] = {}
+            computation_trace["ranking"] = "n/a"
+            computation_trace["parameters"] = {}
+        if computation_trace["filters"] is not None:
+            facts.append(
+                {
+                    "id": "computation_trace",
+                    "text": "Computation trace metadata attached",
+                    "type": "decision",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "computation_trace",
+                            "snippet": json.dumps(computation_trace, ensure_ascii=True),
+                        }
+                    ],
+                }
+            )
+        freshness = {
+            "time_span": None,
+            "coverage_percent": None,
+            "missing_data": None,
+        }
+        if tool == "trend_role":
+            entries = result.get("entries") or []
+            timestamps = [e.get("timestamp") for e in entries if e.get("timestamp")]
+            if timestamps:
+                freshness["time_span"] = {
+                    "start": timestamps[-1],
+                    "end": timestamps[0],
+                }
+            if entries:
+                missing = sum(1 for e in entries if e.get("value") is None)
+                freshness["missing_data"] = {
+                    "count": missing,
+                    "total": len(entries),
+                }
+                freshness["coverage_percent"] = round(
+                    100.0 * (len(entries) - missing) / len(entries), 2
+                )
+        elif tool == "predict_next":
+            if result.get("timestamp"):
+                freshness["time_span"] = {
+                    "start": result.get("timestamp"),
+                    "end": result.get("timestamp"),
+                }
+            freshness["coverage_percent"] = 100.0 if result.get("value") is not None else 0.0
+            freshness["missing_data"] = {
+                "count": 0 if result.get("value") is not None else 1,
+                "total": 1,
+            }
+        if freshness["time_span"] or freshness["coverage_percent"] is not None:
+            facts.append(
+                {
+                    "id": "freshness_coverage",
+                    "text": "Freshness and coverage metadata attached",
+                    "type": "metric",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "freshness_coverage",
+                            "snippet": json.dumps(freshness, ensure_ascii=True),
+                        }
+                    ],
+                }
+            )
+        base_facts = list(facts)
+        base_citations = list(citations)
+        base_reasons = list(reasons)
         if tool == "nl_query" and status == "ok":
             facts, citations, reasons = self._build_nl_facts(payload, result)
         elif tool == "find_by_properties" and status == "ok":
@@ -662,6 +813,12 @@ class MCPServer:
             facts, citations, reasons = self._build_what_if_modify_facts(payload, result)
         elif tool == "health" and status == "ok":
             facts, citations, reasons = self._build_health_facts(payload, result)
+        if base_facts:
+            facts = base_facts + (facts or [])
+        if base_citations:
+            citations = base_citations + (citations or [])
+        if base_reasons:
+            reasons = base_reasons + (reasons or [])
         return {
             "version": "1.0",
             "status": status,
@@ -677,11 +834,7 @@ class MCPServer:
                 "time_window": None,
                 "allowlist_sources": [],
             },
-            "data_provenance": {
-                "origin": "runtime",
-                "pipeline_id": None,
-                "dataset_version": None,
-            },
+            "data_provenance": data_provenance,
             "redactions": {"pii_removed": False, "fields": []},
             "traceability": {
                 "request_id": request_id,

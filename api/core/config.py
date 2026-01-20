@@ -47,6 +47,18 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("GLYPH_RUNTIME_ENDPOINT_URL", "RUNTIME_ENDPOINT_URL"),
     )
+    data_pipeline_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GLYPH_DATA_PIPELINE_ID", "DATA_PIPELINE_ID"),
+    )
+    dataset_version: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GLYPH_DATASET_VERSION", "DATASET_VERSION"),
+    )
+    record_hash_chain: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GLYPH_RECORD_HASH_CHAIN", "RECORD_HASH_CHAIN"),
+    )
     metrics_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("GLYPH_METRICS_ENABLED", "METRICS_ENABLED"),
