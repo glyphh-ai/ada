@@ -47,6 +47,18 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("GLYPH_RUNTIME_ENDPOINT_URL", "RUNTIME_ENDPOINT_URL"),
     )
+    audit_log_path: str = Field(
+        default=".glyphh/audit.log.jsonl",
+        validation_alias=AliasChoices("GLYPH_AUDIT_LOG_PATH", "AUDIT_LOG_PATH"),
+    )
+    audit_log_max_bytes: int = Field(
+        default=5_000_000,
+        validation_alias=AliasChoices("GLYPH_AUDIT_LOG_MAX_BYTES", "AUDIT_LOG_MAX_BYTES"),
+    )
+    audit_log_drain_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GLYPH_AUDIT_LOG_DRAIN_URL", "AUDIT_LOG_DRAIN_URL"),
+    )
 
     class Config:
         env_file = Path(__file__).resolve().parents[2] / ".env"
