@@ -832,6 +832,37 @@ class MCPServer:
                     ],
                 }
             )
+        constraints_applied = {
+            "roles": [],
+            "segments": [],
+            "time_window": None,
+            "allowlist_sources": [],
+        }
+        if tool == "find_by_properties":
+            constraints = payload.get("constraints") or []
+            constraints_applied["roles"] = [
+                c.get("role") for c in constraints if isinstance(c, dict) and c.get("role")
+            ]
+        elif tool == "nl_query":
+            aggregate = result.get("aggregate") or {}
+            start = aggregate.get("start")
+            end = aggregate.get("end")
+            if start or end:
+                constraints_applied["time_window"] = f"{start}..{end}"
+        elif tool == "trend_role":
+            span = freshness.get("time_span")
+            if span:
+                constraints_applied["time_window"] = f"{span.get('start')}..{span.get('end')}"
+        elif tool == "predict_next":
+            span = freshness.get("time_span")
+            if span:
+                constraints_applied["time_window"] = f"{span.get('start')}..{span.get('end')}"
+
+        grounding = {
+            "mode": "glyphh_only",
+            "score": 1.0 if status == "ok" else 0.0,
+            "strict": status == "ok",
+        }
         uncertainty = {
             "metric": None,
             "interval": None,
@@ -1002,15 +1033,14 @@ class MCPServer:
             "answer": {"text": text, "format": "json"},
             "facts": facts,
             "reasons": reasons,
-            "grounding": {"mode": "glyphh_only", "score": 1.0, "strict": True},
+            "grounding": grounding,
             "citations": citations,
-            "freshness": {"as_of": None, "max_age_seconds": 0, "policy": "best_effort"},
-            "constraints_applied": {
-                "roles": [],
-                "segments": [],
-                "time_window": None,
-                "allowlist_sources": [],
+            "freshness": {
+                "as_of": freshness.get("time_span", {}).get("end") if freshness.get("time_span") else None,
+                "max_age_seconds": 0,
+                "policy": "best_effort",
             },
+            "constraints_applied": constraints_applied,
             "data_provenance": data_provenance,
             "redactions": {"pii_removed": False, "fields": []},
             "traceability": {
