@@ -21,9 +21,9 @@ def _parse_scopes(payload: dict) -> set[str]:
     return set()
 
 
-def require_scopes(payload: dict, required: list[str]) -> None:
+def require_scopes(payload: dict, required: list[str]) -> list[str]:
     if not required:
-        return
+        return []
     scopes = _parse_scopes(payload)
     missing = [scope for scope in required if scope not in scopes]
     if missing:
@@ -31,12 +31,14 @@ def require_scopes(payload: dict, required: list[str]) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Missing scopes: {', '.join(missing)}",
         )
+    return list(scopes)
 
 
-def enforce_model_access(payload: dict, model_id: str) -> None:
+def enforce_model_access(payload: dict, model_id: str) -> dict:
     claim = payload.get("model_id")
     if claim and claim != model_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Model access denied")
+    return {"policy_id": "model_access", "allowed_model_id": claim or model_id}
 
 def decode_jwt(token: str, secret: str, algorithm: str) -> dict:
     if algorithm != "HS256":

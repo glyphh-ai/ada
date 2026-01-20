@@ -884,6 +884,23 @@ class MCPServer:
                     ],
                 }
             )
+        governance = payload.get("governance") or {}
+        if governance:
+            facts.append(
+                {
+                    "id": "governance_proof",
+                    "text": "Governance policies evaluated",
+                    "type": "decision",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "governance",
+                            "snippet": json.dumps(governance, ensure_ascii=True),
+                        }
+                    ],
+                }
+            )
         base_facts = list(facts)
         base_citations = list(citations)
         base_reasons = list(reasons)
