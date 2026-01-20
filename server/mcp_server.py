@@ -656,6 +656,21 @@ class MCPServer:
             "input_hash": payload_hash,
         }
 
+    def _build_runtime_stats(
+        self, payload: Dict[str, Any], db: SessionLocal
+    ) -> Dict[str, Any]:
+        model_version = None
+        model_id = payload.get("model_id")
+        if model_id:
+            model = db.get(models.Model, model_id)
+            if model:
+                model_version = model.version or model.updated_at.isoformat() if model.updated_at else None
+        return {
+            "latency_ms": None,
+            "model_version": model_version,
+            "resource_usage": None,
+        }
+
     def _wrap_response(
         self,
         *,
@@ -663,6 +678,7 @@ class MCPServer:
         payload: Dict[str, Any],
         result: Dict[str, Any],
         determinism: Dict[str, Any] | None = None,
+        runtime_stats: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         status = "error" if result.get("error") else "ok"
         model_id = payload.get("model_id")
@@ -939,6 +955,22 @@ class MCPServer:
                     ],
                 }
             )
+        if runtime_stats:
+            facts.append(
+                {
+                    "id": "runtime_stats",
+                    "text": "Runtime stats metadata attached",
+                    "type": "metric",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "runtime_stats",
+                            "snippet": json.dumps(runtime_stats, ensure_ascii=True),
+                        }
+                    ],
+                }
+            )
         base_facts = list(facts)
         base_citations = list(citations)
         base_reasons = list(reasons)
@@ -1201,11 +1233,13 @@ class MCPServer:
         try:
             result = self._run_tool(tool, payload, db)
             determinism = self._build_determinism_evidence(payload, db)
+            runtime_stats = self._build_runtime_stats(payload, db)
             response = self._wrap_response(
                 tool=tool,
                 payload=payload,
                 result=result,
                 determinism=determinism,
+                runtime_stats=runtime_stats,
             )
             try:
                 validate_mcp_response(response)
