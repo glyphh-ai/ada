@@ -832,6 +832,58 @@ class MCPServer:
                     ],
                 }
             )
+        counterfactual = None
+        if tool == "nl_query":
+            counterfactual = {
+                "scenario": "No matching intent or glyph found",
+                "effect": "Response would return matched_glyph=null and intent_source=model_fallback or null",
+            }
+        elif tool == "find_by_properties":
+            counterfactual = {
+                "scenario": "Constraints changed or removed",
+                "effect": "Match set and scores would differ based on new constraints",
+            }
+        elif tool == "similar_to":
+            counterfactual = {
+                "scenario": "Different query glyph or vector",
+                "effect": "Ranked glyph list would change under L2 similarity",
+            }
+        elif tool == "trend_role":
+            counterfactual = {
+                "scenario": "Time window shifts or missing data",
+                "effect": "Trend entries and coverage metrics would change",
+            }
+        elif tool == "predict_next":
+            counterfactual = {
+                "scenario": "No prediction rows available",
+                "effect": "Fallback would use most recent actual value",
+            }
+        elif tool == "what_if_modify":
+            counterfactual = {
+                "scenario": "Patch changed or removed",
+                "effect": "Similarity would be recalculated and may differ",
+            }
+        elif tool == "explain_link":
+            counterfactual = {
+                "scenario": "Different source/target glyphs",
+                "effect": "Similarity and shared semantic keys would change",
+            }
+        if counterfactual:
+            facts.append(
+                {
+                    "id": "counterfactual",
+                    "text": "Counterfactual guidance attached",
+                    "type": "decision",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "counterfactual",
+                            "snippet": json.dumps(counterfactual, ensure_ascii=True),
+                        }
+                    ],
+                }
+            )
         base_facts = list(facts)
         base_citations = list(citations)
         base_reasons = list(reasons)
