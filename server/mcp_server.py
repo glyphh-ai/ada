@@ -23,6 +23,7 @@ from glyphh import vector as glyphh_vector
 from glyphh.nl.configs import resolve_nl_configs, run_nl_query
 from glyphh.nl.inference import SimpleGlyph as NLInferenceGlyph
 from api.services.intent_inference import infer_intent_with_model
+from .mcp_schema import format_validation_error, validate_mcp_response
 
 
 class _NullConfigSource:
@@ -148,6 +149,19 @@ class MCPServer:
                 "sources": [],
             },
         }
+
+    def _error_response(
+        self,
+        *,
+        tool: str,
+        payload: Dict[str, Any],
+        reason: str,
+    ) -> Dict[str, Any]:
+        return self._wrap_response(
+            tool=tool,
+            payload=payload,
+            result={"error": "invalid_mcp_response", "detail": reason},
+        )
 
     def _health(self) -> Dict[str, Any]:
         return {"status": "ok"}
@@ -342,7 +356,14 @@ class MCPServer:
         db = SessionLocal()
         try:
             result = self._run_tool(tool, payload, db)
-            return self._wrap_response(tool=tool, payload=payload, result=result)
+            response = self._wrap_response(tool=tool, payload=payload, result=result)
+            try:
+                validate_mcp_response(response)
+            except Exception as exc:
+                error_text = format_validation_error(exc)
+                response = self._error_response(tool=tool, payload=payload, reason=error_text)
+                validate_mcp_response(response)
+            return response
         finally:
             db.close()
 
