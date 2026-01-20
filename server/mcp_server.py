@@ -612,6 +612,26 @@ class MCPServer:
 
         return facts, citations, reasons
 
+    def _build_health_facts(
+        self, payload: Dict[str, Any], result: Dict[str, Any]
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+        facts = [
+            {
+                "id": "runtime_health",
+                "text": f"Runtime status {result.get('status')}",
+                "type": "decision",
+                "confidence": 1.0,
+                "evidence": [
+                    {
+                        "source_type": "glyphh",
+                        "source_id": "health",
+                        "snippet": "runtime_health",
+                    }
+                ],
+            }
+        ]
+        return facts, [], []
+
     def _wrap_response(
         self,
         *,
@@ -640,6 +660,8 @@ class MCPServer:
             facts, citations, reasons = self._build_predict_next_facts(payload, result)
         elif tool == "what_if_modify" and status == "ok":
             facts, citations, reasons = self._build_what_if_modify_facts(payload, result)
+        elif tool == "health" and status == "ok":
+            facts, citations, reasons = self._build_health_facts(payload, result)
         return {
             "version": "1.0",
             "status": status,
