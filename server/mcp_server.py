@@ -863,6 +863,74 @@ class MCPServer:
             "score": 1.0 if status == "ok" else 0.0,
             "strict": status == "ok",
         }
+        glyph_ids: List[str] = []
+        if tool == "nl_query":
+            if result.get("matched_glyph"):
+                glyph_ids.append(result["matched_glyph"])
+            for edge in result.get("semantic_edges") or []:
+                target = edge.get("target")
+                if target:
+                    glyph_ids.append(target)
+            for edge in result.get("neural_edges") or []:
+                target = edge.get("target")
+                if target:
+                    glyph_ids.append(target)
+        elif tool == "find_by_properties":
+            glyph_ids.extend([m.get("name") for m in result.get("matches") or [] if m.get("name")])
+        elif tool == "similar_to":
+            glyph_ids.extend([m.get("name") for m in result.get("matches") or [] if m.get("name")])
+        elif tool == "explain_link":
+            if payload.get("source"):
+                glyph_ids.append(payload.get("source"))
+            if payload.get("target"):
+                glyph_ids.append(payload.get("target"))
+        elif tool == "trend_role":
+            glyph_ids.append(f"trend_role:{payload.get('role')}")
+        elif tool == "predict_next":
+            glyph_ids.append(f"predict_next:{payload.get('role')}")
+        elif tool == "what_if_modify":
+            if result.get("glyph"):
+                glyph_ids.append(result.get("glyph"))
+
+        filters_trace = {}
+        if tool == "find_by_properties":
+            filters_trace["constraints"] = payload.get("constraints") or []
+        elif tool == "nl_query":
+            filters_trace["intent"] = result.get("intent") or result.get("name")
+        elif tool in {"trend_role", "predict_next"}:
+            filters_trace["role"] = payload.get("role")
+        elif tool == "similar_to":
+            filters_trace["glyph_name"] = payload.get("glyph_name")
+        elif tool == "explain_link":
+            filters_trace["source"] = payload.get("source")
+            filters_trace["target"] = payload.get("target")
+
+        temporal_edges = []
+        if tool == "trend_role":
+            for entry in result.get("entries") or []:
+                temporal_edges.append(
+                    {
+                        "from": payload.get("role"),
+                        "to": entry.get("timestamp"),
+                        "edge_type": "trend_entry",
+                        "valid_from": entry.get("timestamp"),
+                        "valid_to": entry.get("timestamp"),
+                        "weight": 1.0,
+                    }
+                )
+
+        path_edges = []
+        if tool == "nl_query":
+            for edge in result.get("semantic_edges") or []:
+                path_edges.append(
+                    {
+                        "from": result.get("matched_glyph"),
+                        "to": edge.get("target"),
+                        "edge_type": edge.get("kind") or edge.get("type"),
+                        "weight": edge.get("weight"),
+                        "reason": edge.get("value"),
+                    }
+                )
         uncertainty = {
             "metric": None,
             "interval": None,
@@ -1047,12 +1115,12 @@ class MCPServer:
                 "request_id": request_id,
                 "runtime_id": None,
                 "model_id": model_id,
-                "pipeline_id": None,
-                "glyph_ids": [],
-                "filters": {"role": None, "segment": None, "time_window": None},
-                "temporal_edges": [],
-                "path_edges": [],
-                "sources": [],
+                "pipeline_id": settings.data_pipeline_id,
+                "glyph_ids": list(dict.fromkeys(glyph_ids)),
+                "filters": filters_trace,
+                "temporal_edges": temporal_edges,
+                "path_edges": path_edges,
+                "sources": citations,
             },
         }
 
