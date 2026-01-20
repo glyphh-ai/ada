@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
@@ -17,6 +18,7 @@ from sqlalchemy import select
 from api.core import models
 from api.core.db import SessionLocal
 from api.core.schemas import QueryRequest, GlyphSummary, QueryResult
+import glyphh
 from glyphh import Encoder, Glyph, GlyphMemory
 from glyphh import reasoning as glyphh_reasoning
 from glyphh import vector as glyphh_vector
@@ -635,12 +637,32 @@ class MCPServer:
         ]
         return facts, [], []
 
+    def _build_determinism_evidence(
+        self, payload: Dict[str, Any], db: SessionLocal
+    ) -> Dict[str, Any]:
+        model_id = payload.get("model_id")
+        encoder_seed = None
+        if model_id:
+            model = db.get(models.Model, model_id)
+            if model:
+                encoder_seed = model.encoder_seed
+        payload_hash = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        return {
+            "encoder_seed": encoder_seed,
+            "encoder_version": getattr(glyphh, "__version__", None),
+            "native_engine_version": getattr(glyphh, "native_engine_version", None),
+            "input_hash": payload_hash,
+        }
+
     def _wrap_response(
         self,
         *,
         tool: str,
         payload: Dict[str, Any],
         result: Dict[str, Any],
+        determinism: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         status = "error" if result.get("error") else "ok"
         model_id = payload.get("model_id")
@@ -897,6 +919,22 @@ class MCPServer:
                             "source_type": "glyphh",
                             "source_id": "governance",
                             "snippet": json.dumps(governance, ensure_ascii=True),
+                        }
+                    ],
+                }
+            )
+        if determinism:
+            facts.append(
+                {
+                    "id": "determinism",
+                    "text": "Determinism metadata attached",
+                    "type": "decision",
+                    "confidence": 1.0,
+                    "evidence": [
+                        {
+                            "source_type": "glyphh",
+                            "source_id": "determinism",
+                            "snippet": json.dumps(determinism, ensure_ascii=True),
                         }
                     ],
                 }
@@ -1162,7 +1200,13 @@ class MCPServer:
         db = SessionLocal()
         try:
             result = self._run_tool(tool, payload, db)
-            response = self._wrap_response(tool=tool, payload=payload, result=result)
+            determinism = self._build_determinism_evidence(payload, db)
+            response = self._wrap_response(
+                tool=tool,
+                payload=payload,
+                result=result,
+                determinism=determinism,
+            )
             try:
                 validate_mcp_response(response)
             except Exception as exc:
