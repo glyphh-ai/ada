@@ -112,7 +112,12 @@ async def nl_chat(
         raise HTTPException(status_code=404, detail="Model not found")
     glyphs = db.query(models.Glyph).filter(models.Glyph.model_id == model.id).all()
     nl_configs = build_nl_configs(model, db)
-    nl_resp = run_nl_query(payload.text or "", nl_configs, model.roles_config or {}, to_nl_glyphs(glyphs))
+    nl_resp = run_nl_query(
+        payload.text or "",
+        nl_configs,
+        model.roles_config or {},
+        to_nl_glyphs(glyphs, db),
+    )
     if not nl_resp:
         raise HTTPException(status_code=404, detail="No glyph match")
     attributes = nl_resp.get("attributes") or {}

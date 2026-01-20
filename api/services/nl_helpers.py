@@ -29,5 +29,24 @@ def to_simple_glyphs(rows: list[models.Glyph]) -> list[MetricsGlyph]:
     return [MetricsGlyph(g.name, g.node_type, g.semantic or {}, g.cortex) for g in rows]
 
 
-def to_nl_glyphs(rows: list[models.Glyph]) -> list[NLInferenceGlyph]:
-    return [NLInferenceGlyph(g.name, g.node_type, g.semantic or {}, g.cortex) for g in rows]
+def to_nl_glyphs(rows: list[models.Glyph], db: Session) -> list[NLInferenceGlyph]:
+    names = [g.name for g in rows]
+    seg_rows = (
+        db.query(models.Segment)
+        .filter(models.Segment.glyph_name.in_(names))
+        .all()
+    )
+    seg_map: dict[str, dict[tuple[int, int], bytes]] = {}
+    for seg in seg_rows:
+        entry = seg_map.setdefault(seg.glyph_name, {})
+        entry[(seg.layer, seg.seg_index)] = seg.vec
+    return [
+        NLInferenceGlyph(
+            g.name,
+            g.node_type,
+            g.semantic or {},
+            g.cortex,
+            segments=seg_map.get(g.name),
+        )
+        for g in rows
+    ]

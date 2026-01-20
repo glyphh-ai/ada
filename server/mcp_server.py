@@ -82,13 +82,22 @@ def _build_memory(
     return memory, encoder, glyph_map
 
 
-def _nl_glyphs(rows: Iterable[models.Glyph]) -> List[NLInferenceGlyph]:
+def _nl_glyphs(
+    rows: Iterable[models.Glyph],
+    segments: Dict[tuple[str, int, int], bytes],
+) -> List[NLInferenceGlyph]:
     return [
         NLInferenceGlyph(
             name=row.name,
             node_type=row.node_type,
             semantic=row.semantic or {},
             cortex=row.cortex,
+            segments={
+                (layer, seg_idx): vec
+                for (name, layer, seg_idx), vec in segments.items()
+                if name == row.name
+            }
+            or None,
         )
         for row in rows
     ]
@@ -149,11 +158,19 @@ class MCPServer:
                     .filter(models.Glyph.model_id == model.id)
                     .all()
                 )
+                seg_rows = (
+                    db.query(models.Segment)
+                    .filter(models.Segment.glyph_name.in_([g.name for g in glyph_rows]))
+                    .all()
+                )
+                seg_map: dict[tuple[str, int, int], bytes] = {}
+                for seg in seg_rows:
+                    seg_map[(seg.glyph_name, seg.layer, seg.seg_index)] = seg.vec
                 result = run_nl_query(
                     payload["text"],
                     nl_configs,
                     model.roles_config or {},
-                    _nl_glyphs(glyph_rows),
+                    _nl_glyphs(glyph_rows, seg_map),
                 )
                 if result:
                     return result

@@ -118,7 +118,7 @@ def run_model_tests(
         tests=tests_list,
         roles_config=model.roles_config or {},
         nl_configs=nl_configs,
-        glyphs=to_nl_glyphs(glyphs),
+        glyphs=to_nl_glyphs(glyphs, db),
     )
     return ModelTestsRunResponse(results=results)
 
