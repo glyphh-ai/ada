@@ -63,6 +63,10 @@ class Settings(BaseSettings):
         default=".glyphh/runtime_tokens.json",
         validation_alias=AliasChoices("GLYPH_API_TOKEN_STORE_PATH", "API_TOKEN_STORE_PATH"),
     )
+    listener_overrides_path: str = Field(
+        default=".glyphh/listener_overrides.json",
+        validation_alias=AliasChoices("GLYPH_LISTENER_OVERRIDES_PATH", "LISTENER_OVERRIDES_PATH"),
+    )
     redactions_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("GLYPH_REDACTIONS_ENABLED", "REDACTIONS_ENABLED"),

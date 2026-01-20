@@ -334,6 +334,18 @@ class ListenerControl(BaseModel):
     action: Literal["start", "stop"]
 
 
+class ListenerOfflineOverride(BaseModel):
+    enabled: bool | None = None
+    allowlisted: bool | None = None
+    throttle: int | None = None
+
+
+class ListenerOverridesResponse(BaseModel):
+    allowlist: list[str] = []
+    disabled: list[str] = []
+    rate_limits: dict = {}
+
+
 class SampleImportResult(BaseModel):
     category: str
     file: str

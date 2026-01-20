@@ -6,8 +6,9 @@ from fastapi import Body, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from ..core import models
 from ..core.db import SessionLocal
-from ..core.schemas import ListenerControl, ListenerLogs
+from ..core.schemas import ListenerControl, ListenerLogs, ListenerOfflineOverride, ListenerOverridesResponse
 from ..services.listener_runtime import ListenerManager
+from ..services.listener_overrides import load_overrides, update_listener_override
 from .router import api_router
 
 
@@ -18,6 +19,34 @@ router = api_router(tags=["listeners"])
 def listener_logs(listener_id: str, request: Request) -> ListenerLogs:
     manager: ListenerManager = request.app.state.listener_manager
     return ListenerLogs(listener_id=listener_id, entries=manager.get_logs(listener_id))
+
+
+@router.get("/listeners/offline/overrides", response_model=ListenerOverridesResponse)
+def get_listener_overrides() -> ListenerOverridesResponse:
+    payload = load_overrides()
+    return ListenerOverridesResponse(
+        allowlist=payload.get("allowlist") or [],
+        disabled=payload.get("disabled") or [],
+        rate_limits=payload.get("rate_limits") or {},
+    )
+
+
+@router.patch("/listeners/{listener_id}/offline", response_model=ListenerOverridesResponse)
+def update_listener_offline_override(
+    listener_id: str,
+    payload: ListenerOfflineOverride,
+) -> ListenerOverridesResponse:
+    updated = update_listener_override(
+        listener_id=listener_id,
+        enabled=payload.enabled,
+        allowlisted=payload.allowlisted,
+        throttle=payload.throttle,
+    )
+    return ListenerOverridesResponse(
+        allowlist=updated.get("allowlist") or [],
+        disabled=updated.get("disabled") or [],
+        rate_limits=updated.get("rate_limits") or {},
+    )
 
 
 @router.get("/listeners/{listener_id}/logs/stream")
@@ -85,6 +114,8 @@ async def import_listener_data(
     manager: ListenerManager = request.app.state.listener_manager
     if not manager:
         raise HTTPException(status_code=500, detail="Listener manager unavailable")
+    if not manager.is_ingest_allowed(listener_id):
+        raise HTTPException(status_code=403, detail="Listener is disabled or not allowlisted")
     try:
         if not isinstance(payload, list):
             raise HTTPException(status_code=400, detail="Payload must be an array of records")
@@ -108,6 +139,8 @@ async def ingest_listener_data(
     manager: ListenerManager = request.app.state.listener_manager
     if not manager:
         raise HTTPException(status_code=500, detail="Listener manager unavailable")
+    if not manager.is_ingest_allowed(listener_id):
+        raise HTTPException(status_code=403, detail="Listener is disabled or not allowlisted")
     try:
         if isinstance(payload, list):
             records = payload

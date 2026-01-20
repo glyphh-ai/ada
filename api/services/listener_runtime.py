@@ -19,6 +19,7 @@ from ..core.db import SessionLocal
 from ..core.schemas import ConceptInput
 from .history import persist_history_vectors
 from .ingest import ingest_concepts
+from .listener_overrides import load_overrides
 from .usage_metrics import UsageTracker
 from sqlalchemy.orm import joinedload
 
@@ -92,6 +93,7 @@ class ListenerManager:
             ws_logger.setLevel(logging.DEBUG)
             ws_logger.addHandler(self._ws_log_handler)
         self._log_subscribers: Dict[str, list[asyncio.Queue[Dict[str, str]]]] = defaultdict(list)
+        self._overrides: Dict[str, Any] = load_overrides()
 
     async def start(self) -> None:
         if self._monitor_task:
@@ -113,6 +115,7 @@ class ListenerManager:
     async def _monitor_loop(self) -> None:
         while not self._shutdown.is_set():
             try:
+                self._overrides = await asyncio.to_thread(load_overrides)
                 configs = await asyncio.to_thread(self._load_listener_configs_sync)
                 self._configs = configs
                 await self._sync_tasks(configs)
@@ -670,6 +673,8 @@ class ListenerManager:
                 query = query.filter(models.WebSocketListener.enabled == 1)
             listeners = query.all()
             for listener in listeners:
+                if not self._is_listener_allowed(listener.id):
+                    continue
                 map_config = None
                 max_version = listener.updated_at.timestamp() if listener.updated_at else 0.0
                 if listener.map_id:
@@ -686,6 +691,9 @@ class ListenerManager:
                     throttle = max(1, listener.throttle or 1)
                     if throttle <= 0:
                         throttle = 1
+                    override = (self._overrides.get("rate_limits") or {}).get(listener.id)
+                    if isinstance(override, dict) and override.get("throttle"):
+                        throttle = max(1, int(override["throttle"]))
                     map_config = MapConfig(
                         id=map_obj.id,
                         model_id=map_obj.target_profile.generated_from_model_id,
@@ -712,6 +720,18 @@ class ListenerManager:
             return configs
         finally:
             db.close()
+
+    def _is_listener_allowed(self, listener_id: str) -> bool:
+        allowlist = set(self._overrides.get("allowlist") or [])
+        disabled = set(self._overrides.get("disabled") or [])
+        if allowlist and listener_id not in allowlist:
+            return False
+        if listener_id in disabled:
+            return False
+        return True
+
+    def is_ingest_allowed(self, listener_id: str) -> bool:
+        return self._is_listener_allowed(listener_id)
 
     def _ensure_config(self, listener_id: str) -> ListenerConfig | None:
         config = self._configs.get(listener_id)
