@@ -9,7 +9,8 @@ pgvector
 numpy
 alembic
 openai
-torch==2.3.1+cpu
+torch==2.3.1+cpu; platform_system != "Darwin"
+torch==2.3.1; platform_system == "Darwin"
 sentence-transformers
 prometheus-client
 opentelemetry-api
