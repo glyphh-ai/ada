@@ -59,8 +59,6 @@ def _write_json(path: Path, value: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Activate a Glyphh runtime via activation key.")
     parser.add_argument("--platform-url", default=os.getenv("GLYPH_PLATFORM_API_BASE"))
-    parser.add_argument("--org-id", required=True)
-    parser.add_argument("--runtime-id", required=True)
     parser.add_argument("--activation-key", required=True)
     parser.add_argument("--endpoint-url", default=None)
     parser.add_argument("--device-fingerprint", default=None)
@@ -81,8 +79,6 @@ def main() -> int:
     fingerprint = args.device_fingerprint or _default_fingerprint()
     activation_url = args.platform_url.rstrip("/") + "/runtime/activate"
     payload = {
-        "org_id": args.org_id,
-        "runtime_id": args.runtime_id,
         "device_fingerprint": fingerprint,
         "activation_key": args.activation_key,
     }

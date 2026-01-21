@@ -179,15 +179,9 @@ def ensure_runtime_license(settings) -> None:
     else:
         print("License not found. Enter an activation key to continue.")
 
-    platform_url = settings.platform_api_base or input("Platform API base URL: ").strip()
+    platform_url = settings.platform_api_base
     if not platform_url:
         raise RuntimeError("Platform API base URL is required for activation.")
-    org_id = input("Org ID: ").strip()
-    if not org_id:
-        raise RuntimeError("Org ID is required for activation.")
-    runtime_id = input("Runtime ID: ").strip()
-    if not runtime_id:
-        raise RuntimeError("Runtime ID is required for activation.")
     activation_key = input("Activation key: ").strip()
     if not activation_key:
         raise RuntimeError("Activation key is required for activation.")
@@ -195,8 +189,6 @@ def ensure_runtime_license(settings) -> None:
     activation_url = platform_url.rstrip("/") + "/runtime/activate"
 
     payload = {
-        "org_id": org_id,
-        "runtime_id": runtime_id,
         "device_fingerprint": fingerprint,
         "activation_key": activation_key,
     }
@@ -211,4 +203,4 @@ def ensure_runtime_license(settings) -> None:
 
     _write_json(license_path, license_file)
     _write_text(secret_path, runtime_secret)
-    print(f"License saved to {license_path}")
+    print("Activation complete.")

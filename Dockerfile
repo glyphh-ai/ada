@@ -12,6 +12,9 @@ COPY glyphh-runtime /app/glyphh-runtime
 ARG GLYPH_SDK_WHEEL_URL
 ARG HF_TOKEN
 ENV HUGGINGFACE_HUB_TOKEN=$HF_TOKEN
+ENV PIP_DEFAULT_TIMEOUT=120
+ENV PIP_RETRIES=10
+ENV PIP_PROGRESS_BAR=off
 RUN pip install --no-cache-dir -r /app/glyphh-runtime/requirements.txt \
   && if [ -n "$GLYPH_SDK_WHEEL_URL" ]; then pip install --no-cache-dir "$GLYPH_SDK_WHEEL_URL"; fi \
   && pip install --no-cache-dir -e /app/glyphh-sdk \
