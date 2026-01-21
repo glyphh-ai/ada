@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..core import models
 from ..core.db import get_db
 from ..core.schemas import QueryRequest, QueryResult, GlyphSummary
+from ..services.auth_runtime import enforce_model_access, require_scopes
 from ..services.usage_runtime import record_usage
 from .router import api_router
 
@@ -21,6 +22,9 @@ def query(
     request: Request,
     db: Session = Depends(get_db),
 ) -> QueryResult:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["query:read"])
+    enforce_model_access(claims, payload.model_id)
     model = db.get(models.Model, payload.model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")

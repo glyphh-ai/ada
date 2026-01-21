@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from ..core import models
 from ..core.db import SessionLocal
 from ..core.schemas import ListenerControl, ListenerLogs, ListenerOfflineOverride, ListenerOverridesResponse
+from ..services.auth_runtime import require_scopes
 from ..services.listener_runtime import ListenerManager
 from ..services.listener_overrides import load_overrides, update_listener_override
 from .router import api_router
@@ -17,12 +18,16 @@ router = api_router(tags=["listeners"])
 
 @router.get("/listeners/{listener_id}/logs", response_model=ListenerLogs)
 def listener_logs(listener_id: str, request: Request) -> ListenerLogs:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["listeners:read"])
     manager: ListenerManager = request.app.state.listener_manager
     return ListenerLogs(listener_id=listener_id, entries=manager.get_logs(listener_id))
 
 
 @router.get("/listeners/offline/overrides", response_model=ListenerOverridesResponse)
-def get_listener_overrides() -> ListenerOverridesResponse:
+def get_listener_overrides(request: Request) -> ListenerOverridesResponse:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["listeners:read"])
     payload = load_overrides()
     return ListenerOverridesResponse(
         allowlist=payload.get("allowlist") or [],
@@ -35,7 +40,10 @@ def get_listener_overrides() -> ListenerOverridesResponse:
 def update_listener_offline_override(
     listener_id: str,
     payload: ListenerOfflineOverride,
+    request: Request,
 ) -> ListenerOverridesResponse:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["listeners:write"])
     updated = update_listener_override(
         listener_id=listener_id,
         enabled=payload.enabled,
@@ -55,6 +63,8 @@ async def listener_logs_stream(
     request: Request,
     level: str | None = Query(None),
 ) -> StreamingResponse:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["listeners:read"])
     manager: ListenerManager = request.app.state.listener_manager
     normalized_level = level.lower() if level else None
     queue, unsubscribe = manager.subscribe_logs(listener_id)
@@ -89,6 +99,8 @@ async def control_listener(
     payload: ListenerControl,
     request: Request,
 ):
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["listeners:write"])
     db = SessionLocal()
     try:
         listener = db.get(models.WebSocketListener, listener_id)
@@ -111,6 +123,8 @@ async def import_listener_data(
     request: Request,
     payload: list[dict] = Body(...),
 ):
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["listeners:write"])
     manager: ListenerManager = request.app.state.listener_manager
     if not manager:
         raise HTTPException(status_code=500, detail="Listener manager unavailable")
@@ -136,6 +150,8 @@ async def ingest_listener_data(
     request: Request,
     payload: dict | list[dict] = Body(...),
 ):
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["listeners:write"])
     manager: ListenerManager = request.app.state.listener_manager
     if not manager:
         raise HTTPException(status_code=500, detail="Listener manager unavailable")

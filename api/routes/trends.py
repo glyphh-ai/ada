@@ -5,7 +5,7 @@ import uuid
 from typing import Any, List
 
 import numpy as np
-from fastapi import Depends, HTTPException, Query, Response, status
+from fastapi import Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
 
 from ..core import models
@@ -22,6 +22,7 @@ from ..core.schemas import (
     TrendListResponse,
     TrendResponse,
 )
+from ..services.auth_runtime import enforce_model_access, require_scopes
 from ..services.charts import build_historical_chart_data
 from ..services.predictions import compute_prediction_response
 from ..services.trends_helpers import get_trend_or_404, list_trend_charts
@@ -37,8 +38,12 @@ def analysis_trends(
     roles: List[str] | None = Query(None),
     limit: int = Query(200, ge=10, le=2000),
     trend_id: str | None = Query(None),
+    request: Request,
     db: Session = Depends(get_db),
 ) -> TrendResponse:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["trends:read"])
+    enforce_model_access(claims, model_id)
     model = db.get(models.Model, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -112,8 +117,12 @@ def analysis_trends(
 @router.post("/analysis/predictions", response_model=PredictionResponse)
 def analysis_predictions(
     payload: PredictionRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> PredictionResponse:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["trends:read"])
+    enforce_model_access(claims, payload.model_id)
     model = db.get(models.Model, payload.model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -123,8 +132,12 @@ def analysis_predictions(
 @router.post("/analysis/trend-data", response_model=ChartData)
 def analysis_trend_data(
     payload: HistoricalTrendChartRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> ChartData:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["trends:read"])
+    enforce_model_access(claims, payload.model_id)
     model = db.get(models.Model, payload.model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -134,8 +147,12 @@ def analysis_trend_data(
 @router.post("/trends", response_model=TrendDefinitionRead)
 def create_trend(
     payload: TrendDefinitionPayload,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> TrendDefinitionRead:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["trends:write"])
+    enforce_model_access(claims, payload.model_id)
     model = db.get(models.Model, payload.model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -164,9 +181,13 @@ def create_trend(
 @router.delete("/trends/{trend_id}")
 def delete_trend(
     trend_id: str,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> Response:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["trends:write"])
     trend = get_trend_or_404(db, trend_id)
+    enforce_model_access(claims, trend.model_id)
     db.query(models.TrendChart).filter(models.TrendChart.trend_id == trend_id).delete(
         synchronize_session=False
     )
@@ -185,15 +206,20 @@ def delete_trend(
 def update_trend(
     trend_id: str,
     payload: TrendDefinitionPayload,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> TrendDefinitionRead:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["trends:write"])
     trend = db.get(models.TrendDefinition, trend_id)
     if not trend:
         raise HTTPException(status_code=404, detail="Trend not found")
+    enforce_model_access(claims, trend.model_id)
     if payload.model_id != trend.model_id:
         next_model = db.get(models.Model, payload.model_id)
         if not next_model:
             raise HTTPException(status_code=404, detail="Model not found")
+        enforce_model_access(claims, payload.model_id)
         trend.model_id = payload.model_id
         db.query(models.GlyphTrend).filter(
             models.GlyphTrend.trend_definition_id == trend_id
@@ -226,9 +252,16 @@ def update_trend(
 
 @router.get("/trends", response_model=TrendListResponse)
 def list_trends(
+    request: Request,
     db: Session = Depends(get_db),
 ) -> TrendListResponse:
-    items = db.query(models.TrendDefinition).order_by(models.TrendDefinition.updated_at.desc()).all()
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["trends:read"])
+    model_filter = claims.get("model_id")
+    query = db.query(models.TrendDefinition)
+    if model_filter:
+        query = query.filter(models.TrendDefinition.model_id == model_filter)
+    items = query.order_by(models.TrendDefinition.updated_at.desc()).all()
     return TrendListResponse(
         items=[
             TrendDefinitionRead(
@@ -252,11 +285,15 @@ def list_trends(
 @router.get("/trends/{trend_id}", response_model=TrendDefinitionRead)
 def get_trend(
     trend_id: str,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> TrendDefinitionRead:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["trends:read"])
     trend = db.get(models.TrendDefinition, trend_id)
     if not trend:
         raise HTTPException(status_code=404, detail="Trend not found")
+    enforce_model_access(claims, trend.model_id)
     return TrendDefinitionRead(
         id=trend.id,
         created_at=trend.created_at,
@@ -275,9 +312,13 @@ def get_trend(
 @router.post("/trends/{trend_id}/rebuild")
 def rebuild_trend_history(
     trend_id: str,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["trends:write"])
     trend = get_trend_or_404(db, trend_id)
+    enforce_model_access(claims, trend.model_id)
     roles = trend.roles or []
     if not roles:
         return {"status": "no_roles", "inserted": 0}

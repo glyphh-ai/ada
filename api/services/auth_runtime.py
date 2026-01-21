@@ -119,6 +119,7 @@ def build_runtime_auth_middleware(settings):
             in ("/health", "/api/v1/health", "/openapi.json", settings.metrics_path)
             or request.url.path.startswith("/docs")
             or request.url.path.startswith("/redoc")
+            or request.url.path.startswith("/api/v1/auth")
         ):
             return await call_next(request)
         license_ok, license_state = license_status(settings)

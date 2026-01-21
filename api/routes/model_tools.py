@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from ..core import models
@@ -17,6 +17,7 @@ from ..core.schemas import (
     SimilarityReportRequest,
     SimilarityReportResponse,
 )
+from ..services.auth_runtime import enforce_model_access, require_scopes
 from ..services.similarity import build_similarity_report
 from ..services.temporal_sidecar import ensure_temporal_sidecar_model
 from ..services.ingest import ingest_concepts
@@ -33,8 +34,12 @@ router = api_router(tags=["model-tools"])
 @router.get("/models/{model_id}/metrics")
 def model_metrics(
     model_id: str,
+    request: Request,
     db: Session = Depends(get_db),
 ):
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["model:read"])
+    enforce_model_access(claims, model_id)
     model = db.get(models.Model, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -45,8 +50,12 @@ def model_metrics(
 @router.get("/models/{model_id}/tests", response_model=ModelTestsResponse)
 def get_model_tests(
     model_id: str,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> ModelTestsResponse:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["model:read"])
+    enforce_model_access(claims, model_id)
     model = db.get(models.Model, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -72,8 +81,12 @@ def get_model_tests(
 def upsert_model_tests(
     model_id: str,
     payload: ModelTestsPayload,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> ModelTestsResponse:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["model:write"])
+    enforce_model_access(claims, model_id)
     model = db.get(models.Model, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -102,8 +115,12 @@ def upsert_model_tests(
 @router.post("/models/{model_id}/tests/run", response_model=ModelTestsRunResponse)
 def run_model_tests(
     model_id: str,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> ModelTestsRunResponse:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["model:write"])
+    enforce_model_access(claims, model_id)
     model = db.get(models.Model, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -127,8 +144,12 @@ def run_model_tests(
 def model_similarity_report(
     model_id: str,
     payload: SimilarityReportRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> SimilarityReportResponse:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["model:read"])
+    enforce_model_access(claims, model_id)
     model = db.get(models.Model, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -158,8 +179,12 @@ def model_similarity_report(
 def ingest_similarity_sidecar(
     model_id: str,
     payload: SimilarityIngestRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["model:write"])
+    enforce_model_access(claims, model_id)
     primary_model = db.get(models.Model, model_id)
     if not primary_model:
         raise HTTPException(status_code=404, detail="Model not found")

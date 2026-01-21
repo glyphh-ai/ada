@@ -7,7 +7,7 @@ import threading
 import uuid
 from typing import Any
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
@@ -25,6 +25,7 @@ from ..core.schemas import (
     TrendChartPayload,
     TrendChartRead,
 )
+from ..services.auth_runtime import enforce_model_access, require_scopes
 from ..services.charts import build_chart_data
 from ..services.predictions import compute_prediction_response
 from ..services.trends_helpers import get_chart_or_404, get_trend_or_404, list_trend_charts, parse_iso_timestamp
@@ -69,9 +70,13 @@ def _chart_data_stream_generator(
 @router.get("/trends/{trend_id}/charts", response_model=list[TrendChartRead])
 def list_trend_charts_endpoint(
     trend_id: str,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> list[TrendChartRead]:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["charts:read"])
     trend = get_trend_or_404(db, trend_id)
+    enforce_model_access(claims, trend.model_id)
     return list_trend_charts(db, trend.id)
 
 
@@ -79,12 +84,16 @@ def list_trend_charts_endpoint(
 def get_trend_chart_data(
     trend_id: str,
     chart_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     stream: bool = Query(False),
     start: str | None = Query(None),
     end: str | None = Query(None),
 ):
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["charts:read"])
     trend = get_trend_or_404(db, trend_id)
+    enforce_model_access(claims, trend.model_id)
     chart = get_chart_or_404(db, trend_id, chart_id)
     model = db.get(models.Model, trend.model_id)
     if not model:
@@ -121,9 +130,13 @@ def get_trend_chart_data(
 def preview_trend_chart_data(
     trend_id: str,
     payload: ChartPreviewRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> ChartData:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["charts:write"])
     trend = get_trend_or_404(db, trend_id)
+    enforce_model_access(claims, trend.model_id)
     if payload.model_id != trend.model_id:
         raise HTTPException(status_code=400, detail="Model mismatch")
     model = db.get(models.Model, payload.model_id)
@@ -163,9 +176,13 @@ def capture_trend_snapshot(
     trend_id: str,
     chart_id: str,
     payload: SnapshotCaptureRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> SnapshotCaptureResponse:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["charts:write"])
     trend = get_trend_or_404(db, trend_id)
+    enforce_model_access(claims, trend.model_id)
     chart = get_chart_or_404(db, trend_id, chart_id)
     model = db.get(models.Model, trend.model_id)
     if not model:
@@ -281,9 +298,13 @@ def capture_trend_snapshot(
 def create_trend_chart(
     trend_id: str,
     payload: TrendChartPayload,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> TrendChartRead:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["charts:write"])
     trend = get_trend_or_404(db, trend_id)
+    enforce_model_access(claims, trend.model_id)
     if len(payload.y_axes) > 4:
         raise HTTPException(status_code=400, detail="Up to 4 y-axis definitions supported")
     chart = models.TrendChart(
@@ -327,9 +348,13 @@ def update_trend_chart(
     trend_id: str,
     chart_id: str,
     payload: TrendChartPayload,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> TrendChartRead:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["charts:write"])
     trend = get_trend_or_404(db, trend_id)
+    enforce_model_access(claims, trend.model_id)
     chart = db.get(models.TrendChart, chart_id)
     if not chart or chart.trend_id != trend.id:
         raise HTTPException(status_code=404, detail="Chart not found")
@@ -370,9 +395,13 @@ def update_trend_chart(
 def delete_trend_chart(
     trend_id: str,
     chart_id: str,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["charts:write"])
     trend = get_trend_or_404(db, trend_id)
+    enforce_model_access(claims, trend.model_id)
     chart = db.get(models.TrendChart, chart_id)
     if not chart or chart.trend_id != trend.id:
         raise HTTPException(status_code=404, detail="Chart not found")
