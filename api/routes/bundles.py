@@ -16,8 +16,8 @@ router = api_router(tags=["bundles"])
 @router.post("/bundles/import", response_model=SampleImportResponse)
 def import_bundle_route(
     payload: SampleUploadBundle,
-    clear_existing: bool = Query(True),
     request: Request,
+    clear_existing: bool = Query(True),
     db: Session = Depends(get_db),
 ) -> SampleImportResponse:
     claims = getattr(request.state, "runtime_claims", {}) or {}

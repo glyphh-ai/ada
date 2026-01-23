@@ -47,8 +47,8 @@ jobs:
           mkdir -p dist
           TAG="${GITHUB_REF_NAME}"
           SDK_REF="${RUNTIME_SDK_REF:-main}"
-          WORK_DIR="$(pwd)"
-          BUILD_DIR="${WORK_DIR}/dist/glyphh-runtime-${TAG}-${PLATFORM_TAG}"
+          export WORK_DIR="$(pwd)"
+          export BUILD_DIR="${WORK_DIR}/dist/glyphh-runtime-${TAG}-${PLATFORM_TAG}"
           mkdir -p "${BUILD_DIR}"
 
           python -m venv --copies "${BUILD_DIR}/venv"

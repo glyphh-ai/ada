@@ -35,10 +35,10 @@ router = api_router(tags=["trends"])
 @router.get("/analysis/trends", response_model=TrendResponse)
 def analysis_trends(
     model_id: str,
+    request: Request,
     roles: List[str] | None = Query(None),
     limit: int = Query(200, ge=10, le=2000),
     trend_id: str | None = Query(None),
-    request: Request,
     db: Session = Depends(get_db),
 ) -> TrendResponse:
     claims = getattr(request.state, "runtime_claims", {}) or {}
