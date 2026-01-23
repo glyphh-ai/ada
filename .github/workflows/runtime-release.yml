@@ -121,7 +121,11 @@ jobs:
           fi
 
           tar -czf "dist/glyphh-runtime-${TAG}-${PLATFORM_TAG}.tar.gz" -C "dist" "glyphh-runtime-${TAG}-${PLATFORM_TAG}"
-          (cd dist && zip -r "glyphh-runtime-${TAG}-${PLATFORM_TAG}.zip" "glyphh-runtime-${TAG}-${PLATFORM_TAG}")
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            powershell -NoProfile -Command "Compress-Archive -Path \"dist/glyphh-runtime-${TAG}-${PLATFORM_TAG}\" -DestinationPath \"dist/glyphh-runtime-${TAG}-${PLATFORM_TAG}.zip\""
+          else
+            (cd dist && zip -r "glyphh-runtime-${TAG}-${PLATFORM_TAG}.zip" "glyphh-runtime-${TAG}-${PLATFORM_TAG}")
+          fi
 
       - name: Mirror release to glyphh-releases
         env:
