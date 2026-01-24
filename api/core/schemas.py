@@ -278,6 +278,14 @@ class GlyphEdgeSummary(BaseModel):
     deltas: list[dict] | None = None
 
 
+class LineageWindowResponse(BaseModel):
+    name: str
+    previous: dict | None = None
+    current: dict | None = None
+    next: dict | None = None
+    deltas: list[dict] = []
+
+
 class NLChatResponse(BaseModel):
     text: str
     glyph_edges: GlyphEdgeSummary | None = None

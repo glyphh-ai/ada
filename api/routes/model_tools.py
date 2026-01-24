@@ -16,12 +16,14 @@ from ..core.schemas import (
     SimilarityIngestRequest,
     SimilarityReportRequest,
     SimilarityReportResponse,
+    LineageWindowResponse,
 )
 from ..services.auth_runtime import enforce_model_access, require_scopes
 from ..services.similarity import build_similarity_report
 from ..services.temporal_sidecar import ensure_temporal_sidecar_model
 from ..services.ingest import ingest_concepts
 from ..services.nl_helpers import build_nl_configs, to_nl_glyphs, to_simple_glyphs
+from ..services.lineage import get_lineage_window
 from .router import api_router
 from glyphh.encoder import Encoder
 from glyphh.metrics import compute_model_metrics
@@ -217,3 +219,21 @@ def ingest_similarity_sidecar(
             attributes["notes"] = entry.notes
         concepts.append(ConceptInput(name=name, attributes=attributes, node_type="similarity"))
     return ingest_concepts(sidecar_model, concepts, payload.clear_existing, db)
+
+
+@router.get("/models/{model_id}/lineage", response_model=LineageWindowResponse)
+def get_model_lineage(
+    model_id: str,
+    name: str,
+    observed_at: str | None = None,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> LineageWindowResponse:
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["model:read"])
+    enforce_model_access(claims, model_id)
+    model = db.get(models.Model, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    payload = get_lineage_window(db, model_id=model.id, name=name, observed_at=observed_at)
+    return LineageWindowResponse(**payload)
