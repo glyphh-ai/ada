@@ -17,6 +17,8 @@ TEMPORAL_FIELDS = {
 def validate_roles_config(roles_config: dict) -> dict:
     if not isinstance(roles_config, dict):
         raise HTTPException(status_code=400, detail="roles_config must be an object")
+    roles_config = dict(roles_config)
+    roles_config.pop("vector_dim", None)
     layers = roles_config.get("layers")
     if not isinstance(layers, list) or not layers:
         raise HTTPException(status_code=400, detail="roles_config.layers must be a non-empty array")
