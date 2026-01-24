@@ -225,8 +225,8 @@ def ingest_similarity_sidecar(
 def get_model_lineage(
     model_id: str,
     name: str,
-    observed_at: str | None = None,
     request: Request,
+    observed_at: str | None = None,
     db: Session = Depends(get_db),
 ) -> LineageWindowResponse:
     claims = getattr(request.state, "runtime_claims", {}) or {}
