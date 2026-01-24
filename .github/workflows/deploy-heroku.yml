@@ -1,0 +1,48 @@
+name: Deploy Runtime to Heroku
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      promote_to_production:
+        description: "Promote latest staging slug to production"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Heroku CLI
+        run: curl https://cli-assets.heroku.com/install.sh | sh
+
+      - name: Deploy to Heroku (staging)
+        uses: akhileshns/heroku-deploy@v3.13.15
+        with:
+          heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
+          heroku_app_name: ${{ secrets.RUNTIME_HEROKU_APP_NAME_STAGING }}
+          heroku_email: ${{ secrets.HEROKU_EMAIL }}
+          usedocker: false
+          dontautocreate: true
+
+  promote-production:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.promote_to_production == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Heroku CLI
+        run: curl https://cli-assets.heroku.com/install.sh | sh
+
+      - name: Promote staging slug to production
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          STAGING_APP: ${{ secrets.RUNTIME_HEROKU_APP_NAME_STAGING }}
+        run: |
+          heroku pipelines:promote -a "${STAGING_APP}"
