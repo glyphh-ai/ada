@@ -44,7 +44,10 @@ def build_viewer_payload(
 
     seg_rows = (
         db.query(models.Segment)
-        .filter(models.Segment.glyph_name.in_(names))
+        .filter(
+            models.Segment.model_id == model_id,
+            models.Segment.glyph_name.in_(names),
+        )
         .all()
     )
 
@@ -247,7 +250,10 @@ def build_viewer_payload(
     if glyph_names:
         edge_rows = (
             db.query(models.Edge)
-            .filter(models.Edge.source.in_(glyph_names))
+            .filter(
+                models.Edge.model_id == model_id,
+                models.Edge.source.in_(glyph_names),
+            )
             .filter(models.Edge.type.in_(temporal_edge_types))
             .all()
         )

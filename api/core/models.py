@@ -206,19 +206,23 @@ class Segment(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     glyph_name = Column(String, ForeignKey("glyphs.name"), nullable=False)
+    model_id = Column(String, ForeignKey("models.id"), nullable=False, index=True)
     layer = Column(Integer, nullable=False)
     seg_index = Column(Integer, nullable=False)
     vec = Column(BYTEA, nullable=False)
 
     glyph = relationship("Glyph", back_populates="segments")
 
-    __table_args__ = (UniqueConstraint("glyph_name", "layer", "seg_index", name="uq_segment"),)
+    __table_args__ = (
+        UniqueConstraint("model_id", "glyph_name", "layer", "seg_index", name="uq_segment"),
+    )
 
 
 class Edge(Base):
     __tablename__ = "edges"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    model_id = Column(String, ForeignKey("models.id"), nullable=False, index=True)
     source = Column(String, nullable=False)
     target = Column(String, nullable=False)
     type = Column(String, nullable=False)

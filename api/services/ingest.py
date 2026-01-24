@@ -43,16 +43,28 @@ def _clear_model_glyphs(model: models.Model, db: Session) -> None:
     chunk_size = 1000
     for i in range(0, len(glyph_names), chunk_size):
         chunk = glyph_names[i : i + chunk_size]
-        db.query(models.Edge).filter(models.Edge.source.in_(chunk)).delete(
+        db.query(models.Edge).filter(
+            models.Edge.model_id == model.id,
+            models.Edge.source.in_(chunk),
+        ).delete(
             synchronize_session=False
         )
-        db.query(models.Embedding).filter(models.Embedding.glyph_name.in_(chunk)).delete(
+        db.query(models.Embedding).filter(
+            models.Embedding.model_id == model.id,
+            models.Embedding.glyph_name.in_(chunk),
+        ).delete(
             synchronize_session=False
         )
-        db.query(models.Segment).filter(models.Segment.glyph_name.in_(chunk)).delete(
+        db.query(models.Segment).filter(
+            models.Segment.model_id == model.id,
+            models.Segment.glyph_name.in_(chunk),
+        ).delete(
             synchronize_session=False
         )
-        db.query(models.Glyph).filter(models.Glyph.name.in_(chunk)).delete(
+        db.query(models.Glyph).filter(
+            models.Glyph.model_id == model.id,
+            models.Glyph.name.in_(chunk),
+        ).delete(
             synchronize_session=False
         )
     db.query(models.GlyphTrend).filter(models.GlyphTrend.model_id == model.id).delete(
@@ -170,9 +182,18 @@ def ingest_concepts(model: models.Model, concepts: List[ConceptInput], clear_exi
 
         existing = db.get(models.Glyph, identity_name)
         if existing:
-            db.query(models.Edge).filter(models.Edge.source == identity_name).delete()
-            db.query(models.Embedding).filter(models.Embedding.glyph_name == identity_name).delete()
-            db.query(models.Segment).filter(models.Segment.glyph_name == identity_name).delete()
+            db.query(models.Edge).filter(
+                models.Edge.model_id == model.id,
+                models.Edge.source == identity_name,
+            ).delete()
+            db.query(models.Embedding).filter(
+                models.Embedding.model_id == model.id,
+                models.Embedding.glyph_name == identity_name,
+            ).delete()
+            db.query(models.Segment).filter(
+                models.Segment.model_id == model.id,
+                models.Segment.glyph_name == identity_name,
+            ).delete()
             db.delete(existing)
             db.flush()
 
@@ -202,6 +223,7 @@ def ingest_concepts(model: models.Model, concepts: List[ConceptInput], clear_exi
                 db.add(
                     models.Segment(
                         glyph_name=identity_name,
+                        model_id=model.id,
                         layer=li,
                         seg_index=si,
                         vec=seg_vec.tobytes(),
@@ -211,6 +233,7 @@ def ingest_concepts(model: models.Model, concepts: List[ConceptInput], clear_exi
             for edge in concept.edges:
                 db.add(
                     models.Edge(
+                        model_id=model.id,
                         source=identity_name,
                         target=edge.target,
                         type=edge.type,

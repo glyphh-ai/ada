@@ -127,7 +127,7 @@ async def nl_chat(
         payload.text or "",
         nl_configs,
         model.roles_config or {},
-        to_nl_glyphs(glyphs, db),
+        to_nl_glyphs(glyphs, db, model_id=model.id),
     )
     if not nl_resp:
         raise HTTPException(status_code=404, detail="No glyph match")
