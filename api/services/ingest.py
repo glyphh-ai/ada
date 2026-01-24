@@ -140,6 +140,17 @@ def ingest_concepts(model: models.Model, concepts: List[ConceptInput], clear_exi
     if clear_existing:
         _clear_model_glyphs(model, db)
 
+    name_versions: dict[str, list[str | None]] = defaultdict(list)
+    for concept in concepts:
+        observed_at_raw = (concept.attributes or {}).get("observed_at")
+        name_versions[concept.name].append(observed_at_raw)
+    for name, observed_list in name_versions.items():
+        if len(observed_list) > 1 and any(not value for value in observed_list):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Concept '{name}' must include observed_at for all versions.",
+            )
+
     seen_names: set[str] = set()
     for concept in concepts:
         observed_at_raw = (concept.attributes or {}).get("observed_at")
