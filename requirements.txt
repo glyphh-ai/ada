@@ -5,6 +5,7 @@ sqlalchemy
 pydantic-settings
 email-validator
 psycopg[binary]
+psycopg2-binary
 pgvector
 numpy
 alembic
