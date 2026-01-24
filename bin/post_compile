@@ -53,3 +53,16 @@ PY
 else
   echo "GLYPH_SDK_WHEEL_URL not set; skipping SDK wheel install."
 fi
+
+APP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$APP_ROOT"
+
+if [[ ! -f alembic.ini ]]; then
+  echo "Missing alembic.ini; cannot run migrations."
+  exit 1
+fi
+
+export PYTHONPATH="$APP_ROOT"
+
+echo "Running runtime migrations..."
+alembic -c alembic.ini upgrade head
