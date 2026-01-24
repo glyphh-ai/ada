@@ -28,7 +28,7 @@ jobs:
         uses: akhileshns/heroku-deploy@v3.13.15
         with:
           heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
-          heroku_app_name: ${{ secrets.RUNTIME_HEROKU_APP_NAME_STAGING }}
+          heroku_app_name: ${{ secrets.HEROKU_APP_NAME_STAGING }}
           heroku_email: ${{ secrets.HEROKU_EMAIL }}
           usedocker: false
           dontautocreate: true
@@ -43,6 +43,6 @@ jobs:
       - name: Promote staging slug to production
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-          STAGING_APP: ${{ secrets.RUNTIME_HEROKU_APP_NAME_STAGING }}
+          STAGING_APP: ${{ secrets.HEROKU_APP_NAME_STAGING }}
         run: |
           heroku pipelines:promote -a "${STAGING_APP}"
