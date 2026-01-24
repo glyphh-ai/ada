@@ -25,6 +25,12 @@ from ..core.schemas import (
 logger = logging.getLogger(__name__)
 
 
+def _concept_identity(name: str, observed_at: str | None) -> str:
+    if not observed_at:
+        return name
+    return f"{name}@{observed_at}"
+
+
 def _clear_model_glyphs(model: models.Model, db: Session) -> None:
     glyph_names = [
         name
@@ -136,29 +142,31 @@ def ingest_concepts(model: models.Model, concepts: List[ConceptInput], clear_exi
 
     seen_names: set[str] = set()
     for concept in concepts:
-        if concept.name in seen_names:
+        observed_at_raw = (concept.attributes or {}).get("observed_at")
+        identity_name = _concept_identity(concept.name, observed_at_raw)
+        if identity_name in seen_names:
             continue
-        seen_names.add(concept.name)
+        seen_names.add(identity_name)
 
         attributes = dict(concept.attributes or {})
         if "observed_at" not in attributes:
             attributes["observed_at"] = dt.datetime.utcnow().isoformat()
 
-        glyph = encoder.encode(concept.name, attributes, node_type=concept.node_type)
+        glyph = encoder.encode(identity_name, attributes, node_type=concept.node_type)
         if concept.taxonomy:
             glyph.semantic = dict(glyph.semantic)
             glyph.semantic["taxonomy"] = concept.taxonomy
 
-        existing = db.get(models.Glyph, concept.name)
+        existing = db.get(models.Glyph, identity_name)
         if existing:
-            db.query(models.Edge).filter(models.Edge.source == concept.name).delete()
-            db.query(models.Embedding).filter(models.Embedding.glyph_name == concept.name).delete()
-            db.query(models.Segment).filter(models.Segment.glyph_name == concept.name).delete()
+            db.query(models.Edge).filter(models.Edge.source == identity_name).delete()
+            db.query(models.Embedding).filter(models.Embedding.glyph_name == identity_name).delete()
+            db.query(models.Segment).filter(models.Segment.glyph_name == identity_name).delete()
             db.delete(existing)
             db.flush()
 
         g_row = models.Glyph(
-            name=concept.name,
+            name=identity_name,
             model_id=model.id,
             node_type=concept.node_type,
             semantic=glyph.semantic,
@@ -170,7 +178,7 @@ def ingest_concepts(model: models.Model, concepts: List[ConceptInput], clear_exi
         embedding_vec = glyph.global_cortex.astype(float).tolist()
         db.add(
             models.Embedding(
-                glyph_name=concept.name,
+                glyph_name=identity_name,
                 model_id=model.id,
                 embedding=embedding_vec,
                 node_type=concept.node_type,
@@ -182,7 +190,7 @@ def ingest_concepts(model: models.Model, concepts: List[ConceptInput], clear_exi
             for si, seg_vec in enumerate(layer.segments):
                 db.add(
                     models.Segment(
-                        glyph_name=concept.name,
+                        glyph_name=identity_name,
                         layer=li,
                         seg_index=si,
                         vec=seg_vec.tobytes(),
@@ -192,7 +200,7 @@ def ingest_concepts(model: models.Model, concepts: List[ConceptInput], clear_exi
             for edge in concept.edges:
                 db.add(
                     models.Edge(
-                        source=concept.name,
+                        source=identity_name,
                         target=edge.target,
                         type=edge.type,
                         weight=edge.weight,
