@@ -3,7 +3,20 @@ from __future__ import annotations
 import datetime as dt
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, JSON, Boolean
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import BYTEA
 from sqlalchemy.orm import relationship
 
@@ -178,6 +191,14 @@ class Glyph(Base):
 
     model = relationship("Model", back_populates="glyphs")
     segments = relationship("Segment", back_populates="glyph", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index(
+            "ix_glyphs_name_observed_at",
+            "name",
+            func.json_extract_path_text(semantic, "observed_at"),
+        ),
+    )
 
 
 class Segment(Base):
