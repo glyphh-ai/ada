@@ -274,6 +274,8 @@ class GlyphEdgeSummary(BaseModel):
     neural_edges: list[dict] = []
     hierarchy: list[str] | None = None
     sequence: list[str] | None = None
+    lineage: list[dict] | None = None
+    deltas: list[dict] | None = None
 
 
 class NLChatResponse(BaseModel):

@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import json
 
+from datetime import datetime
+
+import numpy as np
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from ..core import models
 from ..core.config import get_settings
@@ -18,6 +22,7 @@ from ..core.schemas import (
     NLQueryResponse,
 )
 from ..services.nl_helpers import build_nl_configs, to_nl_glyphs
+from ..services.similarity import compute_pair_metrics
 from ..services.nl_pipeline import (
     build_capabilities_payload,
     execute_ir,
@@ -33,6 +38,92 @@ from ..services.auth_runtime import enforce_model_access, require_scopes
 
 router = api_router(tags=["nl"])
 settings = get_settings()
+
+
+def _base_concept_name(name: str) -> str:
+    return name.split("@", 1)[0]
+
+
+def _parse_observed_at(name: str, semantic: dict) -> datetime | None:
+    raw = semantic.get("observed_at")
+    if isinstance(raw, str):
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    if "@" in name:
+        _, suffix = name.split("@", 1)
+        try:
+            return datetime.fromisoformat(suffix.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
+def _diff_semantic(prev: dict, curr: dict) -> dict:
+    ignore = {"observed_at", "_space_id"}
+    prev_keys = {k for k in prev.keys() if k not in ignore}
+    curr_keys = {k for k in curr.keys() if k not in ignore}
+    added = {k: curr[k] for k in sorted(curr_keys - prev_keys)}
+    removed = {k: prev[k] for k in sorted(prev_keys - curr_keys)}
+    changed = {}
+    for key in sorted(prev_keys & curr_keys):
+        if prev.get(key) != curr.get(key):
+            changed[key] = {"from": prev.get(key), "to": curr.get(key)}
+    return {"added": added, "removed": removed, "changed": changed}
+
+
+def _build_lineage(db: Session, model_id: str, matched_glyph: str) -> tuple[list[dict], list[dict]]:
+    base_name = _base_concept_name(matched_glyph)
+    glyphs = (
+        db.query(models.Glyph)
+        .filter(models.Glyph.model_id == model_id)
+        .filter(or_(models.Glyph.name == base_name, models.Glyph.name.like(f"{base_name}@%")))
+        .all()
+    )
+    rows = []
+    for glyph in glyphs:
+        semantic = glyph.semantic or {}
+        observed_at = _parse_observed_at(glyph.name, semantic)
+        rows.append(
+            {
+                "name": glyph.name,
+                "observed_at": observed_at,
+                "semantic": semantic,
+                "cortex": glyph.cortex,
+            }
+        )
+    rows.sort(key=lambda row: row["observed_at"] or datetime.min)
+    lineage = [
+        {
+            "name": row["name"],
+            "observed_at": row["observed_at"].isoformat() if row["observed_at"] else None,
+            "semantic": row["semantic"],
+        }
+        for row in rows
+    ]
+
+    deltas: list[dict] = []
+    for prev, curr in zip(rows, rows[1:]):
+        metrics = compute_pair_metrics(
+            np.frombuffer(prev["cortex"], dtype=np.int8),
+            np.frombuffer(curr["cortex"], dtype=np.int8),
+        )
+        deltas.append(
+            {
+                "from": prev["name"],
+                "to": curr["name"],
+                "observed_at_from": prev["observed_at"].isoformat() if prev["observed_at"] else None,
+                "observed_at_to": curr["observed_at"].isoformat() if curr["observed_at"] else None,
+                "field_diff": _diff_semantic(prev["semantic"], curr["semantic"]),
+                "similarity": {
+                    "cortex": metrics.shifted_cosine01,
+                    "layer": None,
+                    "segment": None,
+                },
+            }
+        )
+    return lineage, deltas
 
 
 @router.post("/models/{model_id}/nl-query", response_model=NLQueryResponse)
@@ -130,8 +221,12 @@ async def nl_chat(
     if not nl_resp:
         raise HTTPException(status_code=404, detail="No glyph match")
     attributes = nl_resp.get("attributes") or {}
+    matched_name = nl_resp.get("name") or nl_resp.get("matched_glyph")
+    lineage, deltas = ([], [])
+    if matched_name:
+        lineage, deltas = _build_lineage(db, model.id, matched_name)
     glyph_edges = {
-        "matched_glyph": nl_resp.get("name") or nl_resp.get("matched_glyph"),
+        "matched_glyph": matched_name,
         "primary_target": nl_resp.get("primary_target"),
         "primary_edge": nl_resp.get("primary_edge"),
         "secondary_edge": nl_resp.get("secondary_edge"),
@@ -140,6 +235,8 @@ async def nl_chat(
         "neural_edges": nl_resp.get("neural_edges") or [],
         "hierarchy": attributes.get("taxonomy") or [],
         "sequence": nl_resp.get("sequence") or [],
+        "lineage": lineage or None,
+        "deltas": deltas or None,
     }
     glyph_data_for_prompt = {
         "glyph": glyph_edges,
