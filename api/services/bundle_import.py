@@ -36,7 +36,15 @@ def _create_model_from_roles(
     db: Session, roles_config: dict, model_meta: dict | None
 ) -> models.Model:
     model_id = str(uuid.uuid4())
-    space_meta = build_vector_space_metadata(roles_config=roles_config or {})
+    vector_dim_override = None
+    if model_meta:
+        raw_dim = model_meta.get("vector_dim")
+        if isinstance(raw_dim, int) and raw_dim > 0:
+            vector_dim_override = raw_dim
+    space_meta = build_vector_space_metadata(
+        roles_config=roles_config or {},
+        vector_dim=vector_dim_override,
+    )
     model = models.Model(
         id=model_id,
         name="Imported Model",
