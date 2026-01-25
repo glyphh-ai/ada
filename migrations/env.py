@@ -21,9 +21,17 @@ from api.core.db import Base  # noqa: E402
 
 config = context.config
 
-env_url = os.getenv("GLYPH_DATABASE_URL")
-if env_url:
-    config.set_main_option("sqlalchemy.url", env_url)
+env_db_url = os.getenv("GLYPH_DATABASE_URL")
+debug_enabled = os.getenv("GLYPH_MIGRATIONS_DEBUG") == "1"
+
+if env_db_url:
+    config.set_main_option("sqlalchemy.url", env_db_url.strip().strip('"').strip("'"))
+
+masked_url = config.get_main_option("sqlalchemy.url")
+if masked_url:
+    masked_url = masked_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    masked_url = masked_url.rsplit("@", 1)[-1]
+    print(f"[migrations] using db host: {masked_url}")
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -45,14 +53,44 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection) -> None:
+    if debug_enabled:
+        try:
+            db_name = connection.execute(text("select current_database()")).scalar_one()
+            schema = connection.execute(text("select current_schema()")).scalar_one()
+            user = connection.execute(text("select current_user")).scalar_one()
+            search_path = connection.execute(text("show search_path")).scalar_one()
+            server_addr = connection.execute(text("select inet_server_addr()")).scalar_one()
+            server_port = connection.execute(text("select inet_server_port()")).scalar_one()
+            table_count = connection.execute(
+                text("select count(*) from information_schema.tables where table_schema='public'")
+            ).scalar_one()
+            print(f"[migrations] debug: cwd={os.getcwd()}")
+            print(f"[migrations] debug: config={config.config_file_name}")
+            print(f"[migrations] debug: db={db_name} schema={schema} user={user}")
+            print(f"[migrations] debug: search_path={search_path}")
+            print(f"[migrations] debug: server={server_addr}:{server_port}")
+            print(f"[migrations] debug: public tables before={table_count}")
+        except Exception as exc:
+            print(f"[migrations] debug: failed to inspect connection: {exc!r}")
+
     connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
     )
 
-    with context.begin_transaction():
-        context.run_migrations()
+    context.run_migrations()
+
+    if debug_enabled:
+        try:
+            table_count = connection.execute(
+                text("select count(*) from information_schema.tables where table_schema='public'")
+            ).scalar_one()
+            alembic_table = connection.execute(text("select to_regclass('public.alembic_version')")).scalar_one()
+            print(f"[migrations] debug: public tables after={table_count}")
+            print(f"[migrations] debug: alembic_version={alembic_table}")
+        except Exception as exc:
+            print(f"[migrations] debug: failed to inspect tables after: {exc!r}")
 
 
 def run_migrations_online() -> None:
@@ -66,12 +104,13 @@ def run_migrations_online() -> None:
         )
 
     if isinstance(connectable, AsyncEngine):
-        async def async_run():
-            async with connectable.connect() as connection:
+        async def async_run() -> None:
+            async with connectable.begin() as connection:
                 await connection.run_sync(do_run_migrations)
+
         asyncio.run(async_run())
     else:
-        with connectable.connect() as connection:
+        with connectable.begin() as connection:
             do_run_migrations(connection)
 
 
