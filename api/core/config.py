@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # Database URL should include ?sslmode=require on Heroku
     database_url: str = Field(
-        default="postgresql+psycopg://localhost:5432/glyph_ai",
+        default="postgresql+psycopg://localhost:5432/glyphh_ai",
         validation_alias=AliasChoices("GLYPH_DATABASE_URL"),
     )
     app_name: str = "glyph-ai-service"

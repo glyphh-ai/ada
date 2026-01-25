@@ -7,7 +7,7 @@ from logging.config import fileConfig
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +45,7 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection) -> None:
+    connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
