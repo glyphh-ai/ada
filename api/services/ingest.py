@@ -51,6 +51,43 @@ def _primary_id_role(roles_config: dict | None) -> str | None:
     return None
 
 
+def _required_roles(roles_config: dict | None) -> list[str]:
+    required: list[str] = []
+    if not isinstance(roles_config, dict):
+        return required
+    for layer in roles_config.get("layers", []):
+        if not isinstance(layer, dict):
+            continue
+        for segment in layer.get("segments", []):
+            if not isinstance(segment, dict):
+                continue
+            for role_entry in segment.get("roles", []):
+                if not isinstance(role_entry, dict):
+                    continue
+                if role_entry.get("required") is True:
+                    role_name = role_entry.get("role")
+                    if isinstance(role_name, str) and role_name:
+                        required.append(role_name)
+    return list(dict.fromkeys(required))
+
+
+def _finalize_policy(roles_config: dict | None) -> tuple[list[str], int | None]:
+    required_roles = _required_roles(roles_config)
+    timebox_seconds: int | None = None
+    if isinstance(roles_config, dict):
+        policy = roles_config.get("finalize_policy") or {}
+        if isinstance(policy, dict):
+            policy_roles = policy.get("required_roles")
+            if isinstance(policy_roles, list) and policy_roles:
+                required_roles = [str(role) for role in policy_roles if str(role)]
+            if policy.get("timebox_seconds") is not None:
+                try:
+                    timebox_seconds = int(policy["timebox_seconds"])
+                except (TypeError, ValueError):
+                    logger.warning("Invalid timebox_seconds in finalize_policy: %s", policy["timebox_seconds"])
+    return required_roles, timebox_seconds
+
+
 def _coerce_observed_at(value: str | dt.datetime | None) -> dt.datetime:
     if isinstance(value, dt.datetime):
         return value
@@ -100,6 +137,63 @@ def stage_concepts(
                 )
             )
     db.flush()
+
+
+def finalize_staged_concepts(
+    model: models.Model,
+    concepts: List[ConceptInput],
+    db: Session,
+) -> List[ConceptInput]:
+    required_roles, timebox_seconds = _finalize_policy(model.roles_config or {})
+    primary_role = _primary_id_role(model.roles_config or {})
+    now = dt.datetime.utcnow()
+    final_concepts: List[ConceptInput] = []
+    for concept in concepts:
+        attributes = dict(concept.attributes or {})
+        observed_at = _coerce_observed_at(attributes.get("observed_at"))
+        primary_value = attributes.get(primary_role) if primary_role else None
+        primary_id = str(primary_value) if primary_value not in (None, "") else concept.name
+        record = (
+            db.query(models.ModelStagedConcept)
+            .filter(
+                models.ModelStagedConcept.model_id == model.id,
+                models.ModelStagedConcept.primary_id == primary_id,
+                models.ModelStagedConcept.observed_at == observed_at,
+            )
+            .one_or_none()
+        )
+        if not record or not isinstance(record.payload, dict):
+            continue
+        listeners_payload = record.payload.get("listeners")
+        if not isinstance(listeners_payload, dict):
+            continue
+        merged: dict[str, object] = {}
+        for listener_key in sorted(listeners_payload.keys()):
+            payload = listeners_payload.get(listener_key)
+            if not isinstance(payload, dict):
+                continue
+            for key, value in payload.items():
+                if key not in merged:
+                    merged[key] = value
+        if "observed_at" not in merged:
+            merged["observed_at"] = record.observed_at.isoformat()
+        required_ready = not required_roles or all(
+            role in merged and merged[role] not in (None, "") for role in required_roles
+        )
+        timebox_ready = (
+            timebox_seconds is not None
+            and (now - (record.updated_at or record.created_at)).total_seconds() >= timebox_seconds
+        )
+        if required_roles or timebox_seconds is not None:
+            ready = required_ready or timebox_ready
+        else:
+            ready = True
+        if not ready:
+            continue
+        final_concepts.append(ConceptInput(name=str(primary_id), attributes=merged))
+        db.delete(record)
+    db.flush()
+    return final_concepts
 
 
 def _clear_model_glyphs(model: models.Model, db: Session) -> None:
