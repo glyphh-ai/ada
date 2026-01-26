@@ -31,6 +31,25 @@ def _concept_identity(name: str, observed_at: str | None) -> str:
     return f"{name}@{observed_at}"
 
 
+def _primary_id_role(roles_config: dict | None) -> str | None:
+    if not isinstance(roles_config, dict):
+        return None
+    for layer in roles_config.get("layers", []):
+        if not isinstance(layer, dict):
+            continue
+        for segment in layer.get("segments", []):
+            if not isinstance(segment, dict):
+                continue
+            for role_entry in segment.get("roles", []):
+                if not isinstance(role_entry, dict):
+                    continue
+                if role_entry.get("primary_id") is True:
+                    role_name = role_entry.get("role")
+                    if isinstance(role_name, str) and role_name:
+                        return role_name
+    return None
+
+
 def _clear_model_glyphs(model: models.Model, db: Session) -> None:
     glyph_names = [
         name
@@ -152,11 +171,17 @@ def ingest_concepts(model: models.Model, concepts: List[ConceptInput], clear_exi
     if clear_existing:
         _clear_model_glyphs(model, db)
 
-    name_versions: dict[str, list[str | None]] = defaultdict(list)
+    primary_role = _primary_id_role(model.roles_config or {})
+    key_versions: dict[str, list[str | None]] = defaultdict(list)
     for concept in concepts:
         observed_at_raw = (concept.attributes or {}).get("observed_at")
-        name_versions[concept.name].append(observed_at_raw)
-    for name, observed_list in name_versions.items():
+        identity_key = concept.name
+        if primary_role:
+            primary_value = (concept.attributes or {}).get(primary_role)
+            if primary_value not in (None, ""):
+                identity_key = str(primary_value)
+        key_versions[identity_key].append(observed_at_raw)
+    for name, observed_list in key_versions.items():
         if len(observed_list) > 1 and any(not value for value in observed_list):
             raise HTTPException(
                 status_code=400,

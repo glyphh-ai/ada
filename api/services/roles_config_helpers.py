@@ -23,6 +23,7 @@ def validate_roles_config(roles_config: dict) -> dict:
     if not isinstance(layers, list) or not layers:
         raise HTTPException(status_code=400, detail="roles_config.layers must be a non-empty array")
 
+    primary_id_count = 0
     for layer in layers:
         if not isinstance(layer, dict):
             raise HTTPException(status_code=400, detail="roles_config.layers items must be objects")
@@ -43,6 +44,14 @@ def validate_roles_config(roles_config: dict) -> dict:
                 role_name = role_entry.get("role")
                 if not isinstance(role_name, str) or not role_name:
                     raise HTTPException(status_code=400, detail="roles_config role entries need a role string")
+                primary_id = role_entry.get("primary_id")
+                if primary_id is not None and not isinstance(primary_id, bool):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"roles_config role '{role_name}' primary_id must be a boolean",
+                    )
+                if primary_id:
+                    primary_id_count += 1
                 role_type = role_entry.get("type", "string")
                 if not isinstance(role_type, str) or role_type not in ALLOWED_ROLE_TYPES:
                     raise HTTPException(
@@ -60,4 +69,9 @@ def validate_roles_config(roles_config: dict) -> dict:
                         status_code=400,
                         detail=f"roles_config role '{role_name}' value_policy must be an object",
                     )
+    if primary_id_count != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="roles_config must mark exactly one role as primary_id",
+        )
     return roles_config
