@@ -1,8 +1,8 @@
 """base
 
-Revision ID: 737b75ab4182
+Revision ID: 291dda0f8032
 Revises: 
-Create Date: 2026-01-25 19:31:10.263711
+Create Date: 2026-01-26 02:16:14.722581
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pgvector
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = '737b75ab4182'
+revision = '291dda0f8032'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -160,6 +160,19 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_model_samples_model_id'), 'model_samples', ['model_id'], unique=True)
+    op.create_table('model_staged_concepts',
+    sa.Column('id', sa.String(), nullable=False),
+    sa.Column('model_id', sa.String(), nullable=False),
+    sa.Column('primary_id', sa.String(), nullable=False),
+    sa.Column('observed_at', sa.DateTime(), nullable=False),
+    sa.Column('payload', sa.JSON(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.ForeignKeyConstraint(['model_id'], ['models.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('model_id', 'primary_id', 'observed_at', name='uq_model_staged_concepts_key')
+    )
+    op.create_index(op.f('ix_model_staged_concepts_model_id'), 'model_staged_concepts', ['model_id'], unique=False)
     op.create_table('model_tests',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('model_id', sa.String(), nullable=False),
@@ -359,6 +372,8 @@ def downgrade() -> None:
     op.drop_table('profiles')
     op.drop_index(op.f('ix_model_tests_model_id'), table_name='model_tests')
     op.drop_table('model_tests')
+    op.drop_index(op.f('ix_model_staged_concepts_model_id'), table_name='model_staged_concepts')
+    op.drop_table('model_staged_concepts')
     op.drop_index(op.f('ix_model_samples_model_id'), table_name='model_samples')
     op.drop_table('model_samples')
     op.drop_index(op.f('ix_model_runtime_configs_model_id'), table_name='model_runtime_configs')
