@@ -18,7 +18,7 @@ from ..core import models
 from ..core.db import SessionLocal
 from ..core.schemas import ConceptInput
 from .history import persist_history_vectors
-from .ingest import ingest_concepts
+from .ingest import ingest_concepts, stage_concepts
 from .listener_overrides import load_overrides
 from .usage_metrics import UsageTracker
 from sqlalchemy.orm import joinedload
@@ -574,6 +574,7 @@ class ListenerManager:
                 glyph_count,
             )
             if glyph_count:
+                stage_concepts(model, concepts, listener_id, db)
                 ingest_concepts(model, concepts, False, db)
                 if map_config.history_enabled:
                     persist_history_vectors(model, concepts, listener_id)
@@ -767,6 +768,7 @@ class ListenerManager:
                 if concept:
                     concepts.append(concept)
             if concepts:
+                stage_concepts(model, concepts, listener_id, db)
                 ingest_concepts(model, concepts, False, db)
                 if self._usage_tracker:
                     self._usage_tracker.record("listener_calls", count=len(concepts))

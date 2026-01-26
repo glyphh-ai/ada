@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import uuid
 from collections import defaultdict
 from typing import List
 
@@ -48,6 +49,57 @@ def _primary_id_role(roles_config: dict | None) -> str | None:
                     if isinstance(role_name, str) and role_name:
                         return role_name
     return None
+
+
+def _coerce_observed_at(value: str | dt.datetime | None) -> dt.datetime:
+    if isinstance(value, dt.datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return dt.datetime.fromisoformat(value)
+        except ValueError:
+            logger.warning("Invalid observed_at '%s', defaulting to now()", value)
+    return dt.datetime.utcnow()
+
+
+def stage_concepts(
+    model: models.Model,
+    concepts: List[ConceptInput],
+    listener_id: str,
+    db: Session,
+) -> None:
+    primary_role = _primary_id_role(model.roles_config or {})
+    for concept in concepts:
+        attributes = dict(concept.attributes or {})
+        observed_at = _coerce_observed_at(attributes.get("observed_at"))
+        primary_value = attributes.get(primary_role) if primary_role else None
+        primary_id = str(primary_value) if primary_value not in (None, "") else concept.name
+        record = (
+            db.query(models.ModelStagedConcept)
+            .filter(
+                models.ModelStagedConcept.model_id == model.id,
+                models.ModelStagedConcept.primary_id == primary_id,
+                models.ModelStagedConcept.observed_at == observed_at,
+            )
+            .one_or_none()
+        )
+        payload = dict(record.payload) if record and record.payload else {}
+        listeners_payload = dict(payload.get("listeners", {}))
+        listeners_payload[listener_id] = attributes
+        payload["listeners"] = listeners_payload
+        if record:
+            record.payload = payload
+        else:
+            db.add(
+                models.ModelStagedConcept(
+                    id=str(uuid.uuid4()),
+                    model_id=model.id,
+                    primary_id=primary_id,
+                    observed_at=observed_at,
+                    payload=payload,
+                )
+            )
+    db.flush()
 
 
 def _clear_model_glyphs(model: models.Model, db: Session) -> None:

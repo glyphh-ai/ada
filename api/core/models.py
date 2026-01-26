@@ -50,6 +50,11 @@ class Model(Base):
     runtime_config = relationship("ModelRuntimeConfig", uselist=False, back_populates="model", cascade="all, delete-orphan")
     sample = relationship("ModelSample", uselist=False, back_populates="model", cascade="all, delete-orphan")
     tests = relationship("ModelTests", uselist=False, back_populates="model", cascade="all, delete-orphan")
+    staged_concepts = relationship(
+        "ModelStagedConcept",
+        back_populates="model",
+        cascade="all, delete-orphan",
+    )
     listeners = relationship("WebSocketListener", secondary="model_websocket_listeners", back_populates="models")
 
 
@@ -115,6 +120,24 @@ class ModelTests(Base):
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False)
 
     model = relationship("Model", back_populates="tests")
+
+
+class ModelStagedConcept(Base):
+    __tablename__ = "model_staged_concepts"
+
+    id = Column(String, primary_key=True)
+    model_id = Column(String, ForeignKey("models.id"), nullable=False, index=True)
+    primary_id = Column(String, nullable=False)
+    observed_at = Column(DateTime, nullable=False)
+    payload = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False)
+
+    model = relationship("Model", back_populates="staged_concepts")
+
+    __table_args__ = (
+        UniqueConstraint("model_id", "primary_id", "observed_at", name="uq_model_staged_concepts_key"),
+    )
 
 
 class Encoder(Base):
