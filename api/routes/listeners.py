@@ -4,10 +4,12 @@ import json
 
 from fastapi import Body, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+
 from ..core import models
-from ..core.db import SessionLocal
+from ..core.db import SessionLocal, get_db
 from ..core.schemas import ListenerControl, ListenerLogs, ListenerOfflineOverride, ListenerOverridesResponse
-from ..services.auth_runtime import require_scopes
+from ..services.auth_runtime import enforce_model_access, require_scopes
 from ..services.listener_runtime import ListenerManager
 from ..services.listener_overrides import load_overrides, update_listener_override
 from .router import api_router
@@ -168,6 +170,65 @@ async def ingest_listener_data(
         if not config:
             raise HTTPException(status_code=404, detail="Listener not found")
         processed = manager.import_records(listener_id, records)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Ingest failed")
+    return {"status": "ok", "processed": processed}
+
+
+@router.post("/org/{org_id}/model/{model_id}/listeners/{endpoint_name}")
+async def ingest_scoped_listener_data(
+    org_id: str,
+    model_id: str,
+    endpoint_name: str,
+    request: Request,
+    payload: dict | list[dict] = Body(...),
+    db: Session = Depends(get_db),
+):
+    claims = getattr(request.state, "runtime_claims", {}) or {}
+    require_scopes(claims, ["listeners:write"])
+    enforce_model_access(claims, model_id)
+    claim_org = claims.get("org_id") or claims.get("org")
+    if claim_org and str(claim_org) != org_id:
+        raise HTTPException(status_code=403, detail="Org access denied")
+
+    normalized = endpoint_name.strip().strip("/")
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Endpoint name is required")
+
+    listener = (
+        db.query(models.WebSocketListener)
+        .join(models.ModelWebSocketListener, models.ModelWebSocketListener.listener_id == models.WebSocketListener.id)
+        .filter(models.ModelWebSocketListener.model_id == model_id)
+        .all()
+    )
+    matched = None
+    for item in listener:
+        candidate = (item.url or "").strip().strip("/")
+        if candidate == normalized:
+            matched = item
+            break
+    if not matched:
+        raise HTTPException(status_code=404, detail="Listener endpoint not found")
+
+    manager: ListenerManager = request.app.state.listener_manager
+    if not manager:
+        raise HTTPException(status_code=500, detail="Listener manager unavailable")
+    if not manager.is_ingest_allowed(matched.id):
+        raise HTTPException(status_code=403, detail="Listener is disabled or not allowlisted")
+
+    try:
+        if isinstance(payload, list):
+            records = payload
+        elif isinstance(payload, dict):
+            records = payload.get("records") if isinstance(payload.get("records"), list) else [payload]
+        else:
+            raise HTTPException(status_code=400, detail="Payload must be an object or array of records")
+        config = manager.refresh_listener_config(matched.id, include_disabled=True)
+        if not config:
+            raise HTTPException(status_code=404, detail="Listener not found")
+        processed = manager.import_records(matched.id, records)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
