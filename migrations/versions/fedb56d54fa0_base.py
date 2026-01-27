@@ -1,8 +1,8 @@
 """base
 
-Revision ID: 3d3bb55aa9d8
+Revision ID: fedb56d54fa0
 Revises: 
-Create Date: 2026-01-26 06:36:49.928091
+Create Date: 2026-01-27 11:40:21.718446
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pgvector
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = '3d3bb55aa9d8'
+revision = 'fedb56d54fa0'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -127,6 +127,17 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_model_linguistic_configs_model_id'), 'model_linguistic_configs', ['model_id'], unique=True)
+    op.create_table('model_mcp_configs',
+    sa.Column('id', sa.String(), nullable=False),
+    sa.Column('model_id', sa.String(), nullable=False),
+    sa.Column('config', sa.JSON(), nullable=False),
+    sa.Column('version', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.ForeignKeyConstraint(['model_id'], ['models.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_model_mcp_configs_model_id'), 'model_mcp_configs', ['model_id'], unique=True)
     op.create_table('model_nl_configs',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('model_id', sa.String(), nullable=False),
@@ -380,6 +391,8 @@ def downgrade() -> None:
     op.drop_table('model_runtime_configs')
     op.drop_index(op.f('ix_model_nl_configs_model_id'), table_name='model_nl_configs')
     op.drop_table('model_nl_configs')
+    op.drop_index(op.f('ix_model_mcp_configs_model_id'), table_name='model_mcp_configs')
+    op.drop_table('model_mcp_configs')
     op.drop_index(op.f('ix_model_linguistic_configs_model_id'), table_name='model_linguistic_configs')
     op.drop_table('model_linguistic_configs')
     op.drop_index('ix_glyphs_name_observed_at', table_name='glyphs')
