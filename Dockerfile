@@ -10,8 +10,8 @@ COPY glyphh-sdk /app/glyphh-sdk
 COPY glyphh-runtime /app/glyphh-runtime
 
 ARG GLYPH_SDK_WHEEL_URL
-ARG HF_TOKEN
-ENV HUGGINGFACE_HUB_TOKEN=$HF_TOKEN
+ARG GLYPH_HUGGINGFACE_HUB_TOKEN
+ENV GLYPH_HUGGINGFACE_HUB_TOKEN=$GLYPH_HUGGINGFACE_HUB_TOKEN
 ENV PIP_DEFAULT_TIMEOUT=120
 ENV PIP_RETRIES=10
 ENV PIP_PROGRESS_BAR=off
@@ -25,14 +25,18 @@ from huggingface_hub import snapshot_download
 
 repo_id = "sentence-transformers/all-MiniLM-L6-v2"
 local_dir = "/app/glyphh-runtime/models/intent/all-MiniLM-L6-v2"
-token = os.environ.get("HUGGINGFACE_HUB_TOKEN")
+token = os.environ.get("GLYPH_HUGGINGFACE_HUB_TOKEN")
+token = token.strip() if isinstance(token, str) and token.strip() else None
 
-snapshot_download(
+kwargs = dict(
     repo_id=repo_id,
     local_dir=local_dir,
     local_dir_use_symlinks=False,
-    token=token,
 )
+if token:
+    kwargs["token"] = token
+
+snapshot_download(**kwargs)
 PY
 
 ENV PYTHONPATH=/app/glyphh-runtime

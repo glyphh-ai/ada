@@ -41,7 +41,7 @@ jobs:
           PLATFORM_TAG: ${{ matrix.platform_tag }}
           RUNTIME_SDK_REF: ${{ vars.RUNTIME_SDK_REF }}
           SDK_REPO_TOKEN: ${{ secrets.RUNTIME_SDK_TOKEN }}
-          HUGGINGFACE_HUB_TOKEN: ${{ secrets.HUGGINGFACE_HUB_TOKEN }}
+          GLYPH_HUGGINGFACE_HUB_TOKEN: ${{ secrets.GLYPH_HUGGINGFACE_HUB_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p dist
