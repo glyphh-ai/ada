@@ -1,8 +1,8 @@
 """base
 
-Revision ID: 50cdfca4672b
+Revision ID: c0911ecb8c18
 Revises: 
-Create Date: 2026-01-27 17:39:37.710396
+Create Date: 2026-01-27 19:09:00.813566
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pgvector
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = '50cdfca4672b'
+revision = 'c0911ecb8c18'
 down_revision = None
 branch_labels = None
 depends_on = None
