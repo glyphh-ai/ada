@@ -48,6 +48,7 @@ class Model(Base):
     nl_config = relationship("ModelNLConfig", uselist=False, back_populates="model", cascade="all, delete-orphan")
     linguistic_config = relationship("ModelLinguisticConfig", uselist=False, back_populates="model", cascade="all, delete-orphan")
     runtime_config = relationship("ModelRuntimeConfig", uselist=False, back_populates="model", cascade="all, delete-orphan")
+    mcp_config = relationship("ModelMcpConfig", uselist=False, back_populates="model", cascade="all, delete-orphan")
     sample = relationship("ModelSample", uselist=False, back_populates="model", cascade="all, delete-orphan")
     tests = relationship("ModelTests", uselist=False, back_populates="model", cascade="all, delete-orphan")
     staged_concepts = relationship(
@@ -95,6 +96,19 @@ class ModelRuntimeConfig(Base):
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False)
 
     model = relationship("Model", back_populates="runtime_config")
+
+
+class ModelMcpConfig(Base):
+    __tablename__ = "model_mcp_configs"
+
+    id = Column(String, primary_key=True)
+    model_id = Column(String, ForeignKey("models.id"), nullable=False, unique=True, index=True)
+    config = Column(JSON, nullable=False)
+    version = Column(Integer, default=1, nullable=False)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False)
+
+    model = relationship("Model", back_populates="mcp_config")
 
 class ModelSample(Base):
     __tablename__ = "model_samples"

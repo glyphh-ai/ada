@@ -374,6 +374,7 @@ class SampleUploadBundle(BaseModel):
     tests: List[SampleUploadEntry] = []
     encoders: List[SampleUploadEntry] = []
     runtime: List[SampleUploadEntry] = []
+    mcp: List[SampleUploadEntry] = []
     concepts: List[SampleUploadEntry] = []
     profiles: List[SampleUploadEntry] = []
     maps: List[SampleUploadEntry] = []

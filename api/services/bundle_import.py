@@ -103,6 +103,19 @@ def _create_runtime_config(db: Session, model_id: str, data: dict) -> models.Mod
     return cfg
 
 
+def _create_mcp_config(db: Session, model_id: str, data: dict) -> models.ModelMcpConfig:
+    cfg = models.ModelMcpConfig(
+        id=str(uuid.uuid4()),
+        model_id=model_id,
+        config=data or {},
+        version=1,
+    )
+    db.add(cfg)
+    db.commit()
+    db.refresh(cfg)
+    return cfg
+
+
 def _create_tests(db: Session, model_id: str, data: dict) -> models.ModelTests:
     tests = models.ModelTests(
         id=str(uuid.uuid4()),
@@ -203,6 +216,23 @@ def import_bundle(
             results.append(
                 SampleImportResult(
                     category="runtime",
+                    file=entry.file,
+                    status="error",
+                    detail=str(exc),
+                )
+            )
+
+    for entry in payload.mcp:
+        try:
+            data = _bundle_entry_content(entry.content)
+            _create_mcp_config(db, model.id, data)
+            results.append(
+                SampleImportResult(category="mcp", file=entry.file, status="success")
+            )
+        except Exception as exc:
+            results.append(
+                SampleImportResult(
+                    category="mcp",
                     file=entry.file,
                     status="error",
                     detail=str(exc),
