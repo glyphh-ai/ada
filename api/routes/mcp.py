@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import Body, HTTPException, Request
+from fastapi import Body, Depends, HTTPException, Request
+from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from server.mcp_server import MCPServer
 from ..services.audit_log import log_tool_access_decision
 from ..services.auth_runtime import enforce_model_access, require_scopes
+from ..services.mcp_config_helpers import resolve_mcp_config
+from ..core.db import get_db
 from .router import api_router
 
 
@@ -100,8 +103,12 @@ def run_scoped_mcp_tool(
     org_id: str,
     model_id: str,
     endpoint_name: str,
+    db: Session = Depends(get_db),
     payload: MCPRequest = Body(...),
 ) -> dict[str, Any]:
+    cfg = resolve_mcp_config(db, model_id=model_id, endpoint_name=endpoint_name)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="MCP endpoint not found")
     return _run_mcp_tool(
         request,
         payload,
