@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     )
     app_name: str = "glyph-ai-service"
     jwt_secret: str = "change-me"
+    runtime_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GLYPH_RUNTIME_KEY", "RUNTIME_KEY"),
+    )
     jwt_algorithm: str = "HS256"
     app_base_url: str = "http://localhost:5173"
     sendgrid_api_key: str | None = None

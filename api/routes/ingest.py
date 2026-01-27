@@ -14,6 +14,7 @@ from ..services.auth_runtime import (
     parse_license_expiry,
     enforce_model_access,
     require_scopes,
+    runtime_jwt_secret,
 )
 from ..services.ingest import ingest_concepts, refresh_model_data
 from ..services.usage_runtime import record_usage
@@ -83,7 +84,7 @@ async def ingest_stream(model_id: str, websocket: WebSocket):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     try:
-        payload = decode_jwt(token, settings.jwt_secret, settings.jwt_algorithm)
+        payload = decode_jwt(token, runtime_jwt_secret(settings), settings.jwt_algorithm)
         now_ts = int(dt.datetime.utcnow().timestamp())
         exp = payload.get("exp")
         if isinstance(exp, int) and exp < now_ts:

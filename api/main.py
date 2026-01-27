@@ -19,6 +19,7 @@ from .core.db import Base, SessionLocal, engine
 from .services.listener_runtime import ListenerManager
 from .services.temporal_sidecar import ensure_temporal_sidecar_model
 from .services.usage_metrics import UsageTracker
+from .services.auth_runtime import runtime_jwt_secret
 from .services.monitoring import setup_monitoring
 from .routes import bundles as bundle_routes
 from .routes import charts as charts_routes
@@ -113,7 +114,7 @@ async def startup_listener_manager() -> None:
                 platform_api_base=settings.platform_api_base,
                 runtime_token=settings.runtime_token,
                 runtime_version=settings.runtime_version,
-                jwt_secret=settings.jwt_secret,
+                jwt_secret=runtime_jwt_secret(settings),
                 jwt_algorithm=settings.jwt_algorithm,
                 flush_seconds=settings.usage_metrics_flush_seconds,
             )

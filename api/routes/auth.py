@@ -13,7 +13,7 @@ from ..core.schemas import (
     AuthTokenExchangeResponse,
     AuthTokenListResponse,
 )
-from ..services.auth_runtime import encode_jwt, load_runtime_secret
+from ..services.auth_runtime import encode_jwt, load_runtime_secret, runtime_jwt_secret
 from ..services.token_store import create_token, list_tokens, revoke_token, verify_token
 from .router import api_router
 
@@ -72,7 +72,7 @@ def exchange_token(payload: AuthTokenExchangeRequest = Body(...)) -> Any:
         "iat": int(now.timestamp()),
         "exp": int(exp.timestamp()),
     }
-    token = encode_jwt(claims, settings.jwt_secret, settings.jwt_algorithm)
+    token = encode_jwt(claims, runtime_jwt_secret(settings), settings.jwt_algorithm)
     return AuthTokenExchangeResponse(
         access_token=token,
         token_type="runtime",

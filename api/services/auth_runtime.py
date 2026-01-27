@@ -60,6 +60,13 @@ def decode_jwt(token: str, secret: str, algorithm: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
 
 
+def runtime_jwt_secret(settings) -> str:
+    secret = settings.runtime_key or settings.jwt_secret
+    if not secret:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Runtime JWT secret not configured")
+    return secret
+
+
 def encode_jwt(payload: dict, secret: str, algorithm: str) -> str:
     if algorithm != "HS256":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unsupported token algorithm")
@@ -99,7 +106,7 @@ def enforce_runtime_token(request: Request, settings) -> dict:
     token = extract_bearer_token(request)
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing runtime token")
-    payload = decode_jwt(token, settings.jwt_secret, settings.jwt_algorithm)
+    payload = decode_jwt(token, runtime_jwt_secret(settings), settings.jwt_algorithm)
     if payload.get("token_type") != "runtime":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid runtime token")
     now_ts = int(dt.datetime.utcnow().timestamp())
