@@ -47,6 +47,14 @@ class Settings(BaseSettings):
         default=86400,
         validation_alias=AliasChoices("GLYPH_RUNTIME_LICENSE_CHECK_SECONDS", "RUNTIME_LICENSE_CHECK_SECONDS"),
     )
+    runtime_license_required: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("GLYPH_RUNTIME_LICENSE_REQUIRED", "RUNTIME_LICENSE_REQUIRED"),
+    )
+    runtime_license_bypass_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GLYPH_RUNTIME_LICENSE_BYPASS_KEY", "RUNTIME_LICENSE_BYPASS_KEY"),
+    )
     runtime_endpoint_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices("GLYPH_RUNTIME_ENDPOINT_URL", "RUNTIME_ENDPOINT_URL"),

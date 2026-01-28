@@ -129,15 +129,16 @@ def build_runtime_auth_middleware(settings):
             or request.url.path.startswith("/api/v1/auth")
         ):
             return await call_next(request)
-        license_ok, license_state = license_status(settings)
-        if not license_ok:
-            if license_state == "missing":
-                detail = "License missing. Activate this runtime to continue."
-            elif license_state == "invalid":
-                detail = "License invalid. Provide a new activation key."
-            else:
-                detail = "License expired or revoked. Provide a new activation key."
-            return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detail": detail})
+        if not getattr(settings, "runtime_license_bypass_key", None):
+            license_ok, license_state = license_status(settings)
+            if not license_ok:
+                if license_state == "missing":
+                    detail = "License missing. Activate this runtime to continue."
+                elif license_state == "invalid":
+                    detail = "License invalid. Provide a new activation key."
+                else:
+                    detail = "License expired or revoked. Provide a new activation key."
+                return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detail": detail})
         if request.url.path.startswith("/api/v1") and request.headers.get("x-api-key"):
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,

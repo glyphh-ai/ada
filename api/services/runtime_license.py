@@ -158,6 +158,10 @@ def _renew_license(settings, license_file: dict) -> dict | None:
 
 
 def ensure_runtime_license(settings) -> None:
+    if getattr(settings, "runtime_license_bypass_key", None):
+        return
+    if not getattr(settings, "runtime_license_required", True):
+        return
     license_path = Path(settings.runtime_license_path)
     secret_path = Path(settings.runtime_secret_path)
     license_file = _read_json(license_path)
