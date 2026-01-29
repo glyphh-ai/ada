@@ -1,8 +1,8 @@
 """base
 
-Revision ID: 0114bbc6487f
+Revision ID: e561b46cf75c
 Revises: 
-Create Date: 2026-01-29 12:06:25.295453
+Create Date: 2026-01-29 12:49:43.956541
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '0114bbc6487f'
+revision = 'e561b46cf75c'
 down_revision = None
 branch_labels = None
 depends_on = None

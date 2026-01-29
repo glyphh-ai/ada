@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from uuid import uuid4
 import sys
 import hashlib
 from pathlib import Path
@@ -679,6 +680,7 @@ class MCPServer:
         result: Dict[str, Any],
         determinism: Dict[str, Any] | None = None,
         runtime_stats: Dict[str, Any] | None = None,
+        request_id: str,
     ) -> Dict[str, Any]:
         status = "error" if result.get("error") else "ok"
         model_id = payload.get("model_id")
@@ -1095,7 +1097,7 @@ class MCPServer:
             citations = base_citations + (citations or [])
         if base_reasons:
             reasons = base_reasons + (reasons or [])
-        return {
+        legacy_response = {
             "version": "1.0",
             "status": status,
             "answer": {"text": text, "format": "json"},
@@ -1130,6 +1132,25 @@ class MCPServer:
                 "sources": citations,
             },
         }
+        is_error = status != "ok"
+        response_text = text or ""
+        if is_error and result:
+            detail = result.get("detail") or result.get("error") or result.get("message")
+            if detail:
+                response_text = str(detail)
+        content = [{"type": "text", "text": response_text}]
+        structured_text = json.dumps(legacy_response, default=str)
+        if structured_text != response_text:
+            content.append({"type": "text", "text": structured_text})
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "content": content,
+                "isError": is_error,
+                "structuredContent": legacy_response,
+            },
+        }
 
     def _error_response(
         self,
@@ -1137,12 +1158,17 @@ class MCPServer:
         tool: str,
         payload: Dict[str, Any],
         reason: str,
+        request_id: str,
     ) -> Dict[str, Any]:
-        return self._wrap_response(
-            tool=tool,
-            payload=payload,
-            result={"error": "invalid_mcp_response", "detail": reason},
-        )
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {
+                "code": -32603,
+                "message": "MCP response validation failed",
+                "data": {"error": "invalid_mcp_response", "detail": reason, "tool": tool},
+            },
+        }
 
     def _health(self) -> Dict[str, Any]:
         return {"status": "ok"}
@@ -1333,7 +1359,14 @@ class MCPServer:
             return self._health()
         return {"error": "unknown_tool", "tool": tool}
 
-    def handle_tool(self, tool: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def handle_tool(
+        self,
+        tool: str,
+        payload: Dict[str, Any],
+        *,
+        request_id: str | None = None,
+    ) -> Dict[str, Any]:
+        resolved_request_id = request_id or str(uuid4())
         db = SessionLocal()
         try:
             result = self._run_tool(tool, payload, db)
@@ -1345,12 +1378,18 @@ class MCPServer:
                 result=result,
                 determinism=determinism,
                 runtime_stats=runtime_stats,
+                request_id=resolved_request_id,
             )
             try:
                 validate_mcp_response(response)
             except Exception as exc:
                 error_text = format_validation_error(exc)
-                response = self._error_response(tool=tool, payload=payload, reason=error_text)
+                response = self._error_response(
+                    tool=tool,
+                    payload=payload,
+                    reason=error_text,
+                    request_id=resolved_request_id,
+                )
                 validate_mcp_response(response)
             return response
         finally:
@@ -1364,9 +1403,17 @@ def main() -> None:
         if not raw:
             continue
         msg = json.loads(raw)
-        tool = msg.get("tool")
-        payload = msg.get("payload", {})
-        resp = server.handle_tool(tool, payload)
+        request_id = msg.get("id")
+        if msg.get("jsonrpc") == "2.0":
+            if msg.get("method") != "tools/call":
+                raise ValueError("Unsupported MCP method")
+            params = msg.get("params") or {}
+            tool = params.get("name")
+            payload = params.get("arguments") or {}
+        else:
+            tool = msg.get("tool")
+            payload = msg.get("payload", {})
+        resp = server.handle_tool(tool, payload, request_id=request_id)
         print(json.dumps(resp))
 
 
