@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     runtime_version: str = "dev"
     usage_metrics_enabled: bool = False
     usage_metrics_flush_seconds: int = 60
+    runtime_tests_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("GLYPH_RUNTIME_TESTS_ENABLED", "RUNTIME_TESTS_ENABLED"),
+    )
     runtime_license_path: str = Field(
         default=".glyphh/license.json",
         validation_alias=AliasChoices("GLYPH_RUNTIME_LICENSE_PATH", "RUNTIME_LICENSE_PATH"),

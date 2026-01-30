@@ -6,7 +6,7 @@ import uuid
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from ..core import models
+from ..core import get_settings, models
 from ..core.db import get_db
 from ..core.schemas import (
     ConceptInput,
@@ -55,6 +55,8 @@ def get_model_tests(
     request: Request,
     db: Session = Depends(get_db),
 ) -> ModelTestsResponse:
+    if not get_settings().runtime_tests_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
     claims = getattr(request.state, "runtime_claims", {}) or {}
     require_scopes(claims, ["model:read"])
     enforce_model_access(claims, model_id)
@@ -86,6 +88,8 @@ def upsert_model_tests(
     request: Request,
     db: Session = Depends(get_db),
 ) -> ModelTestsResponse:
+    if not get_settings().runtime_tests_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
     claims = getattr(request.state, "runtime_claims", {}) or {}
     require_scopes(claims, ["model:write"])
     enforce_model_access(claims, model_id)
@@ -120,6 +124,8 @@ def run_model_tests(
     request: Request,
     db: Session = Depends(get_db),
 ) -> ModelTestsRunResponse:
+    if not get_settings().runtime_tests_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
     claims = getattr(request.state, "runtime_claims", {}) or {}
     require_scopes(claims, ["model:write"])
     enforce_model_access(claims, model_id)
