@@ -2,7 +2,7 @@
 Natural Language Query Service.
 
 Provides hybrid rules-first + LLM-fallback query translation and execution.
-The core principle: "when your LLM can't be wrong, sidecar it with Glyphh."
+The core principle: "When your LLM can't afford to be wrong, sidecar it with Glyphh."
 """
 
 import logging

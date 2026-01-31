@@ -8,7 +8,7 @@ Key Components:
 - NLQueryService: Orchestrates rules + LLM fallback
 - LLMFallback: Optional LLM-based translation (Phi-3.5-mini-instruct)
 
-Design Principle: "When your LLM can't be wrong, sidecar it with Glyphh"
+Design Principle: "When your LLM can't afford to be wrong, sidecar it with Glyphh"
 """
 
 # Use lazy imports to avoid circular dependencies and missing deps during testing

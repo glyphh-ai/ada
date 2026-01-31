@@ -3,7 +3,7 @@ Intent Matcher for Rules-Based NL Query Matching.
 
 Uses HDC similarity from the SDK's IntentEncoder to match natural language
 queries against registered intent patterns. This is the deterministic,
-rules-first approach - "when your LLM can't be wrong, sidecar it with Glyphh."
+rules-first approach - "When your LLM can't afford to be wrong, sidecar it with Glyphh."
 """
 
 import logging
