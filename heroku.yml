@@ -1,5 +1,7 @@
 # Heroku Container Deployment Configuration
-# Deploy using: heroku stack:set container && git push heroku main
+# 
+# Deploy using: heroku stack:set container
+# Then: git push heroku main
 
 setup:
   addons:
@@ -17,6 +19,6 @@ run:
   web: uvicorn main:app --host 0.0.0.0 --port $PORT
 
 release:
+  image: web
   command:
     - alembic upgrade head
-  image: web

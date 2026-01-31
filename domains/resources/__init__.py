@@ -10,6 +10,12 @@ from domains.resources.namespace_config import (
     NamespaceConfigService,
     SimilarityWeights,
 )
+from domains.resources.manager import (
+    ResourceManager,
+    ResourceUsage as ManagerResourceUsage,
+    ResourceQuota,
+    QuotaCheckResult,
+)
 
 __all__ = [
     "QuotaService",
@@ -18,4 +24,7 @@ __all__ = [
     "NamespaceConfigService",
     "NamespaceConfig",
     "SimilarityWeights",
+    "ResourceManager",
+    "ResourceQuota",
+    "QuotaCheckResult",
 ]
