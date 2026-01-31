@@ -173,6 +173,7 @@ from api.routes import (
     health_router,
     org_scoped_router,
     listeners_router,
+    nl_query_router,
 )
 
 app.include_router(health_router)
@@ -181,6 +182,7 @@ app.include_router(glyphs_router)
 app.include_router(query_router)
 app.include_router(org_scoped_router)
 app.include_router(listeners_router)
+app.include_router(nl_query_router)
 
 
 if __name__ == "__main__":
