@@ -108,12 +108,21 @@ class AuthenticationException(GlyphhRuntimeException):
 class AuthorizationException(GlyphhRuntimeException):
     """Raised when authorization fails"""
     
-    def __init__(self, operation: str, namespace: Optional[str] = None):
+    def __init__(
+        self,
+        operation: str = "access",
+        namespace: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ):
         super().__init__(
-            message=f"Not authorized to perform {operation}",
+            message=f"Not authorized to perform {operation}" + (f" on {namespace}" if namespace else ""),
             error_code="AUTHORIZATION_FAILED",
             status_code=403,
-            details={"operation": operation, "namespace": namespace}
+            details={
+                "operation": operation,
+                "namespace": namespace,
+                "user_id": user_id,
+            }
         )
 
 
