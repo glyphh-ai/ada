@@ -240,3 +240,71 @@ class ErrorDetail(BaseModel):
 class ErrorResponse(BaseModel):
     """Standard error response"""
     error: ErrorDetail
+
+
+# ============================================================================
+# Model Configuration Schemas
+# ============================================================================
+
+class SimilarityWeightsUpdate(BaseModel):
+    """Similarity weights for edge types"""
+    similarity: Optional[float] = Field(None, ge=0, le=1)
+    contrast: Optional[float] = Field(None, ge=0, le=1)
+    analogy: Optional[float] = Field(None, ge=0, le=1)
+    composition: Optional[float] = Field(None, ge=0, le=1)
+    precedes: Optional[float] = Field(None, ge=0, le=1)
+    follows: Optional[float] = Field(None, ge=0, le=1)
+    causes: Optional[float] = Field(None, ge=0, le=1)
+    prevents: Optional[float] = Field(None, ge=0, le=1)
+
+
+class ModelConfigUpdate(BaseModel):
+    """Request to update model configuration (no re-encode needed)"""
+    similarity_weights: Optional[SimilarityWeightsUpdate] = None
+    beam_width: Optional[int] = Field(None, ge=1, le=50)
+    max_tree_depth: Optional[int] = Field(None, ge=1, le=20)
+
+
+class ModelConfigResponse(BaseModel):
+    """Current model configuration"""
+    namespace: str
+    similarity_weights: Dict[str, float]
+    beam_width: int
+    max_tree_depth: int
+    resource_quotas: Dict[str, Any]
+    resource_usage: Dict[str, Any]
+    updated_at: datetime
+
+
+class ReEncodeRequest(BaseModel):
+    """Request to re-encode all glyphs"""
+    regenerate_edges: bool = Field(default=True, description="Regenerate edges after re-encoding")
+    background: bool = Field(default=True, description="Run as background job for large models")
+
+
+class ReEncodeResponse(BaseModel):
+    """Response from re-encode operation"""
+    status: str  # started, completed
+    job_id: Optional[str] = None  # If background=True
+    glyphs_processed: Optional[int] = None
+    edges_regenerated: Optional[int] = None
+    duration_ms: Optional[float] = None
+
+
+class ReEncodeStatusResponse(BaseModel):
+    """Status of a re-encode job"""
+    job_id: str
+    status: str  # pending, running, completed, failed
+    progress: float = Field(..., ge=0, le=1)
+    glyphs_total: int
+    glyphs_processed: int
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    error: Optional[str] = None
+
+
+class ClearDataResponse(BaseModel):
+    """Response from clear data operation"""
+    namespace: str
+    glyphs_deleted: int
+    edges_deleted: int
