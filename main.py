@@ -11,12 +11,14 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
-from infrastructure.config import get_settings
-from infrastructure.database import init_db, close_db
+from infrastructure.config import get_settings, validate_settings
+from infrastructure.database import init_db, close_db, get_db
 from shared.exceptions import GlyphhRuntimeException
 from shared.middleware import (
     CorrelationIDMiddleware,
@@ -39,6 +41,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan management"""
     # Startup
     logger.info("Starting Glyphh Runtime...")
+    
+    # Validate configuration
+    try:
+        validate_settings()
+        logger.info(f"Configuration validated for {settings.deployment_mode} mode")
+    except ValueError as e:
+        logger.error(f"Configuration error: {e}")
+        raise
+    
     await init_db()
     logger.info("Database initialized")
     
@@ -123,16 +134,30 @@ async def health_check() -> dict:
 
 
 @app.get("/health/ready")
-async def readiness_check() -> dict:
+async def readiness_check(db: AsyncSession = Depends(get_db)) -> dict:
     """Readiness probe - checks all dependencies"""
-    # TODO: Add actual checks for database, license, SDK
+    checks = {}
+    
+    # Check database
+    try:
+        await db.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}")
+        checks["database"] = "error"
+    
+    # Check license (placeholder)
+    checks["license"] = "ok"  # TODO: Implement actual license check
+    
+    # Check SDK (placeholder)
+    checks["sdk"] = "ok"  # TODO: Implement actual SDK check
+    
+    # Determine overall status
+    all_ok = all(v == "ok" for v in checks.values())
+    
     return {
-        "status": "ready",
-        "checks": {
-            "database": "ok",
-            "license": "ok",
-            "sdk": "ok"
-        }
+        "status": "ready" if all_ok else "degraded",
+        "checks": checks
     }
 
 
