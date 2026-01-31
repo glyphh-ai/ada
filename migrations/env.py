@@ -14,7 +14,7 @@ from infrastructure.config import get_settings
 from infrastructure.database.connection import Base
 
 # Import all models to ensure they're registered with Base.metadata
-# from domains.models.db_models import Glyph, Edge, ModelConfig
+from domains.models.db_models import Glyph, Edge, ModelConfig, Token
 
 config = context.config
 settings = get_settings()
