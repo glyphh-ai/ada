@@ -14,7 +14,7 @@
 # =============================================================================
 # Base Stage - Common dependencies
 # =============================================================================
-FROM python:3.11-slim as base
+FROM python:3.11-slim AS base
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -43,7 +43,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # =============================================================================
 # SDK Stage - Install Glyphh SDK
 # =============================================================================
-FROM base as sdk
+FROM base AS sdk
 
 ARG SDK_REF=main
 ARG SDK_TOKEN
@@ -58,7 +58,7 @@ RUN if [ -n "$SDK_TOKEN" ]; then \
 # =============================================================================
 # Full Stage - With NL Query (LLM support)
 # =============================================================================
-FROM sdk as full
+FROM sdk AS full
 
 ARG HF_TOKEN
 
@@ -84,7 +84,7 @@ ENV ENABLE_NL_QUERY=true
 # =============================================================================
 # Lite Stage - Without NL Query
 # =============================================================================
-FROM sdk as lite
+FROM sdk AS lite
 
 ENV ENABLE_NL_QUERY=false
 
@@ -92,7 +92,7 @@ ENV ENABLE_NL_QUERY=false
 # Final Stage - Runtime
 # =============================================================================
 ARG ENABLE_NL_QUERY=false
-FROM ${ENABLE_NL_QUERY:+full}${ENABLE_NL_QUERY:-lite} as final
+FROM ${ENABLE_NL_QUERY:+full}${ENABLE_NL_QUERY:-lite} AS final
 
 # Copy application code
 COPY --chown=glyphh:glyphh . /app
