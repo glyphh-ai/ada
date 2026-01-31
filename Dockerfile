@@ -2,14 +2,13 @@
 # Multi-stage build supporting full (with NL query) and lite variants
 #
 # Build args:
-#   ENABLE_NL_QUERY: "true" for full image with LLM, "false" for lite
 #   SDK_REF: Git ref for SDK (branch, tag, or commit)
 #   SDK_TOKEN: GitHub token for private SDK repo
 #   HF_TOKEN: HuggingFace token for downloading models (full only)
 #
 # Build examples:
-#   Full:  docker build --build-arg ENABLE_NL_QUERY=true --build-arg SDK_REF=main ...
-#   Lite:  docker build --build-arg ENABLE_NL_QUERY=false --build-arg SDK_REF=main ...
+#   Lite:  docker build --target lite -t glyphh-runtime:lite .
+#   Full:  docker build --target full --build-arg HF_TOKEN=xxx -t glyphh-runtime:full .
 
 # =============================================================================
 # Base Stage - Common dependencies
@@ -56,6 +55,29 @@ RUN if [ -n "$SDK_TOKEN" ]; then \
     fi
 
 # =============================================================================
+# Lite Stage - Without NL Query (default)
+# =============================================================================
+FROM sdk AS lite
+
+ENV ENABLE_NL_QUERY=false
+
+# Copy application code
+COPY --chown=glyphh:glyphh . /app
+
+# Switch to non-root user
+USER glyphh
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Default command
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# =============================================================================
 # Full Stage - With NL Query (LLM support)
 # =============================================================================
 FROM sdk AS full
@@ -80,19 +102,6 @@ RUN if [ -n "$HF_TOKEN" ]; then \
     fi
 
 ENV ENABLE_NL_QUERY=true
-
-# =============================================================================
-# Lite Stage - Without NL Query
-# =============================================================================
-FROM sdk AS lite
-
-ENV ENABLE_NL_QUERY=false
-
-# =============================================================================
-# Final Stage - Runtime
-# =============================================================================
-ARG ENABLE_NL_QUERY=false
-FROM ${ENABLE_NL_QUERY:+full}${ENABLE_NL_QUERY:-lite} AS final
 
 # Copy application code
 COPY --chown=glyphh:glyphh . /app
