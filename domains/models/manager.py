@@ -126,6 +126,14 @@ class ModelManager:
             ModelLoadException: If model fails to load
             ModelIncompatibleException: If model is incompatible with SDK
         """
+        # Check local mode model limit
+        if settings.deployment_mode == "local":
+            if len(self._models) >= settings.local_mode_max_models:
+                raise ModelLoadException(
+                    f"Local mode limit: maximum {settings.local_mode_max_models} model(s). "
+                    f"Upgrade to a production license for unlimited models."
+                )
+        
         # Import SDK components
         try:
             from glyphh import GlyphhModel, Encoder

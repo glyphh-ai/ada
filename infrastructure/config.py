@@ -77,6 +77,16 @@ class Settings(BaseSettings):
         description="Default storage quota per namespace in GB"
     )
     
+    # Local mode limits (development)
+    local_mode_max_models: int = Field(
+        default=1,
+        description="Maximum models in local mode (development limit)"
+    )
+    local_mode_max_glyphs: int = Field(
+        default=1000,
+        description="Maximum glyphs per model in local mode (development limit)"
+    )
+    
     # Edge generation
     edge_generation_strategy: Literal["eager", "lazy", "on-demand"] = Field(
         default="lazy",

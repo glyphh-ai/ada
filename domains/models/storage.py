@@ -22,13 +22,16 @@ from domains.models.schemas import (
     GlyphResponse,
     ScoredGlyph,
 )
+from infrastructure.config import get_settings
 from shared.exceptions import (
     GlyphNotFoundException,
     NamespaceNotFoundException,
+    NamespaceQuotaExceededException,
     ValidationException,
 )
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 class GlyphStorage:
@@ -74,7 +77,21 @@ class GlyphStorage:
             
         Raises:
             ValidationException: If embedding dimension is wrong
+            NamespaceQuotaExceededException: If local mode glyph limit reached
         """
+        # Check local mode glyph limit
+        if settings.deployment_mode == "local":
+            current_count = await self.count_glyphs(namespace)
+            if current_count >= settings.local_mode_max_glyphs:
+                raise NamespaceQuotaExceededException(
+                    namespace=namespace,
+                    resource="glyphs",
+                    limit=settings.local_mode_max_glyphs,
+                    current=current_count,
+                    message=f"Local mode limit: maximum {settings.local_mode_max_glyphs} glyphs. "
+                            f"Upgrade to a production license for unlimited glyphs."
+                )
+        
         # Validate embedding dimension
         if len(embedding) != 768:
             raise ValidationException(

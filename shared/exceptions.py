@@ -78,9 +78,17 @@ class NamespaceNotFoundException(GlyphhRuntimeException):
 class NamespaceQuotaExceededException(GlyphhRuntimeException):
     """Raised when a namespace exceeds its resource quota"""
     
-    def __init__(self, namespace: str, resource: str, limit: Any, current: Any):
+    def __init__(
+        self,
+        namespace: str,
+        resource: str,
+        limit: Any,
+        current: Any,
+        message: Optional[str] = None
+    ):
+        default_message = f"Namespace {namespace} exceeded {resource} quota"
         super().__init__(
-            message=f"Namespace {namespace} exceeded {resource} quota",
+            message=message or default_message,
             error_code="QUOTA_EXCEEDED",
             status_code=429,
             details={
