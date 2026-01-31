@@ -137,13 +137,21 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
 
 
 # Import and include routers
-from api.routes import deployment_router, glyphs_router, query_router, health_router, org_scoped_router
+from api.routes import (
+    deployment_router,
+    glyphs_router,
+    query_router,
+    health_router,
+    org_scoped_router,
+    listeners_router,
+)
 
 app.include_router(health_router)
 app.include_router(deployment_router)
 app.include_router(glyphs_router)
 app.include_router(query_router)
 app.include_router(org_scoped_router)
+app.include_router(listeners_router)
 
 
 if __name__ == "__main__":
