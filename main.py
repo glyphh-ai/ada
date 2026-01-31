@@ -11,14 +11,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
 
 from infrastructure.config import get_settings, validate_settings
-from infrastructure.database import init_db, close_db, get_db, async_session_maker
+from infrastructure.database import init_db, close_db, async_session_maker
 from shared.exceptions import GlyphhRuntimeException
 from shared.middleware import (
     CorrelationIDMiddleware,
@@ -138,85 +136,14 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
     )
 
 
-# Health check endpoints
-@app.get("/health")
-async def health_check() -> dict:
-    """Liveness probe"""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat() + "Z"
-    }
-
-
-@app.get("/health/ready")
-async def readiness_check(db: AsyncSession = Depends(get_db)) -> dict:
-    """Readiness probe - checks all dependencies"""
-    checks = {}
-    
-    # Check database
-    try:
-        await db.execute(text("SELECT 1"))
-        checks["database"] = "ok"
-    except Exception as e:
-        logger.error(f"Database health check failed: {e}")
-        checks["database"] = "error"
-    
-    # Check license (placeholder)
-    checks["license"] = "ok"  # TODO: Implement actual license check
-    
-    # Check SDK (placeholder)
-    checks["sdk"] = "ok"  # TODO: Implement actual SDK check
-    
-    # Determine overall status
-    all_ok = all(v == "ok" for v in checks.values())
-    
-    return {
-        "status": "ready" if all_ok else "degraded",
-        "checks": checks
-    }
-
-
-# CLI-facing deployment API endpoints
-@app.get("/api/status")
-async def get_status(manager: ModelManager = Depends(get_model_manager)) -> dict:
-    """Runtime status for CLI"""
-    uptime = datetime.utcnow() - _start_time
-    models = await manager.list_models() if manager else []
-    return {
-        "version": "1.0.0",
-        "models_loaded": len(models),
-        "uptime": str(uptime),
-        "deployment_mode": settings.deployment_mode
-    }
-
-
-@app.get("/api/models")
-async def list_models(manager: ModelManager = Depends(get_model_manager)) -> dict:
-    """List all deployed models"""
-    models = await manager.list_models()
-    return {"models": [m.model_dump() for m in models]}
-
-
-@app.delete("/api/models/{model_id}")
-async def delete_model(
-    model_id: str,
-    manager: ModelManager = Depends(get_model_manager)
-) -> dict:
-    """Remove a deployed model"""
-    await manager.unload_model(model_id, delete_data=True)
-    return {"status": "deleted", "model_id": model_id}
-
-
 # Import and include routers
-# from domains.deploy.routes import router as deploy_router
-# from domains.models.routes import router as models_router
-# from domains.query.routes import router as query_router
-# from domains.tokens.routes import router as tokens_router
+from api.routes import deployment_router, glyphs_router, query_router, health_router, org_scoped_router
 
-# app.include_router(deploy_router, prefix="/api", tags=["deployment"])
-# app.include_router(models_router, prefix="/api", tags=["models"])
-# app.include_router(query_router, prefix="/api/v1", tags=["query"])
-# app.include_router(tokens_router, prefix="/api", tags=["tokens"])
+app.include_router(health_router)
+app.include_router(deployment_router)
+app.include_router(glyphs_router)
+app.include_router(query_router)
+app.include_router(org_scoped_router)
 
 
 if __name__ == "__main__":
