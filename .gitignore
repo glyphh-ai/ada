@@ -63,6 +63,6 @@ logs/
 Thumbs.db
 
 # Model weights (downloaded at runtime)
-models/
+/models/
 *.bin
 *.safetensors
