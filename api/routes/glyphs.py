@@ -15,8 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from domains.models.storage import GlyphStorage
 from domains.models.schemas import CreateGlyphResponse, GlyphResponse
+from domains.resources.manager import ResourceManager
 from infrastructure.database import get_db
-from shared.exceptions import GlyphNotFoundException, ValidationException
+from shared.exceptions import GlyphNotFoundException, NamespaceQuotaExceededException, ValidationException
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/{namespace}/glyphs", tags=["glyphs"])
@@ -55,6 +56,14 @@ async def get_storage(db: AsyncSession = Depends(get_db)) -> GlyphStorage:
     return GlyphStorage(db)
 
 
+async def get_resource_manager() -> ResourceManager:
+    """Get resource manager instance."""
+    from main import resource_manager
+    if resource_manager is None:
+        raise HTTPException(status_code=503, detail="Resource manager not initialized")
+    return resource_manager
+
+
 async def get_encoder(namespace: str):
     """Get encoder for namespace."""
     from main import model_manager
@@ -74,6 +83,7 @@ async def create_glyph(
     namespace: str,
     request: CreateGlyphRequest,
     storage: GlyphStorage = Depends(get_storage),
+    resource_mgr: ResourceManager = Depends(get_resource_manager),
 ) -> CreateGlyphResponse:
     """
     Create a new glyph.
@@ -81,6 +91,9 @@ async def create_glyph(
     Encodes the concept text and stores the resulting glyph.
     """
     try:
+        # Check quota before creating
+        await resource_mgr.enforce_quota(namespace, additional_glyphs=1)
+        
         # Get encoder for namespace
         encoder = await get_encoder(namespace)
         
@@ -95,8 +108,13 @@ async def create_glyph(
             metadata=request.metadata,
         )
         
+        # Invalidate resource cache
+        resource_mgr.invalidate_cache(namespace)
+        
         return result
         
+    except NamespaceQuotaExceededException as e:
+        raise HTTPException(status_code=429, detail=str(e))
     except ValidationException as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -109,6 +127,7 @@ async def create_glyphs_batch(
     namespace: str,
     request: BatchCreateGlyphRequest,
     storage: GlyphStorage = Depends(get_storage),
+    resource_mgr: ResourceManager = Depends(get_resource_manager),
 ) -> Dict[str, Any]:
     """
     Create multiple glyphs in a batch.
@@ -116,6 +135,9 @@ async def create_glyphs_batch(
     Encodes all concepts and stores them in a single transaction.
     """
     try:
+        # Check quota before creating batch
+        await resource_mgr.enforce_quota(namespace, additional_glyphs=len(request.concepts))
+        
         encoder = await get_encoder(namespace)
         
         results = []
@@ -142,6 +164,9 @@ async def create_glyphs_batch(
                     "error": str(e)
                 })
         
+        # Invalidate resource cache
+        resource_mgr.invalidate_cache(namespace)
+        
         return {
             "created": len(results),
             "failed": len(errors),
@@ -149,6 +174,8 @@ async def create_glyphs_batch(
             "errors": errors,
         }
         
+    except NamespaceQuotaExceededException as e:
+        raise HTTPException(status_code=429, detail=str(e))
     except Exception as e:
         logger.error(f"Batch create failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

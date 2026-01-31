@@ -23,6 +23,7 @@ from shared.middleware import (
     LoggingMiddleware,
 )
 from domains.models.manager import ModelManager
+from domains.resources.manager import ResourceManager
 
 # Configure structured logging
 logging.basicConfig(
@@ -36,6 +37,7 @@ _start_time = datetime.utcnow()
 
 # Global model manager instance
 model_manager: ModelManager = None
+resource_manager: ResourceManager = None
 
 
 def get_model_manager() -> ModelManager:
@@ -43,10 +45,15 @@ def get_model_manager() -> ModelManager:
     return model_manager
 
 
+def get_resource_manager() -> ResourceManager:
+    """Dependency for getting resource manager"""
+    return resource_manager
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan management"""
-    global model_manager
+    global model_manager, resource_manager
     
     # Startup
     logger.info("Starting Glyphh Runtime...")
@@ -66,15 +73,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     model_manager = ModelManager(async_session_maker)
     logger.info("Model manager initialized")
     
+    # Initialize resource manager
+    resource_manager = ResourceManager(async_session_maker)
+    logger.info("Resource manager initialized")
+    
     # TODO: Initialize licensing service
     # TODO: Load any pre-configured models
     
     yield
     
-    # Shutdown
+    # Graceful shutdown
     logger.info("Shutting down Glyphh Runtime...")
+    
+    # Close WebSocket connections
+    try:
+        from api.routes.listeners import get_listener_service
+        listener_service = get_listener_service()
+        await listener_service.close_all_connections("Server shutdown")
+        logger.info("WebSocket connections closed")
+    except Exception as e:
+        logger.warning(f"Error closing WebSocket connections: {e}")
+    
+    # Allow in-flight requests to complete (30s timeout handled by uvicorn)
+    logger.info("Draining connections...")
+    
+    # Close database connections
     await close_db()
     logger.info("Database connections closed")
+    
+    # Flush logs
+    logging.shutdown()
+    logger.info("Shutdown complete")
 
 
 # Create FastAPI application

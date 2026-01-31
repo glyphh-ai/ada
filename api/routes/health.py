@@ -81,7 +81,7 @@ async def get_metrics() -> Dict[str, Any]:
     
     Returns runtime metrics for monitoring.
     """
-    from main import _start_time, model_manager
+    from main import _start_time, model_manager, resource_manager
     
     uptime_seconds = (datetime.utcnow() - _start_time).total_seconds()
     models_loaded = 0
@@ -93,6 +93,22 @@ async def get_metrics() -> Dict[str, Any]:
         except Exception:
             pass
     
+    # Get resource usage
+    resource_metrics = {}
+    if resource_manager:
+        try:
+            system_usage = await resource_manager.get_system_usage()
+            resource_metrics = {
+                "runtime_memory_mb": system_usage["process"]["memory_mb"],
+                "runtime_memory_percent": system_usage["process"]["memory_percent"],
+                "runtime_cpu_percent": system_usage["process"]["cpu_percent"],
+                "runtime_total_glyphs": system_usage["namespaces"]["total_glyphs"],
+                "runtime_total_edges": system_usage["namespaces"]["total_edges"],
+                "runtime_namespaces_count": system_usage["namespaces"]["count"],
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get resource metrics: {e}")
+    
     # Return metrics in a simple format
     # TODO: Implement proper Prometheus format
     return {
@@ -100,4 +116,41 @@ async def get_metrics() -> Dict[str, Any]:
         "runtime_models_loaded": models_loaded,
         "runtime_requests_total": 0,  # TODO: Track requests
         "runtime_errors_total": 0,    # TODO: Track errors
+        **resource_metrics,
     }
+
+
+@router.get("/resources")
+async def get_resource_usage() -> Dict[str, Any]:
+    """
+    Get detailed resource usage for all namespaces.
+    
+    Returns memory, storage, and glyph counts per namespace.
+    """
+    from main import resource_manager
+    
+    if resource_manager is None:
+        return {"error": "Resource manager not initialized"}
+    
+    try:
+        system_usage = await resource_manager.get_system_usage()
+        all_usage = await resource_manager.get_all_usage()
+        
+        return {
+            "system": system_usage,
+            "namespaces": [
+                {
+                    "namespace": u.namespace,
+                    "memory_mb": u.memory_mb,
+                    "storage_mb": u.storage_mb,
+                    "glyph_count": u.glyph_count,
+                    "edge_count": u.edge_count,
+                    "last_updated": u.last_updated.isoformat() + "Z",
+                }
+                for u in all_usage
+            ],
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+    except Exception as e:
+        logger.error(f"Failed to get resource usage: {e}")
+        return {"error": str(e)}
