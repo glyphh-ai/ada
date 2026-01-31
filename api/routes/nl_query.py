@@ -54,7 +54,7 @@ class TranslationDebugResponse(BaseModel):
     match_method: str
 
 
-# Dependency injection
+# Service factory
 def get_nl_query_service():
     """Get NL query service instance."""
     from main import model_manager
@@ -80,13 +80,19 @@ def get_nl_query_service():
     llm_fallback = None
     try:
         from domains.nl_query.llm_fallback import LLMFallback
-        llm_fallback = LLMFallback()
+        llm_fallback = LLMFallback(model_name=settings.nl_model)
         if not llm_fallback.is_available():
             llm_fallback = None
+            logger.info("LLM fallback disabled (transformers not available)")
     except ImportError:
-        pass
+        logger.info("LLM fallback disabled (import error)")
     
-    return NLQueryService(query_service, intent_matcher, llm_fallback)
+    return NLQueryService(
+        query_service=query_service,
+        intent_matcher=intent_matcher,
+        llm_fallback=llm_fallback,
+        confidence_threshold=0.85,
+    )
 
 
 # Endpoints
@@ -105,6 +111,8 @@ async def execute_nl_query(
     """
     service = get_nl_query_service()
     
+    logger.info(f"NL query: namespace={namespace}, query='{request.query}'")
+    
     result = await service.execute_nl_query(
         namespace=namespace,
         query=request.query,
@@ -117,6 +125,8 @@ async def execute_nl_query(
             "Try rephrasing your query",
             "Use keywords like 'find', 'similar', 'verify', 'predict'",
             "Example: 'find similar to machine learning'",
+            "Example: 'verify that X is related to Y'",
+            "Example: 'predict what comes after X'",
         ]
         raise HTTPException(
             status_code=422,
@@ -124,6 +134,7 @@ async def execute_nl_query(
                 "message": "Could not understand query",
                 "suggestions": suggestions,
                 "original_query": request.query,
+                "confidence": result.confidence,
             }
         )
     
@@ -166,6 +177,8 @@ async def debug_translation(
     actually executing it.
     """
     service = get_nl_query_service()
+    
+    logger.info(f"Debug translation: namespace={namespace}, query='{request.query}'")
     
     match_result, match_method = await service.translate_query(request.query)
     

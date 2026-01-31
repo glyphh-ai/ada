@@ -1,8 +1,9 @@
 """
-Intent Matcher for Natural Language Query.
+Intent Matcher for Rules-Based NL Query Matching.
 
-Rules-based intent matching using pattern matching and
-optional HDC similarity for fuzzy matching.
+Uses HDC similarity from the SDK's IntentEncoder to match natural language
+queries against registered intent patterns. This is the deterministic,
+rules-first approach - "when your LLM can't be wrong, sidecar it with Glyphh."
 """
 
 import logging
@@ -10,305 +11,278 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from domains.nl_query.default_intents import (
-    DEFAULT_INTENT_PATTERNS,
-    INTENT_SIMILARITY_SEARCH,
-    INTENT_FACT_TREE,
-    INTENT_TEMPORAL_PREDICTION,
-    INTENT_GLYPH_LOOKUP,
-    INTENT_EDGE_QUERY,
-    PARAMETER_PATTERNS,
-    get_default_patterns,
-)
-
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class MatchResult:
-    """Result of intent matching."""
+class IntentMatch:
+    """Result of matching a query against intent patterns."""
     intent: str
     confidence: float
     parameters: Dict[str, str]
-    pattern_matched: Optional[str] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "intent": self.intent,
-            "confidence": self.confidence,
-            "parameters": self.parameters,
-            "pattern_matched": self.pattern_matched,
-        }
+    pattern_matched: Optional[str]
+    structured_query: Dict[str, Any]
 
 
 class IntentMatcher:
     """
-    Rules-based intent matcher for natural language queries.
+    Rules-based intent matcher using HDC similarity.
     
-    Uses pattern matching with optional HDC similarity for
-    fuzzy matching when exact patterns don't match.
-    
-    Responsibilities:
-    - Load intent patterns from model or defaults
-    - Match queries against patterns
-    - Extract parameters from matched patterns
-    - Return confidence scores
+    Matches natural language queries against registered patterns
+    using the SDK's IntentEncoder for deterministic matching.
     """
     
-    def __init__(
-        self,
-        patterns: Optional[Dict[str, List[str]]] = None,
-        encoder: Optional[Any] = None,
-        confidence_threshold: float = 0.85,
-    ):
+    def __init__(self, confidence_threshold: float = 0.85):
         """
-        Initialize IntentMatcher.
+        Initialize the IntentMatcher.
         
         Args:
-            patterns: Custom intent patterns (uses defaults if None)
-            encoder: Optional SDK encoder for HDC similarity
             confidence_threshold: Minimum confidence for a match
         """
-        self._patterns = patterns or get_default_patterns()
-        self._encoder = encoder
-        self._confidence_threshold = confidence_threshold
-        self._compiled_patterns: Dict[str, List[Tuple[str, re.Pattern]]] = {}
-        self._encoded_patterns: Dict[str, List[Tuple[str, Any]]] = {}
+        self.confidence_threshold = confidence_threshold
+        self._encoder = None
+        self._patterns_loaded = False
         
-        # Compile regex patterns
-        self._compile_patterns()
-        
-        # Encode patterns if encoder available
-        if encoder:
-            self._encode_patterns()
-    
-    def _compile_patterns(self) -> None:
-        """Compile pattern strings to regex."""
-        for intent, patterns in self._patterns.items():
-            self._compiled_patterns[intent] = []
-            
-            for pattern in patterns:
-                # Convert pattern template to regex
-                regex_pattern = pattern
-                for param, param_regex in PARAMETER_PATTERNS.items():
-                    regex_pattern = regex_pattern.replace(param, param_regex)
+    def _get_encoder(self):
+        """Lazy-load the SDK IntentEncoder."""
+        if self._encoder is None:
+            try:
+                from glyphh.encoder.intent import IntentEncoder
+                from glyphh.core.config import EncoderConfig
                 
-                # Make it case-insensitive and match full string
-                regex_pattern = f"^{regex_pattern}$"
-                
-                try:
-                    compiled = re.compile(regex_pattern, re.IGNORECASE)
-                    self._compiled_patterns[intent].append((pattern, compiled))
-                except re.error as e:
-                    logger.warning(f"Failed to compile pattern '{pattern}': {e}")
+                config = EncoderConfig(dimension=10000, seed=42)
+                self._encoder = IntentEncoder(config)
+                self._encoder.add_defaults()
+                self._patterns_loaded = True
+                logger.info(f"IntentEncoder initialized with {len(self._encoder.get_patterns())} patterns")
+            except ImportError as e:
+                logger.warning(f"SDK IntentEncoder not available: {e}")
+                self._encoder = None
+        return self._encoder
     
-    def _encode_patterns(self) -> None:
-        """Encode patterns using HDC encoder for similarity matching."""
-        if not self._encoder:
-            return
-        
-        for intent, patterns in self._patterns.items():
-            self._encoded_patterns[intent] = []
-            
-            for pattern in patterns:
-                try:
-                    # Remove parameter placeholders for encoding
-                    clean_pattern = pattern
-                    for param in PARAMETER_PATTERNS:
-                        clean_pattern = clean_pattern.replace(param, "something")
-                    
-                    # Encode using SDK encoder
-                    embedding = self._encoder.encode_text(clean_pattern)
-                    self._encoded_patterns[intent].append((pattern, embedding))
-                except Exception as e:
-                    logger.warning(f"Failed to encode pattern '{pattern}': {e}")
-    
-    def match_intent(self, query: str) -> Optional[MatchResult]:
+    async def match_intent(self, query: str) -> Optional[IntentMatch]:
         """
-        Match a query against intent patterns.
+        Match a query against registered intent patterns.
+        
+        Args:
+            query: Natural language query to match
+            
+        Returns:
+            IntentMatch if confidence >= threshold, None otherwise
+        """
+        encoder = self._get_encoder()
+        
+        if encoder is None:
+            # Fallback to simple keyword matching
+            return self._fallback_match(query)
+        
+        try:
+            # Use SDK's IntentEncoder for HDC similarity matching
+            match = encoder.match_intent(query, self.confidence_threshold)
+            
+            # Extract parameters from query
+            parameters = self._extract_parameters(query, match.intent_type)
+            
+            # Build structured query with parameters
+            structured_query = self._build_structured_query(
+                match.structured_query,
+                parameters,
+                query
+            )
+            
+            return IntentMatch(
+                intent=match.intent_type,
+                confidence=match.confidence,
+                parameters=parameters,
+                pattern_matched=match.matched_phrase,
+                structured_query=structured_query,
+            )
+        except Exception as e:
+            logger.warning(f"Intent matching failed: {e}")
+            return self._fallback_match(query)
+    
+    def _fallback_match(self, query: str) -> Optional[IntentMatch]:
+        """
+        Simple keyword-based fallback when SDK is unavailable.
         
         Args:
             query: Natural language query
             
         Returns:
-            MatchResult if match found above threshold, None otherwise
+            IntentMatch based on keyword matching
         """
-        query = query.strip()
-        
-        # Try exact pattern matching first
-        result = self._match_exact(query)
-        if result and result.confidence >= self._confidence_threshold:
-            return result
-        
-        # Try HDC similarity matching if encoder available
-        if self._encoder and self._encoded_patterns:
-            result = self._match_similarity(query)
-            if result and result.confidence >= self._confidence_threshold:
-                return result
-        
-        # Try fuzzy pattern matching
-        result = self._match_fuzzy(query)
-        if result and result.confidence >= self._confidence_threshold:
-            return result
-        
-        return None
-    
-    def _match_exact(self, query: str) -> Optional[MatchResult]:
-        """Try exact regex pattern matching."""
-        for intent, patterns in self._compiled_patterns.items():
-            for pattern_str, compiled in patterns:
-                match = compiled.match(query)
-                if match:
-                    # Extract parameters
-                    params = self._extract_parameters(pattern_str, match)
-                    
-                    return MatchResult(
-                        intent=intent,
-                        confidence=1.0,
-                        parameters=params,
-                        pattern_matched=pattern_str,
-                    )
-        
-        return None
-    
-    def _match_similarity(self, query: str) -> Optional[MatchResult]:
-        """Match using HDC similarity."""
-        if not self._encoder:
-            return None
-        
-        try:
-            import numpy as np
-            
-            # Encode query
-            query_embedding = self._encoder.encode_text(query)
-            
-            best_match = None
-            best_score = 0.0
-            best_intent = None
-            best_pattern = None
-            
-            for intent, patterns in self._encoded_patterns.items():
-                for pattern_str, pattern_embedding in patterns:
-                    # Compute cosine similarity
-                    similarity = np.dot(query_embedding, pattern_embedding) / (
-                        np.linalg.norm(query_embedding) * np.linalg.norm(pattern_embedding)
-                    )
-                    
-                    if similarity > best_score:
-                        best_score = similarity
-                        best_intent = intent
-                        best_pattern = pattern_str
-            
-            if best_intent and best_score >= self._confidence_threshold:
-                # Try to extract parameters using fuzzy matching
-                params = self._extract_parameters_fuzzy(best_pattern, query)
-                
-                return MatchResult(
-                    intent=best_intent,
-                    confidence=float(best_score),
-                    parameters=params,
-                    pattern_matched=best_pattern,
-                )
-                
-        except Exception as e:
-            logger.warning(f"Similarity matching failed: {e}")
-        
-        return None
-    
-    def _match_fuzzy(self, query: str) -> Optional[MatchResult]:
-        """Try fuzzy pattern matching using keyword detection."""
         query_lower = query.lower()
         
-        # Keyword-based intent detection
-        intent_keywords = {
-            INTENT_SIMILARITY_SEARCH: ["similar", "like", "find", "search", "related"],
-            INTENT_FACT_TREE: ["verify", "explain", "prove", "true", "evidence", "support"],
-            INTENT_TEMPORAL_PREDICTION: ["predict", "next", "future", "forecast", "after", "before"],
-            INTENT_GLYPH_LOOKUP: ["glyph", "get", "show", "retrieve", "fetch"],
-            INTENT_EDGE_QUERY: ["related", "connection", "edge", "link", "connect"],
-        }
+        # Simple keyword patterns
+        patterns = [
+            (["find", "search", "similar", "like"], "similarity_search", 0.7),
+            (["verify", "explain", "prove", "evidence"], "fact_tree", 0.7),
+            (["predict", "forecast", "next", "after"], "temporal_predict", 0.7),
+            (["list", "show all", "get all"], "list_all", 0.7),
+            (["count", "how many"], "count", 0.7),
+            (["compare", "difference", "versus", "vs"], "compare", 0.7),
+        ]
         
-        best_intent = None
+        best_match = None
         best_score = 0.0
         
-        for intent, keywords in intent_keywords.items():
+        for keywords, intent, base_score in patterns:
             matches = sum(1 for kw in keywords if kw in query_lower)
-            score = matches / len(keywords)
-            
-            if score > best_score:
-                best_score = score
-                best_intent = intent
+            if matches > 0:
+                score = base_score + (matches * 0.05)
+                if score > best_score:
+                    best_score = score
+                    best_match = intent
         
-        if best_intent and best_score > 0:
-            # Extract the main content as parameter
-            params = {"query": query}
+        if best_match and best_score >= self.confidence_threshold:
+            parameters = self._extract_parameters(query, best_match)
+            structured_query = self._build_structured_query(
+                self._get_default_template(best_match),
+                parameters,
+                query
+            )
             
-            # Adjust confidence based on keyword matches
-            confidence = min(0.9, 0.5 + best_score * 0.4)
-            
-            return MatchResult(
-                intent=best_intent,
-                confidence=confidence,
-                parameters=params,
+            return IntentMatch(
+                intent=best_match,
+                confidence=best_score,
+                parameters=parameters,
                 pattern_matched=None,
+                structured_query=structured_query,
             )
         
         return None
     
-    def _extract_parameters(
-        self,
-        pattern: str,
-        match: re.Match,
-    ) -> Dict[str, str]:
-        """Extract parameters from regex match."""
+    def _extract_parameters(self, query: str, intent: str) -> Dict[str, str]:
+        """
+        Extract parameters from the query based on intent type.
+        
+        Args:
+            query: Original query
+            intent: Matched intent type
+            
+        Returns:
+            Dictionary of extracted parameters
+        """
         params = {}
-        groups = match.groups()
         
-        # Find parameter names in pattern
-        param_names = []
-        for param in PARAMETER_PATTERNS:
-            if param in pattern:
-                param_names.append(param.strip("{}"))
+        # Remove common intent keywords to get the concept/subject
+        query_clean = query.lower()
         
-        # Map groups to parameter names
-        for i, name in enumerate(param_names):
-            if i < len(groups):
-                params[name] = groups[i].strip()
+        # Remove intent-specific keywords
+        remove_patterns = {
+            "similarity_search": ["find", "search", "similar to", "like", "what's like", "show me"],
+            "fact_tree": ["verify", "explain", "prove", "is it true that", "evidence for"],
+            "temporal_predict": ["predict", "forecast", "what comes after", "next state", "what will happen"],
+            "list_all": ["list all", "show all", "get all", "enumerate"],
+            "count": ["how many", "count", "total number of"],
+            "compare": ["compare", "difference between", "versus", "vs"],
+        }
+        
+        for pattern in remove_patterns.get(intent, []):
+            query_clean = query_clean.replace(pattern, "").strip()
+        
+        # Clean up extra whitespace
+        query_clean = " ".join(query_clean.split())
+        
+        if query_clean:
+            params["query"] = query_clean
+            params["concept"] = query_clean
         
         return params
     
-    def _extract_parameters_fuzzy(
+    def _build_structured_query(
         self,
-        pattern: str,
-        query: str,
-    ) -> Dict[str, str]:
-        """Extract parameters using fuzzy matching."""
-        params = {}
+        template: Dict[str, Any],
+        parameters: Dict[str, str],
+        original_query: str
+    ) -> Dict[str, Any]:
+        """
+        Build a structured query from template and parameters.
         
-        # Find parameter placeholders
-        for param in PARAMETER_PATTERNS:
-            if param in pattern:
-                param_name = param.strip("{}")
-                # Use the whole query as the parameter value
-                params[param_name] = query
-                break
+        Args:
+            template: Query template from pattern
+            parameters: Extracted parameters
+            original_query: Original NL query
+            
+        Returns:
+            Structured query ready for execution
+        """
+        query = template.copy()
         
-        return params
+        # Add the query/concept parameter
+        if "query" in parameters:
+            query["query"] = parameters["query"]
+        elif "concept" in parameters:
+            query["query"] = parameters["concept"]
+        else:
+            query["query"] = original_query
+        
+        return query
     
-    def get_patterns(self) -> Dict[str, List[str]]:
-        """Get current intent patterns."""
-        return self._patterns.copy()
+    def _get_default_template(self, intent: str) -> Dict[str, Any]:
+        """Get default query template for an intent."""
+        templates = {
+            "similarity_search": {
+                "operation": "similarity_search",
+                "top_k": 10,
+            },
+            "fact_tree": {
+                "operation": "fact_tree",
+                "max_depth": 3,
+            },
+            "temporal_predict": {
+                "operation": "temporal_predict",
+                "steps_ahead": 1,
+                "beam_width": 3,
+            },
+            "list_all": {
+                "operation": "list",
+                "limit": 100,
+            },
+            "count": {
+                "operation": "count",
+            },
+            "compare": {
+                "operation": "compare",
+            },
+        }
+        return templates.get(intent, {"operation": intent})
     
-    def add_patterns(self, intent: str, patterns: List[str]) -> None:
-        """Add patterns for an intent."""
-        if intent not in self._patterns:
-            self._patterns[intent] = []
+    def get_intents(self) -> Dict[str, Any]:
+        """
+        Get available intents and their patterns.
         
-        self._patterns[intent].extend(patterns)
+        Returns:
+            Dictionary with intent names and example patterns
+        """
+        encoder = self._get_encoder()
         
-        # Recompile patterns
-        self._compile_patterns()
+        if encoder is not None:
+            patterns = encoder.get_patterns()
+            return {
+                "intents": [p.intent_type for p in patterns],
+                "patterns": {
+                    p.intent_type: p.example_phrases
+                    for p in patterns
+                }
+            }
         
-        # Re-encode if encoder available
-        if self._encoder:
-            self._encode_patterns()
+        # Fallback patterns
+        return {
+            "intents": [
+                "similarity_search",
+                "fact_tree",
+                "temporal_predict",
+                "list_all",
+                "count",
+                "compare",
+            ],
+            "patterns": {
+                "similarity_search": ["find similar to", "search for", "what's like"],
+                "fact_tree": ["verify", "explain", "prove"],
+                "temporal_predict": ["predict", "what comes after", "forecast"],
+                "list_all": ["list all", "show all"],
+                "count": ["how many", "count"],
+                "compare": ["compare", "difference between"],
+            }
+        }

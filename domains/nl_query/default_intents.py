@@ -1,113 +1,219 @@
 """
-Default Intent Patterns for Natural Language Query.
+Default Intent Patterns for the Runtime.
 
-Built-in patterns for common query types. Models can override
-or extend these patterns.
+These patterns are used when the SDK's IntentEncoder is not available
+or as a fallback. They provide basic keyword-based matching for
+common Glyphh operations.
+
+Note: The SDK's default_intents.py contains the authoritative patterns
+that use HDC similarity. This file provides a simpler fallback.
 """
 
-from typing import Dict, List
+from dataclasses import dataclass
+from typing import Any, Dict, List
 
 
-# Intent categories
-INTENT_SIMILARITY_SEARCH = "similarity_search"
-INTENT_FACT_TREE = "fact_tree"
-INTENT_TEMPORAL_PREDICTION = "temporal_prediction"
-INTENT_GLYPH_LOOKUP = "glyph_lookup"
-INTENT_EDGE_QUERY = "edge_query"
-
-
-# Default patterns for each intent
-DEFAULT_INTENT_PATTERNS: Dict[str, List[str]] = {
-    INTENT_SIMILARITY_SEARCH: [
-        "find similar to {query}",
-        "what's like {query}",
-        "search for {query}",
-        "find {query}",
-        "look up {query}",
-        "similar to {query}",
-        "related to {query}",
-        "concepts like {query}",
-        "things similar to {query}",
-        "what is similar to {query}",
-        "show me things like {query}",
-        "find concepts related to {query}",
-    ],
+@dataclass
+class RuntimeIntentPattern:
+    """
+    A simple intent pattern for keyword-based matching.
     
-    INTENT_FACT_TREE: [
-        "verify {claim}",
-        "explain {claim}",
-        "prove {claim}",
-        "is it true that {claim}",
-        "check if {claim}",
-        "validate {claim}",
-        "confirm {claim}",
-        "evidence for {claim}",
-        "support for {claim}",
-        "why is {claim}",
-        "how do we know {claim}",
-        "what supports {claim}",
-    ],
+    Used as fallback when SDK IntentEncoder is unavailable.
+    """
+    intent_type: str
+    keywords: List[str]
+    query_template: Dict[str, Any]
+    description: str
+
+
+# Default patterns for common Glyphh operations
+DEFAULT_RUNTIME_PATTERNS = [
+    # Similarity Search - find similar concepts
+    RuntimeIntentPattern(
+        intent_type="similarity_search",
+        keywords=[
+            "find",
+            "search",
+            "similar",
+            "like",
+            "matching",
+            "lookup",
+            "show me",
+        ],
+        query_template={
+            "operation": "similarity_search",
+            "top_k": 10,
+        },
+        description="Find concepts similar to the query",
+    ),
     
-    INTENT_TEMPORAL_PREDICTION: [
-        "predict {state}",
-        "what comes after {state}",
-        "what happens next after {state}",
-        "forecast {state}",
-        "future of {state}",
-        "what follows {state}",
-        "next step after {state}",
-        "what will happen to {state}",
-        "predict the future of {state}",
-        "what comes before {state}",
-        "what led to {state}",
-    ],
+    # Fact Tree - verify and explain relationships
+    RuntimeIntentPattern(
+        intent_type="fact_tree",
+        keywords=[
+            "verify",
+            "explain",
+            "prove",
+            "evidence",
+            "why",
+            "how",
+            "is it true",
+            "show proof",
+        ],
+        query_template={
+            "operation": "fact_tree",
+            "max_depth": 3,
+        },
+        description="Verify a claim and show supporting evidence",
+    ),
     
-    INTENT_GLYPH_LOOKUP: [
-        "get glyph {id}",
-        "show me {id}",
-        "retrieve {id}",
-        "fetch glyph {id}",
-        "display {id}",
-        "what is glyph {id}",
-        "details of {id}",
-        "info about {id}",
-    ],
+    # Temporal Prediction - predict future states
+    RuntimeIntentPattern(
+        intent_type="temporal_predict",
+        keywords=[
+            "predict",
+            "forecast",
+            "next",
+            "after",
+            "future",
+            "what will",
+            "what comes",
+        ],
+        query_template={
+            "operation": "temporal_predict",
+            "steps_ahead": 1,
+            "beam_width": 3,
+        },
+        description="Predict future states based on current state",
+    ),
     
-    INTENT_EDGE_QUERY: [
-        "how is {source} related to {target}",
-        "connections to {source}",
-        "relationships of {source}",
-        "edges from {source}",
-        "what connects {source} and {target}",
-        "link between {source} and {target}",
-        "how does {source} connect to {target}",
-        "neighbors of {source}",
-    ],
-}
+    # List All - enumerate concepts
+    RuntimeIntentPattern(
+        intent_type="list_all",
+        keywords=[
+            "list all",
+            "show all",
+            "get all",
+            "enumerate",
+            "all items",
+            "everything",
+        ],
+        query_template={
+            "operation": "list",
+            "limit": 100,
+        },
+        description="List all concepts in the namespace",
+    ),
+    
+    # Count - count concepts
+    RuntimeIntentPattern(
+        intent_type="count",
+        keywords=[
+            "how many",
+            "count",
+            "total",
+            "number of",
+        ],
+        query_template={
+            "operation": "count",
+        },
+        description="Count the number of concepts",
+    ),
+    
+    # Compare - compare two concepts
+    RuntimeIntentPattern(
+        intent_type="compare",
+        keywords=[
+            "compare",
+            "difference",
+            "versus",
+            "vs",
+            "contrast",
+            "between",
+        ],
+        query_template={
+            "operation": "compare",
+        },
+        description="Compare two concepts",
+    ),
+    
+    # Edge Query - find relationships
+    RuntimeIntentPattern(
+        intent_type="edge_query",
+        keywords=[
+            "related",
+            "relationship",
+            "connection",
+            "edge",
+            "link",
+            "connected to",
+        ],
+        query_template={
+            "operation": "get_edges",
+        },
+        description="Find relationships between concepts",
+    ),
+]
 
 
-# Pattern templates for extracting parameters
-PARAMETER_PATTERNS = {
-    "{query}": r"(.+)",
-    "{claim}": r"(.+)",
-    "{state}": r"(.+)",
-    "{id}": r"([a-f0-9-]+)",
-    "{source}": r"(.+?)",
-    "{target}": r"(.+)",
-}
+def get_default_patterns() -> List[RuntimeIntentPattern]:
+    """
+    Get a copy of the default runtime intent patterns.
+    
+    Returns:
+        List of RuntimeIntentPattern objects
+    """
+    return DEFAULT_RUNTIME_PATTERNS.copy()
 
 
-def get_default_patterns() -> Dict[str, List[str]]:
-    """Get default intent patterns."""
-    return DEFAULT_INTENT_PATTERNS.copy()
+def get_pattern_by_type(intent_type: str) -> RuntimeIntentPattern:
+    """
+    Get a specific default pattern by intent type.
+    
+    Args:
+        intent_type: The intent type to look up
+    
+    Returns:
+        RuntimeIntentPattern if found
+    
+    Raises:
+        KeyError: If intent_type not found in defaults
+    """
+    for pattern in DEFAULT_RUNTIME_PATTERNS:
+        if pattern.intent_type == intent_type:
+            return pattern
+    raise KeyError(f"No default pattern with intent_type '{intent_type}'")
 
 
-def get_all_intents() -> List[str]:
-    """Get list of all intent categories."""
-    return [
-        INTENT_SIMILARITY_SEARCH,
-        INTENT_FACT_TREE,
-        INTENT_TEMPORAL_PREDICTION,
-        INTENT_GLYPH_LOOKUP,
-        INTENT_EDGE_QUERY,
-    ]
+def match_keywords(query: str, patterns: List[RuntimeIntentPattern] = None) -> tuple:
+    """
+    Simple keyword-based intent matching.
+    
+    Args:
+        query: Natural language query
+        patterns: Patterns to match against (defaults to DEFAULT_RUNTIME_PATTERNS)
+    
+    Returns:
+        Tuple of (intent_type, confidence, template) or (None, 0.0, None)
+    """
+    if patterns is None:
+        patterns = DEFAULT_RUNTIME_PATTERNS
+    
+    query_lower = query.lower()
+    best_match = None
+    best_score = 0.0
+    best_template = None
+    
+    for pattern in patterns:
+        matches = sum(1 for kw in pattern.keywords if kw in query_lower)
+        if matches > 0:
+            # Score based on number of keyword matches
+            score = 0.5 + (matches * 0.1)
+            score = min(score, 0.95)  # Cap at 0.95
+            
+            if score > best_score:
+                best_score = score
+                best_match = pattern.intent_type
+                best_template = pattern.query_template.copy()
+    
+    return best_match, best_score, best_template

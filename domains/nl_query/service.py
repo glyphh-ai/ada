@@ -1,68 +1,38 @@
 """
 Natural Language Query Service.
 
-Provides hybrid rules-first + LLM-fallback query translation
-and execution.
+Provides hybrid rules-first + LLM-fallback query translation and execution.
+The core principle: "when your LLM can't be wrong, sidecar it with Glyphh."
 """
 
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
-from domains.nl_query.default_intents import (
-    INTENT_SIMILARITY_SEARCH,
-    INTENT_FACT_TREE,
-    INTENT_TEMPORAL_PREDICTION,
-    INTENT_GLYPH_LOOKUP,
-    INTENT_EDGE_QUERY,
-)
-from domains.nl_query.intent_matcher import IntentMatcher, MatchResult
-from domains.query.service import QueryService, Permissions
-from domains.models.schemas import (
-    SimilaritySearchRequest,
-    FactTreeRequest,
-    TemporalPredictRequest,
-)
-from infrastructure.config import get_settings
+from domains.nl_query.intent_matcher import IntentMatcher, IntentMatch
+from domains.query.service import QueryService
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 @dataclass
 class NLQueryResult:
-    """Result of natural language query."""
+    """Result of executing a natural language query."""
     result: Any
     query_type: str
-    match_method: str  # "rules" or "llm"
+    match_method: str  # "rules", "llm", or "none"
     confidence: float
-    translated_query: Optional[Dict[str, Any]] = None
-    query_time_ms: float = 0.0
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "result": self.result,
-            "query_type": self.query_type,
-            "match_method": self.match_method,
-            "confidence": self.confidence,
-            "translated_query": self.translated_query,
-            "query_time_ms": self.query_time_ms,
-        }
+    translated_query: Optional[Dict[str, Any]]
+    query_time_ms: float
 
 
 class NLQueryService:
     """
-    Natural Language Query Service.
+    Natural Language Query Service with hybrid rules + LLM approach.
     
-    Translates natural language queries to structured queries
-    using rules-first approach with optional LLM fallback.
-    
-    Responsibilities:
-    - Translate NL queries using IntentMatcher
-    - Fall back to LLM when rules fail (if enabled)
-    - Execute translated queries
-    - Return results with match method indicator
+    Uses rules-first matching via IntentMatcher (HDC similarity).
+    Falls back to LLM only when rules can't confidently match.
     """
     
     def __init__(
@@ -70,166 +40,275 @@ class NLQueryService:
         query_service: QueryService,
         intent_matcher: IntentMatcher,
         llm_fallback: Optional[Any] = None,
+        confidence_threshold: float = 0.85,
     ):
         """
-        Initialize NLQueryService.
+        Initialize the NL Query Service.
         
         Args:
-            query_service: QueryService for executing queries
+            query_service: QueryService for executing structured queries
             intent_matcher: IntentMatcher for rules-based matching
-            llm_fallback: Optional LLMFallback for when rules fail
+            llm_fallback: Optional LLMFallback for low-confidence queries
+            confidence_threshold: Minimum confidence for rules-based match
         """
-        self._query_service = query_service
-        self._intent_matcher = intent_matcher
-        self._llm_fallback = llm_fallback
-    
-    async def translate_query(
-        self,
-        query: str,
-    ) -> tuple[Optional[MatchResult], str]:
-        """
-        Translate natural language query to structured query.
-        
-        Args:
-            query: Natural language query
-            
-        Returns:
-            Tuple of (MatchResult, match_method)
-        """
-        # Try rules-based matching first
-        result = self._intent_matcher.match_intent(query)
-        
-        if result:
-            logger.debug(
-                f"Rules matched: intent={result.intent}, "
-                f"confidence={result.confidence:.2f}"
-            )
-            return result, "rules"
-        
-        # Try LLM fallback if available
-        if self._llm_fallback:
-            try:
-                result = await self._llm_fallback.translate(query)
-                if result:
-                    logger.debug(
-                        f"LLM matched: intent={result.intent}, "
-                        f"confidence={result.confidence:.2f}"
-                    )
-                    return result, "llm"
-            except Exception as e:
-                logger.warning(f"LLM fallback failed: {e}")
-        
-        return None, "none"
+        self.query_service = query_service
+        self.intent_matcher = intent_matcher
+        self.llm_fallback = llm_fallback
+        self.confidence_threshold = confidence_threshold
     
     async def execute_nl_query(
         self,
         namespace: str,
         query: str,
-        permissions: Optional[Permissions] = None,
         debug: bool = False,
     ) -> NLQueryResult:
         """
         Execute a natural language query.
         
+        Flow:
+        1. Try rules-based matching (IntentMatcher)
+        2. If confidence >= threshold: execute directly
+        3. If confidence < threshold AND LLM enabled: use LLM fallback
+        4. If confidence < threshold AND no LLM: return "none" match_method
+        
         Args:
-            namespace: Model namespace
+            namespace: Model namespace to query
             query: Natural language query
-            permissions: User permissions
             debug: Include translation details in response
             
         Returns:
-            NLQueryResult with execution results
+            NLQueryResult with result and match metadata
         """
         start_time = time.time()
         
-        # Translate query
-        match_result, match_method = await self.translate_query(query)
+        # Log the incoming query
+        logger.info(f"NL query received: '{query}' for namespace '{namespace}'")
         
-        if not match_result:
-            # Return error result
+        # Step 1: Try rules-based matching
+        match_result = await self.intent_matcher.match_intent(query)
+        
+        if match_result and match_result.confidence >= self.confidence_threshold:
+            # High confidence - execute directly with rules
+            logger.info(
+                f"Rules match: intent={match_result.intent}, "
+                f"confidence={match_result.confidence:.3f}"
+            )
+            
+            result = await self._execute_structured_query(
+                namespace,
+                match_result.intent,
+                match_result.structured_query,
+            )
+            
+            elapsed_ms = (time.time() - start_time) * 1000
+            
             return NLQueryResult(
-                result=None,
-                query_type="unknown",
-                match_method="none",
-                confidence=0.0,
-                translated_query={"original": query} if debug else None,
-                query_time_ms=(time.time() - start_time) * 1000,
+                result=result,
+                query_type=match_result.intent,
+                match_method="rules",
+                confidence=match_result.confidence,
+                translated_query=match_result.structured_query if debug else None,
+                query_time_ms=elapsed_ms,
             )
         
-        # Execute based on intent
-        result = await self._execute_intent(
-            namespace,
-            match_result,
-            permissions,
-        )
+        # Step 2: Try LLM fallback if available
+        if self.llm_fallback is not None:
+            logger.info("Rules confidence too low, trying LLM fallback")
+            
+            try:
+                llm_result = await self.llm_fallback.translate_query(query, namespace)
+                
+                if llm_result:
+                    result = await self._execute_structured_query(
+                        namespace,
+                        llm_result.get("operation", "similarity_search"),
+                        llm_result,
+                    )
+                    
+                    elapsed_ms = (time.time() - start_time) * 1000
+                    
+                    return NLQueryResult(
+                        result=result,
+                        query_type=llm_result.get("operation", "unknown"),
+                        match_method="llm",
+                        confidence=0.0,
+                        translated_query=llm_result if debug else None,
+                        query_time_ms=elapsed_ms,
+                    )
+            except Exception as e:
+                logger.warning(f"LLM fallback failed: {e}")
         
-        query_time_ms = (time.time() - start_time) * 1000
+        # Step 3: No match - return with "none" method
+        elapsed_ms = (time.time() - start_time) * 1000
+        
+        logger.warning(f"Could not match query: '{query}'")
         
         return NLQueryResult(
-            result=result,
-            query_type=match_result.intent,
-            match_method=match_method,
-            confidence=match_result.confidence,
-            translated_query=match_result.to_dict() if debug else None,
-            query_time_ms=query_time_ms,
+            result=None,
+            query_type="unknown",
+            match_method="none",
+            confidence=match_result.confidence if match_result else 0.0,
+            translated_query=None,
+            query_time_ms=elapsed_ms,
         )
     
-    async def _execute_intent(
+    async def translate_query(
+        self,
+        query: str
+    ) -> Tuple[Optional[IntentMatch], str]:
+        """
+        Translate a query without executing it.
+        
+        Useful for debugging and testing query translation.
+        
+        Args:
+            query: Natural language query
+            
+        Returns:
+            Tuple of (IntentMatch or None, match_method)
+        """
+        match_result = await self.intent_matcher.match_intent(query)
+        
+        if match_result and match_result.confidence >= self.confidence_threshold:
+            return match_result, "rules"
+        
+        if self.llm_fallback is not None:
+            try:
+                llm_result = await self.llm_fallback.translate_query(query, "")
+                if llm_result:
+                    # Create a synthetic IntentMatch for LLM result
+                    return IntentMatch(
+                        intent=llm_result.get("operation", "unknown"),
+                        confidence=0.0,
+                        parameters=llm_result,
+                        pattern_matched=None,
+                        structured_query=llm_result,
+                    ), "llm"
+            except Exception:
+                pass
+        
+        return match_result, "none"
+    
+    async def _execute_structured_query(
         self,
         namespace: str,
-        match_result: MatchResult,
-        permissions: Optional[Permissions],
+        operation: str,
+        query: Dict[str, Any],
     ) -> Any:
-        """Execute the matched intent."""
-        intent = match_result.intent
-        params = match_result.parameters
+        """
+        Execute a structured query against the QueryService.
         
-        if intent == INTENT_SIMILARITY_SEARCH:
-            request = SimilaritySearchRequest(
-                query=params.get("query", ""),
-                top_k=10,
-            )
-            return await self._query_service.similarity_search(
-                namespace, request, permissions
-            )
+        Args:
+            namespace: Model namespace
+            operation: Query operation type
+            query: Structured query parameters
+            
+        Returns:
+            Query result
+        """
+        from domains.models.schemas import (
+            SimilaritySearchRequest,
+            FactTreeRequest,
+            TemporalPredictRequest,
+        )
         
-        elif intent == INTENT_FACT_TREE:
-            request = FactTreeRequest(
-                claim=params.get("claim", params.get("query", "")),
-                max_depth=3,
-            )
-            return await self._query_service.generate_fact_tree(
-                namespace, request, permissions
-            )
-        
-        elif intent == INTENT_TEMPORAL_PREDICTION:
-            state = params.get("state", params.get("query", ""))
-            request = TemporalPredictRequest(
-                current_state=[state],
-                steps_ahead=3,
-            )
-            return await self._query_service.predict_temporal(
-                namespace, request, permissions
-            )
-        
-        elif intent == INTENT_GLYPH_LOOKUP:
-            # Return glyph ID for lookup
-            return {"glyph_id": params.get("id", params.get("query", ""))}
-        
-        elif intent == INTENT_EDGE_QUERY:
-            # Return edge query parameters
-            return {
-                "source": params.get("source", params.get("query", "")),
-                "target": params.get("target"),
-            }
-        
-        else:
-            logger.warning(f"Unknown intent: {intent}")
-            return None
+        try:
+            if operation == "similarity_search":
+                request = SimilaritySearchRequest(
+                    query=query.get("query", ""),
+                    top_k=query.get("top_k", 10),
+                )
+                result = await self.query_service.similarity_search(
+                    namespace=namespace,
+                    request=request,
+                )
+                return result.model_dump() if hasattr(result, 'model_dump') else result
+            
+            elif operation == "fact_tree":
+                request = FactTreeRequest(
+                    claim=query.get("query", query.get("claim", "")),
+                    max_depth=query.get("max_depth", 3),
+                )
+                result = await self.query_service.generate_fact_tree(
+                    namespace=namespace,
+                    request=request,
+                )
+                return result.model_dump() if hasattr(result, 'model_dump') else result
+            
+            elif operation == "temporal_predict":
+                current_state = query.get("current_state", [query.get("query", "")])
+                if isinstance(current_state, str):
+                    current_state = [current_state]
+                
+                request = TemporalPredictRequest(
+                    current_state=current_state,
+                    steps_ahead=query.get("steps_ahead", 1),
+                    beam_width=query.get("beam_width", 3),
+                )
+                result = await self.query_service.predict_temporal(
+                    namespace=namespace,
+                    request=request,
+                )
+                return result.model_dump() if hasattr(result, 'model_dump') else result
+            
+            elif operation == "list":
+                # List operation - use similarity search with empty query
+                request = SimilaritySearchRequest(
+                    query="",
+                    top_k=query.get("limit", 100),
+                )
+                result = await self.query_service.similarity_search(
+                    namespace=namespace,
+                    request=request,
+                )
+                return result.model_dump() if hasattr(result, 'model_dump') else result
+            
+            elif operation == "count":
+                # Count operation - use similarity search and return count
+                request = SimilaritySearchRequest(
+                    query="",
+                    top_k=1000,  # Get a large sample
+                )
+                result = await self.query_service.similarity_search(
+                    namespace=namespace,
+                    request=request,
+                )
+                return {"count": result.total_count}
+            
+            elif operation == "compare":
+                # Compare requires two concepts - use similarity search
+                request = SimilaritySearchRequest(
+                    query=query.get("query", ""),
+                    top_k=2,
+                )
+                result = await self.query_service.similarity_search(
+                    namespace=namespace,
+                    request=request,
+                )
+                return result.model_dump() if hasattr(result, 'model_dump') else result
+            
+            else:
+                # Default to similarity search
+                logger.warning(f"Unknown operation '{operation}', defaulting to similarity_search")
+                request = SimilaritySearchRequest(
+                    query=query.get("query", ""),
+                    top_k=10,
+                )
+                result = await self.query_service.similarity_search(
+                    namespace=namespace,
+                    request=request,
+                )
+                return result.model_dump() if hasattr(result, 'model_dump') else result
+                
+        except Exception as e:
+            logger.error(f"Query execution failed: {e}")
+            raise
     
     def get_intents(self) -> Dict[str, Any]:
-        """Get available intents and patterns."""
-        return {
-            "intents": list(self._intent_matcher.get_patterns().keys()),
-            "patterns": self._intent_matcher.get_patterns(),
-        }
+        """
+        Get available intents and patterns.
+        
+        Returns:
+            Dictionary with intent names and example patterns
+        """
+        return self.intent_matcher.get_intents()
