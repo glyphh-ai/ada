@@ -18,12 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from infrastructure.config import get_settings, validate_settings
-from infrastructure.database import init_db, close_db, get_db
+from infrastructure.database import init_db, close_db, get_db, async_session_maker
 from shared.exceptions import GlyphhRuntimeException
 from shared.middleware import (
     CorrelationIDMiddleware,
     LoggingMiddleware,
 )
+from domains.models.manager import ModelManager
 
 # Configure structured logging
 logging.basicConfig(
@@ -35,10 +36,20 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 _start_time = datetime.utcnow()
 
+# Global model manager instance
+model_manager: ModelManager = None
+
+
+def get_model_manager() -> ModelManager:
+    """Dependency for getting model manager"""
+    return model_manager
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan management"""
+    global model_manager
+    
     # Startup
     logger.info("Starting Glyphh Runtime...")
     
@@ -52,6 +63,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     await init_db()
     logger.info("Database initialized")
+    
+    # Initialize model manager
+    model_manager = ModelManager(async_session_maker)
+    logger.info("Model manager initialized")
     
     # TODO: Initialize licensing service
     # TODO: Load any pre-configured models
@@ -163,15 +178,33 @@ async def readiness_check(db: AsyncSession = Depends(get_db)) -> dict:
 
 # CLI-facing deployment API endpoints
 @app.get("/api/status")
-async def get_status() -> dict:
+async def get_status(manager: ModelManager = Depends(get_model_manager)) -> dict:
     """Runtime status for CLI"""
     uptime = datetime.utcnow() - _start_time
+    models = await manager.list_models() if manager else []
     return {
         "version": "1.0.0",
-        "models_loaded": 0,  # TODO: Get from ModelManager
+        "models_loaded": len(models),
         "uptime": str(uptime),
         "deployment_mode": settings.deployment_mode
     }
+
+
+@app.get("/api/models")
+async def list_models(manager: ModelManager = Depends(get_model_manager)) -> dict:
+    """List all deployed models"""
+    models = await manager.list_models()
+    return {"models": [m.model_dump() for m in models]}
+
+
+@app.delete("/api/models/{model_id}")
+async def delete_model(
+    model_id: str,
+    manager: ModelManager = Depends(get_model_manager)
+) -> dict:
+    """Remove a deployed model"""
+    await manager.unload_model(model_id, delete_data=True)
+    return {"status": "deleted", "model_id": model_id}
 
 
 # Import and include routers
