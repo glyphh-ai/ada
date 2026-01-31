@@ -366,8 +366,8 @@ class EdgeGeneratorService:
                 # Update edge
                 edge.weight = new_weight
                 edge.expires_at = new_expires_at
-                edge.metadata = {
-                    **edge.metadata,
+                edge.edge_metadata = {
+                    **edge.edge_metadata,
                     "refreshed_at": now.isoformat(),
                 }
                 refreshed_count += 1
@@ -512,7 +512,7 @@ class EdgeGeneratorService:
                 "target_glyph_id": edge.target_glyph_id,
                 "edge_type": edge.edge_type,
                 "weight": edge.weight,
-                "metadata": edge.metadata,
+                "metadata": edge.edge_metadata,
                 "created_at": edge.created_at,
                 "expires_at": edge.expires_at,
             }

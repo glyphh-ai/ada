@@ -42,7 +42,7 @@ class Glyph(Base):
     namespace = Column(String(255), nullable=False, index=True)
     concept_text = Column(Text, nullable=False)
     embedding = Column(Vector(768), nullable=False)  # 768-dim for all-MiniLM-L6-v2
-    metadata = Column(JSONB, default=dict)
+    glyph_metadata = Column("metadata", JSONB, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
@@ -101,7 +101,7 @@ class Edge(Base):
     )
     edge_type = Column(String(50), nullable=False)  # similarity, contrast, etc.
     weight = Column(Float, nullable=False)
-    metadata = Column(JSONB, default=dict)
+    edge_metadata = Column("metadata", JSONB, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     expires_at = Column(DateTime, nullable=True)  # For TTL-based cache invalidation
     

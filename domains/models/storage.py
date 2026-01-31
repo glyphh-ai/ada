@@ -109,7 +109,7 @@ class GlyphStorage:
             namespace=namespace,
             concept_text=concept_text,
             embedding=embedding,
-            metadata=metadata or {},
+            glyph_metadata=metadata or {},
         )
         
         self._session.add(glyph)
@@ -156,7 +156,7 @@ class GlyphStorage:
             id=glyph.id,
             namespace=glyph.namespace,
             concept_text=glyph.concept_text,
-            metadata=glyph.metadata,
+            metadata=glyph.glyph_metadata,
             created_at=glyph.created_at,
             updated_at=glyph.updated_at,
         )
@@ -200,7 +200,7 @@ class GlyphStorage:
             values["embedding"] = embedding
         
         if metadata is not None:
-            values["metadata"] = metadata
+            values["glyph_metadata"] = metadata
         
         # Execute update
         result = await self._session.execute(
@@ -218,7 +218,7 @@ class GlyphStorage:
             id=glyph.id,
             namespace=glyph.namespace,
             concept_text=glyph.concept_text,
-            metadata=glyph.metadata,
+            metadata=glyph.glyph_metadata,
             created_at=glyph.created_at,
             updated_at=glyph.updated_at,
         )
@@ -293,7 +293,7 @@ class GlyphStorage:
         # Apply metadata filters if provided
         if filters:
             for key, value in filters.items():
-                query = query.where(Glyph.metadata[key].astext == str(value))
+                query = query.where(Glyph.glyph_metadata[key].astext == str(value))
         
         result = await self._session.execute(query)
         rows = result.all()
@@ -304,7 +304,7 @@ class GlyphStorage:
                     id=row.Glyph.id,
                     namespace=row.Glyph.namespace,
                     concept_text=row.Glyph.concept_text,
-                    metadata=row.Glyph.metadata,
+                    metadata=row.Glyph.glyph_metadata,
                     created_at=row.Glyph.created_at,
                     updated_at=row.Glyph.updated_at,
                 ),
@@ -345,7 +345,7 @@ class GlyphStorage:
                 id=g.id,
                 namespace=g.namespace,
                 concept_text=g.concept_text,
-                metadata=g.metadata,
+                metadata=g.glyph_metadata,
                 created_at=g.created_at,
                 updated_at=g.updated_at,
             )
@@ -397,7 +397,7 @@ class GlyphStorage:
             target_glyph_id=target_glyph_id,
             edge_type=edge_type,
             weight=weight,
-            metadata=metadata or {},
+            edge_metadata=metadata or {},
             expires_at=expires_at,
         )
         
@@ -455,7 +455,7 @@ class GlyphStorage:
                     "target_glyph_id": edge.target_glyph_id,
                     "edge_type": edge.edge_type,
                     "weight": edge.weight,
-                    "metadata": edge.metadata,
+                    "metadata": edge.edge_metadata,
                     "created_at": edge.created_at,
                     "expires_at": edge.expires_at,
                 })
@@ -571,7 +571,7 @@ class GlyphStorage:
             "id": str(glyph.id),
             "namespace": glyph.namespace,
             "concept_text": glyph.concept_text,
-            "metadata": glyph.metadata,
+            "metadata": glyph.glyph_metadata,
             "created_at": glyph.created_at.isoformat() + "Z",
             "updated_at": glyph.updated_at.isoformat() + "Z",
         }

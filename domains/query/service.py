@@ -326,7 +326,7 @@ class QueryService:
             return 0.0
         
         # Check security level in metadata
-        glyph_security = glyph.metadata.get("security_level", 0.0)
+        glyph_security = glyph.glyph_metadata.get("security_level", 0.0)
         if permissions.security_level < glyph_security:
             return 0.0
         

@@ -108,7 +108,7 @@ class TestGlyphStorage:
         )
         
         assert updated.concept_text == "updated concept"
-        assert updated.metadata["updated"] is True
+        assert updated.glyph_metadata["updated"] is True
     
     @pytest.mark.asyncio
     async def test_delete_glyph_success(self, test_db, sample_namespace, sample_embedding):
