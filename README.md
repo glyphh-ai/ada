@@ -302,4 +302,10 @@ docker-compose exec db psql -U postgres -c "SELECT extname FROM pg_extension WHE
 
 ## License
 
-Proprietary - Glyphh AI
+This project is licensed under the [Glyphh AI Community License](LICENSE).
+
+- ✓ Free to download and use for development
+- ✓ Free tier available for production (1 model, 1,000 glyphs)
+- ✗ Not open source — cannot redistribute or build competing products
+
+Production use beyond the free tier requires a license key from https://glyphh.com.
