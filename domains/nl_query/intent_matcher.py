@@ -36,25 +36,50 @@ class IntentMatcher:
     
     Matches natural language queries against registered patterns
     using the SDK's IntentEncoder for deterministic matching.
+    
+    Supports loading patterns from:
+    1. Model's NL encoder config (preferred)
+    2. SDK default patterns (fallback)
     """
     
-    def __init__(self, confidence_threshold: float = 0.85):
+    def __init__(
+        self, 
+        confidence_threshold: float = 0.85,
+        model_nl_config: Optional[Dict[str, Any]] = None
+    ):
         """
         Initialize the IntentMatcher.
         
         Args:
             confidence_threshold: Minimum confidence for a match
+            model_nl_config: Optional NL encoder config from deployed model
         """
         self.confidence_threshold = confidence_threshold
+        self._model_nl_config = model_nl_config
         self._encoder = None
         self._patterns_loaded = False
+        self._using_model_patterns = False
+    
+    def set_model_config(self, model_nl_config: Optional[Dict[str, Any]]) -> None:
+        """
+        Set or update the model NL config.
+        
+        This will reset the encoder so it reloads with new patterns.
+        
+        Args:
+            model_nl_config: NL encoder config from model, or None to use defaults
+        """
+        self._model_nl_config = model_nl_config
+        self._encoder = None
+        self._patterns_loaded = False
+        self._using_model_patterns = False
         
     def _get_encoder(self):
         """
-        Lazy-load the SDK IntentEncoder using the new explicit config API.
+        Lazy-load the SDK IntentEncoder.
         
-        Uses EncoderConfigFactory.create_intent_config() for proper
-        LayerConfig/SegmentConfig/Role structure.
+        If model_nl_config is provided, loads patterns from the model.
+        Otherwise, falls back to SDK default patterns.
         """
         if self._encoder is None:
             adapter = get_sdk_adapter()
@@ -74,9 +99,17 @@ class IntentMatcher:
                 self._encoder = adapter.create_intent_encoder(config)
                 
                 if self._encoder is not None:
+                    # Load patterns from model config if provided
+                    if self._model_nl_config and "patterns" in self._model_nl_config:
+                        self._load_model_patterns()
+                    else:
+                        # Fall back to SDK defaults
+                        logger.info("No model NL config provided, using SDK default patterns")
+                    
                     self._patterns_loaded = True
                     pattern_count = len(self._encoder.get_patterns()) if hasattr(self._encoder, 'get_patterns') else 0
-                    logger.info(f"IntentEncoder initialized with {pattern_count} patterns")
+                    source = "model" if self._using_model_patterns else "SDK defaults"
+                    logger.info(f"IntentEncoder initialized with {pattern_count} patterns from {source}")
                 else:
                     logger.warning("IntentEncoder not available in SDK, using fallback matching")
                     
@@ -94,6 +127,55 @@ class IntentMatcher:
                 self._encoder = None
                 
         return self._encoder
+    
+    def _load_model_patterns(self) -> None:
+        """
+        Load intent patterns from model NL config.
+        
+        Clears any existing patterns and loads from model config.
+        """
+        if not self._encoder or not self._model_nl_config:
+            return
+        
+        patterns = self._model_nl_config.get("patterns", [])
+        if not patterns:
+            logger.info("Model NL config has no patterns, using SDK defaults")
+            return
+        
+        try:
+            # Import IntentPattern from SDK
+            adapter = get_sdk_adapter()
+            IntentPattern = adapter.import_intent_pattern()
+            
+            if IntentPattern is None:
+                logger.warning("IntentPattern not available, cannot load model patterns")
+                return
+            
+            # Clear existing patterns and add model patterns
+            loaded_count = 0
+            for pattern_data in patterns:
+                try:
+                    pattern = IntentPattern(
+                        intent_type=pattern_data.get("intent_type", ""),
+                        example_phrases=pattern_data.get("example_phrases", []),
+                        query_template=pattern_data.get("query_template", {})
+                    )
+                    self._encoder.add_pattern(pattern)
+                    loaded_count += 1
+                except ValueError as e:
+                    logger.warning(f"Skipping invalid pattern: {e}")
+                except Exception as e:
+                    logger.warning(f"Failed to add pattern '{pattern_data.get('intent_type', 'unknown')}': {e}")
+            
+            if loaded_count > 0:
+                self._using_model_patterns = True
+                logger.info(f"Loaded {loaded_count} patterns from model NL config")
+            else:
+                logger.warning("No valid patterns loaded from model, using SDK defaults")
+                
+        except Exception as e:
+            logger.error(f"Failed to load model patterns: {e}")
+            logger.info("Falling back to SDK default patterns")
     
     async def match_intent(self, query: str) -> Optional[IntentMatch]:
         """

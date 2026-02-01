@@ -175,15 +175,31 @@ class SDKAdapter:
         try:
             from glyphh import IntentEncoder
             encoder = IntentEncoder(config)
-            # Add default patterns if available
-            if hasattr(encoder, 'add_defaults'):
-                encoder.add_defaults()
+            # Note: Don't add defaults here - let the caller decide
+            # whether to use model patterns or defaults
             return encoder
         except ImportError:
             logger.warning("IntentEncoder not available in SDK")
             return None
         except Exception as e:
             logger.warning(f"Failed to create IntentEncoder: {e}")
+            return None
+    
+    def import_intent_pattern(self) -> Optional[Type]:
+        """
+        Import the IntentPattern class from SDK.
+        
+        Returns:
+            IntentPattern class, or None if not available
+        """
+        if not self.is_available:
+            return None
+        
+        try:
+            from glyphh import IntentPattern
+            return IntentPattern
+        except ImportError:
+            logger.warning("IntentPattern not available in SDK")
             return None
     
     def get_compatibility_status(self) -> Dict[str, Any]:

@@ -62,6 +62,7 @@ def get_nl_query_service():
     from domains.nl_query.intent_matcher import IntentMatcher
     from domains.nl_query.service import NLQueryService
     from infrastructure.database import async_session_maker
+    from shared.encoder_config_factory import EncoderConfigFactory
     
     if model_manager is None:
         raise HTTPException(status_code=503, detail="Model manager not initialized")
@@ -72,9 +73,24 @@ def get_nl_query_service():
             detail="Natural language query is not enabled. Set ENABLE_NL_QUERY=true"
         )
     
+    # Try to extract NL encoder config from loaded model
+    model_nl_config = None
+    try:
+        # Get the currently loaded model from model manager
+        model = model_manager.get_current_model() if hasattr(model_manager, 'get_current_model') else None
+        if model is not None:
+            model_nl_config = EncoderConfigFactory.extract_nl_encoder_config(model)
+            if model_nl_config:
+                logger.info(f"Using NL encoder config from model with {len(model_nl_config.get('patterns', []))} patterns")
+    except Exception as e:
+        logger.warning(f"Failed to extract NL config from model: {e}")
+    
     # Create services
     query_service = QueryService(model_manager, async_session_maker)
-    intent_matcher = IntentMatcher(confidence_threshold=0.85)
+    intent_matcher = IntentMatcher(
+        confidence_threshold=0.85,
+        model_nl_config=model_nl_config
+    )
     
     # Create LLM fallback if available
     llm_fallback = None

@@ -267,3 +267,58 @@ class EncoderConfigFactory:
                 )
             ]
         )
+    
+    @staticmethod
+    def extract_nl_encoder_config(model: Any) -> Optional[Dict[str, Any]]:
+        """
+        Extract NL encoder config from a loaded model.
+        
+        Extracts the NL encoder configuration (intent patterns) from a
+        GlyphhModel's encoder_config if present.
+        
+        Args:
+            model: Loaded GlyphhModel instance
+            
+        Returns:
+            NL encoder config dict if present, None otherwise
+            
+        Example:
+            >>> model = GlyphhModel.from_file("my_model.glyphh")
+            >>> nl_config = EncoderConfigFactory.extract_nl_encoder_config(model)
+            >>> if nl_config:
+            ...     patterns = nl_config.get("patterns", [])
+        """
+        if not hasattr(model, 'encoder_config'):
+            logger.debug("Model missing encoder_config")
+            return None
+        
+        config = model.encoder_config
+        
+        # Check for nl_encoder_config in the encoder config
+        if hasattr(config, 'nl_encoder_config') and config.nl_encoder_config is not None:
+            nl_config = config.nl_encoder_config
+            
+            # If it has a to_dict method, use it
+            if hasattr(nl_config, 'to_dict'):
+                result = nl_config.to_dict()
+                logger.info(
+                    f"Extracted NL encoder config with {len(result.get('patterns', []))} patterns"
+                )
+                return result
+            
+            # If it's already a dict, return it
+            if isinstance(nl_config, dict):
+                logger.info(
+                    f"Extracted NL encoder config dict with {len(nl_config.get('patterns', []))} patterns"
+                )
+                return nl_config
+        
+        # Also check for legacy intent_patterns field on the model itself
+        if hasattr(model, 'intent_patterns') and model.intent_patterns is not None:
+            logger.info(
+                f"Extracted legacy intent_patterns with {len(model.intent_patterns.get('patterns', []))} patterns"
+            )
+            return model.intent_patterns
+        
+        logger.debug("No NL encoder config found in model")
+        return None
