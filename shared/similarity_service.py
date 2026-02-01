@@ -101,6 +101,11 @@ class SimilarityService:
         Uses SDK SimilarityCalculator if available, otherwise falls back
         to cosine similarity with a logged warning.
         
+        Note: The SDK SimilarityCalculator.compute_similarity() method requires
+        Glyph objects, not raw embeddings. For raw embedding comparison, we use
+        the fallback cosine similarity which is mathematically equivalent for
+        normalized vectors.
+        
         Args:
             embedding1: First embedding vector
             embedding2: Second embedding vector
@@ -108,17 +113,11 @@ class SimilarityService:
         Returns:
             Similarity score (typically in range [0, 1] or [-1, 1])
         """
-        if self._calculator is not None:
-            try:
-                # Use SDK SimilarityCalculator
-                return self._calculator.compute(embedding1, embedding2)
-            except Exception as e:
-                logger.error(f"SimilarityCalculator.compute() failed: {e}")
-                self._warn_fallback()
-                return self._cosine_similarity(embedding1, embedding2)
-        else:
-            self._warn_fallback()
-            return self._cosine_similarity(embedding1, embedding2)
+        # The SDK SimilarityCalculator works with Glyph objects, not raw embeddings.
+        # For raw embedding comparison, we use cosine similarity which is the
+        # underlying metric used by the SDK for neural_cortex comparisons.
+        self._warn_fallback()
+        return self._cosine_similarity(embedding1, embedding2)
     
     def compute_batch_similarity(
         self,
@@ -128,8 +127,9 @@ class SimilarityService:
         """
         Compute similarity for multiple targets efficiently.
         
-        Uses SDK SimilarityCalculator batch method if available,
-        otherwise computes similarities individually.
+        Uses cosine similarity for raw embedding comparison.
+        The SDK SimilarityCalculator works with Glyph objects, so for
+        raw embeddings we use the fallback implementation.
         
         Args:
             query_embedding: Query embedding vector
@@ -141,25 +141,9 @@ class SimilarityService:
         if not target_embeddings:
             return []
         
-        if self._calculator is not None:
-            try:
-                # Try batch method if available
-                if hasattr(self._calculator, 'compute_batch'):
-                    return self._calculator.compute_batch(
-                        query_embedding, target_embeddings
-                    )
-                # Fall back to individual computations via calculator
-                return [
-                    self._calculator.compute(query_embedding, target)
-                    for target in target_embeddings
-                ]
-            except Exception as e:
-                logger.error(f"SimilarityCalculator batch computation failed: {e}")
-                self._warn_fallback()
-        else:
-            self._warn_fallback()
+        self._warn_fallback()
         
-        # Fallback: compute individually using cosine similarity
+        # Compute individually using cosine similarity
         return [
             self._cosine_similarity(query_embedding, target)
             for target in target_embeddings
