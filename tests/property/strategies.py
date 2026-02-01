@@ -253,3 +253,191 @@ def edge_data(draw, namespace: Optional[str] = None) -> Dict[str, Any]:
         "weight": draw(st.floats(min_value=0.0, max_value=1.0)),
         "metadata": draw(st.one_of(st.none(), valid_metadata())),
     }
+
+
+# =============================================================================
+# SDK Configuration Strategies (New Explicit API)
+# =============================================================================
+
+@st.composite
+def valid_role(draw, with_weight: bool = True) -> Dict[str, Any]:
+    """
+    Generate a valid Role configuration.
+    
+    Args:
+        with_weight: If True, always include similarity_weight.
+                     If False, may omit it (for testing defaults).
+    """
+    role = {
+        "name": draw(st.text(
+            alphabet="abcdefghijklmnopqrstuvwxyz_",
+            min_size=2,
+            max_size=20,
+        )),
+    }
+    
+    if with_weight:
+        role["similarity_weight"] = draw(st.floats(
+            min_value=0.0,
+            max_value=1.0,
+            allow_nan=False,
+            allow_infinity=False,
+        ))
+    elif draw(st.booleans()):  # 50% chance to include weight
+        role["similarity_weight"] = draw(st.floats(
+            min_value=0.0,
+            max_value=1.0,
+            allow_nan=False,
+            allow_infinity=False,
+        ))
+    
+    return role
+
+
+@st.composite
+def valid_segment_config(draw, min_roles: int = 1, max_roles: int = 5) -> Dict[str, Any]:
+    """Generate a valid SegmentConfig with roles."""
+    return {
+        "name": draw(st.text(
+            alphabet="abcdefghijklmnopqrstuvwxyz_",
+            min_size=2,
+            max_size=20,
+        )),
+        "roles": draw(st.lists(
+            valid_role(),
+            min_size=min_roles,
+            max_size=max_roles,
+        )),
+    }
+
+
+@st.composite
+def valid_layer_config(draw, min_segments: int = 1, max_segments: int = 3) -> Dict[str, Any]:
+    """Generate a valid LayerConfig with segments."""
+    return {
+        "name": draw(st.text(
+            alphabet="abcdefghijklmnopqrstuvwxyz_",
+            min_size=2,
+            max_size=20,
+        )),
+        "similarity_weight": draw(st.floats(
+            min_value=0.0,
+            max_value=1.0,
+            allow_nan=False,
+            allow_infinity=False,
+        )),
+        "segments": draw(st.lists(
+            valid_segment_config(),
+            min_size=min_segments,
+            max_size=max_segments,
+        )),
+    }
+
+
+@st.composite
+def valid_encoder_config(draw, min_layers: int = 1, max_layers: int = 3) -> Dict[str, Any]:
+    """
+    Generate a valid EncoderConfig with explicit layer structure.
+    
+    This strategy generates configs that conform to the new SDK API
+    requiring explicit LayerConfig, SegmentConfig, and Role definitions.
+    """
+    return {
+        "dimension": draw(st.sampled_from([1000, 5000, 10000, 20000])),
+        "seed": draw(st.integers(min_value=1, max_value=1000000)),
+        "layers": draw(st.lists(
+            valid_layer_config(),
+            min_size=min_layers,
+            max_size=max_layers,
+        )),
+    }
+
+
+@st.composite
+def invalid_encoder_config_no_layers(draw) -> Dict[str, Any]:
+    """
+    Generate an invalid EncoderConfig without layers.
+    
+    Used for testing validation error handling.
+    """
+    return {
+        "dimension": draw(st.sampled_from([1000, 5000, 10000])),
+        "seed": draw(st.integers(min_value=1, max_value=1000000)),
+        "layers": draw(st.sampled_from([None, []])),  # Invalid: no layers
+    }
+
+
+# =============================================================================
+# Model Metadata Strategies
+# =============================================================================
+
+@st.composite
+def valid_model_metadata(draw) -> Dict[str, Any]:
+    """
+    Generate valid model metadata for marketplace display.
+    """
+    return {
+        "meta_name": draw(st.text(
+            alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_",
+            min_size=3,
+            max_size=100,
+        )),
+        "short_description": draw(st.text(
+            alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,!?-",
+            min_size=0,
+            max_size=200,
+        )),
+        "long_description": draw(st.text(
+            alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,!?-\n#*",
+            min_size=0,
+            max_size=2000,
+        )),
+    }
+
+
+@st.composite
+def model_metadata_with_missing_fields(draw) -> Dict[str, Any]:
+    """
+    Generate model metadata with some fields potentially missing.
+    
+    Used for testing default value handling.
+    """
+    metadata = {}
+    
+    # meta_name: 50% chance to include
+    if draw(st.booleans()):
+        metadata["meta_name"] = draw(st.text(
+            alphabet="abcdefghijklmnopqrstuvwxyz ",
+            min_size=3,
+            max_size=50,
+        ))
+    
+    # short_description: 50% chance to include
+    if draw(st.booleans()):
+        metadata["short_description"] = draw(st.text(
+            alphabet="abcdefghijklmnopqrstuvwxyz ",
+            min_size=0,
+            max_size=100,
+        ))
+    
+    # long_description: 50% chance to include
+    if draw(st.booleans()):
+        metadata["long_description"] = draw(st.text(
+            alphabet="abcdefghijklmnopqrstuvwxyz ",
+            min_size=0,
+            max_size=500,
+        ))
+    
+    return metadata
+
+
+@st.composite
+def roles_without_similarity_weight(draw, count: int = 3) -> List[Dict[str, Any]]:
+    """
+    Generate roles without similarity_weight for testing defaults.
+    """
+    return draw(st.lists(
+        valid_role(with_weight=False),
+        min_size=count,
+        max_size=count,
+    ))

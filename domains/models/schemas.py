@@ -308,3 +308,31 @@ class ClearDataResponse(BaseModel):
     namespace: str
     glyphs_deleted: int
     edges_deleted: int
+
+
+# ============================================================================
+# Model Metadata Schemas (for Marketplace Display)
+# ============================================================================
+
+class ModelMetadata(BaseModel):
+    """Model metadata for marketplace display."""
+    meta_name: str = Field(..., description="Display name for the model")
+    short_description: str = Field(
+        default="",
+        max_length=200,
+        description="Brief description for marketplace cards"
+    )
+    long_description: str = Field(
+        default="",
+        description="Detailed description for model pages (markdown supported)"
+    )
+
+
+class ModelMetadataResponse(BaseModel):
+    """API response for model metadata."""
+    namespace: str
+    meta_name: str
+    short_description: str
+    long_description: str
+    model_version: Optional[str] = None
+    sdk_version: Optional[str] = None

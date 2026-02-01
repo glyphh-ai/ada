@@ -3,6 +3,8 @@ Query Service for Glyphh Runtime.
 
 Handles similarity search, fact tree generation, and temporal prediction
 by coordinating between storage, model manager, and SDK components.
+
+Updated to use SimilarityService for consistent similarity calculations.
 """
 
 import logging
@@ -34,6 +36,7 @@ from shared.exceptions import (
     NamespaceNotFoundException,
     ValidationException,
 )
+from shared.similarity_service import SimilarityService
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +56,7 @@ class QueryService:
     Coordinates between:
     - GlyphStorage for database operations
     - ModelManager for model access
+    - SimilarityService for similarity calculations
     - SDK components for computation
     """
     
@@ -60,6 +64,7 @@ class QueryService:
         self,
         model_manager: ModelManager,
         session_factory,
+        similarity_service: Optional[SimilarityService] = None,
     ):
         """
         Initialize QueryService.
@@ -67,9 +72,27 @@ class QueryService:
         Args:
             model_manager: ModelManager instance
             session_factory: Async session factory for database access
+            similarity_service: Optional SimilarityService for similarity calculations.
+                               If not provided, will create per-model services.
         """
         self._model_manager = model_manager
         self._session_factory = session_factory
+        self._similarity_service = similarity_service
+    
+    def _get_similarity_service(self, loaded_model: Any) -> SimilarityService:
+        """
+        Get SimilarityService for a loaded model.
+        
+        Uses injected service if available, otherwise creates one from
+        the model's SimilarityCalculator.
+        """
+        if self._similarity_service is not None:
+            return self._similarity_service
+        
+        # Create service from model's similarity calculator
+        return SimilarityService(
+            similarity_calculator=loaded_model.similarity_calculator
+        )
     
     async def similarity_search(
         self,
@@ -79,6 +102,8 @@ class QueryService:
     ) -> SimilaritySearchResponse:
         """
         Search for similar glyphs with weighted similarity and security filtering.
+        
+        Uses SimilarityService for consistent similarity calculations.
         
         Args:
             namespace: Model namespace
@@ -95,6 +120,9 @@ class QueryService:
         if loaded_model is None:
             raise ModelNotFoundException(namespace)
         
+        # Get similarity service for this model
+        similarity_service = self._get_similarity_service(loaded_model)
+        
         # Encode query text using SDK encoder
         query_embedding = await self._encode_query(
             loaded_model.encoder,
@@ -108,17 +136,15 @@ class QueryService:
         async with self._session_factory() as session:
             storage = GlyphStorage(session)
             
-            # Perform similarity search
-            raw_results = await storage.similarity_search(
+            # Get all glyphs for similarity computation
+            raw_results = await storage.get_glyphs_with_embeddings(
                 namespace=namespace,
-                query_embedding=query_embedding,
-                top_k=request.top_k,
                 filters=request.filters,
             )
             
-            # Apply weighted scoring and security filtering
+            # Compute similarities using SimilarityService
             scored_results = []
-            for glyph_response, base_similarity in raw_results:
+            for glyph_response, glyph_embedding in raw_results:
                 # Compute security weight
                 security_weight = self._compute_security_weight(
                     glyph_response,
@@ -128,6 +154,12 @@ class QueryService:
                 # Skip if no access
                 if security_weight == 0:
                     continue
+                
+                # Compute similarity using SimilarityService
+                base_similarity = similarity_service.compute_similarity(
+                    query_embedding,
+                    glyph_embedding,
+                )
                 
                 # Apply edge-type weights (simplified - using base similarity)
                 weighted_similarity = base_similarity
@@ -145,8 +177,9 @@ class QueryService:
                     final_score=final_score,
                 ))
             
-            # Sort by final score descending
+            # Sort by final score descending and limit to top_k
             scored_results.sort(key=lambda x: x.final_score, reverse=True)
+            scored_results = scored_results[:request.top_k]
         
         query_time_ms = (time.time() - start_time) * 1000
         

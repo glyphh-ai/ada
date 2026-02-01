@@ -3,6 +3,8 @@ Edge Generator Service for Glyphh Runtime.
 
 Generates and caches edges between glyphs using the SDK's EdgeGenerator.
 Supports eager, lazy, and on-demand edge generation strategies.
+
+Updated to use SimilarityService for consistent similarity calculations.
 """
 
 import logging
@@ -16,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from domains.models.db_models import Edge, Glyph
 from shared.exceptions import GlyphNotFoundException, NamespaceNotFoundException
+from shared.similarity_service import SimilarityService
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +67,7 @@ class EdgeGeneratorService:
         self,
         session: AsyncSession,
         sdk_edge_generator: Optional[Any] = None,
+        similarity_service: Optional[SimilarityService] = None,
     ):
         """
         Initialize EdgeGeneratorService.
@@ -71,9 +75,11 @@ class EdgeGeneratorService:
         Args:
             session: Async SQLAlchemy session
             sdk_edge_generator: SDK's EdgeGenerator instance (optional, for testing)
+            similarity_service: SimilarityService for computing edge weights
         """
         self._session = session
         self._sdk_generator = sdk_edge_generator
+        self._similarity_service = similarity_service or SimilarityService()
 
     def set_sdk_generator(self, sdk_edge_generator: Any) -> None:
         """
@@ -83,6 +89,15 @@ class EdgeGeneratorService:
             sdk_edge_generator: SDK's EdgeGenerator instance
         """
         self._sdk_generator = sdk_edge_generator
+    
+    def set_similarity_service(self, similarity_service: SimilarityService) -> None:
+        """
+        Set the SimilarityService instance.
+        
+        Args:
+            similarity_service: SimilarityService for computing edge weights
+        """
+        self._similarity_service = similarity_service
     
     async def generate_edges_for_glyph(
         self,
@@ -180,8 +195,8 @@ class EdgeGeneratorService:
         created_edge_ids = []
         
         for target_glyph in target_glyphs:
-            # Compute similarity between source and target embeddings
-            similarity = self._compute_cosine_similarity(
+            # Compute similarity using SimilarityService
+            similarity = self._similarity_service.compute_similarity(
                 source_embedding,
                 target_glyph.embedding
             )
@@ -351,9 +366,9 @@ class EdgeGeneratorService:
                     await self._session.delete(edge)
                     continue
                 
-                # Recompute edge weight
+                # Recompute edge weight using SimilarityService
                 if edge.edge_type.startswith("neural_"):
-                    new_weight = self._compute_cosine_similarity(
+                    new_weight = self._similarity_service.compute_similarity(
                         source_glyph.embedding,
                         target_glyph.embedding
                     )
@@ -549,39 +564,6 @@ class EdgeGeneratorService:
     # =========================================================================
     # Helper Methods
     # =========================================================================
-    
-    def _compute_cosine_similarity(
-        self,
-        embedding1: List[float],
-        embedding2: List[float],
-    ) -> float:
-        """
-        Compute cosine similarity between two embeddings.
-        
-        Args:
-            embedding1: First embedding vector
-            embedding2: Second embedding vector
-            
-        Returns:
-            Cosine similarity score (0.0 to 1.0)
-        """
-        import numpy as np
-        
-        v1 = np.array(embedding1, dtype=np.float32)
-        v2 = np.array(embedding2, dtype=np.float32)
-        
-        # Handle zero vectors
-        norm1 = np.linalg.norm(v1)
-        norm2 = np.linalg.norm(v2)
-        
-        if norm1 == 0 or norm2 == 0:
-            return 0.0
-        
-        # Cosine similarity
-        similarity = np.dot(v1, v2) / (norm1 * norm2)
-        
-        # Clamp to [0, 1] range (similarity can be negative for opposing vectors)
-        return float(max(0.0, min(1.0, (similarity + 1) / 2)))
     
     def _compute_temporal_delta_magnitude(
         self,

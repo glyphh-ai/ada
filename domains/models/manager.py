@@ -2,7 +2,10 @@
 Model Manager for Glyphh Runtime.
 
 Handles loading, unloading, and managing multiple .glyphh models with namespace isolation.
-Uses SDK's GlyphhModel for model loading and maintains an in-memory registry.
+Uses SDK's GlyphhModel for model loading only (packaging), and creates separate Encoder
+and SimilarityCalculator instances for runtime operations.
+
+Updated to use the new SDK API with explicit EncoderConfig structure.
 """
 
 import asyncio
@@ -32,28 +35,49 @@ from shared.exceptions import (
     NamespaceNotFoundException,
     NamespaceQuotaExceededException,
 )
+from shared.sdk_adapter import get_sdk_adapter, SDKNotAvailableError
+from shared.encoder_config_factory import EncoderConfigFactory, ConfigurationError
+from shared.config_validator import get_config_validator
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
 class LoadedModel:
-    """In-memory representation of a loaded model."""
+    """
+    In-memory representation of a loaded model.
+    
+    Updated to follow correct SDK usage pattern:
+    - sdk_model: GlyphhModel for metadata only (packaging)
+    - encoder: Encoder instance for encoding operations
+    - similarity_calculator: SimilarityCalculator for similarity operations
+    - Metadata fields for marketplace display
+    """
     
     def __init__(
         self,
         namespace: str,
         model_path: str,
-        sdk_model: Any,  # GlyphhModel from SDK
-        encoder: Any,  # Encoder from SDK
+        sdk_model: Any,  # GlyphhModel from SDK - for metadata only
+        encoder: Any,  # Encoder from SDK - for encoding operations
+        similarity_calculator: Optional[Any],  # SimilarityCalculator from SDK
         loaded_at: datetime,
+        # Metadata fields for marketplace display
+        meta_name: str,
+        short_description: str,
+        long_description: str,
     ):
         self.namespace = namespace
         self.model_path = model_path
-        self.sdk_model = sdk_model
-        self.encoder = encoder
+        self.sdk_model = sdk_model  # For metadata access only
+        self.encoder = encoder  # For encoding operations
+        self.similarity_calculator = similarity_calculator  # For similarity operations
         self.loaded_at = loaded_at
         self.lock = asyncio.Lock()  # For re-encode operations
+        # Metadata for marketplace
+        self.meta_name = meta_name
+        self.short_description = short_description
+        self.long_description = long_description
 
 
 class ReEncodeJob:
@@ -115,6 +139,10 @@ class ModelManager:
         """
         Load a .glyphh model and assign it a namespace.
         
+        Uses GlyphhModel.from_file() for loading only, then extracts
+        encoder_config to create separate Encoder and SimilarityCalculator
+        instances for runtime operations.
+        
         Args:
             model_path: Path to .glyphh file
             namespace: Optional namespace (generated if not provided)
@@ -134,9 +162,14 @@ class ModelManager:
                     f"Upgrade to a production license for unlimited models."
                 )
         
-        # Import SDK components
+        # Get SDK adapter
+        adapter = get_sdk_adapter()
+        if not adapter.is_available:
+            raise ModelLoadException("SDK not available")
+        
+        # Import GlyphhModel for loading
         try:
-            from glyphh import GlyphhModel, Encoder
+            from glyphh import GlyphhModel
         except ImportError as e:
             raise ModelLoadException(f"SDK not available: {e}")
         
@@ -148,7 +181,7 @@ class ModelManager:
         if not path.suffix == ".glyphh":
             raise ModelLoadException(f"Invalid file extension: {path.suffix}")
         
-        # Load model from file
+        # Load model from file (GlyphhModel for packaging/loading only)
         try:
             sdk_model = GlyphhModel.from_file(str(path))
         except Exception as e:
@@ -170,28 +203,62 @@ class ModelManager:
         if namespace in self._models:
             raise ModelLoadException(f"Namespace already in use: {namespace}")
         
-        # Create encoder from model config
+        # Extract encoder config from model and validate
         try:
-            encoder = Encoder(sdk_model.encoder_config)
+            encoder_config = EncoderConfigFactory.create_from_model(sdk_model)
+            
+            # Validate and apply defaults
+            validator = get_config_validator()
+            validator.validate_encoder_config_or_raise(encoder_config)
+            encoder_config = validator.apply_defaults(encoder_config)
+            
+        except ConfigurationError as e:
+            raise ModelLoadException(f"Invalid model configuration: {e}")
+        
+        # Create Encoder instance via SDK adapter (not using GlyphhModel directly)
+        try:
+            encoder = adapter.create_encoder(encoder_config)
         except Exception as e:
             raise ModelLoadException(f"Failed to create encoder: {e}")
         
-        # Create loaded model
+        # Create SimilarityCalculator instance via SDK adapter
+        similarity_calculator = adapter.create_similarity_calculator()
+        if similarity_calculator is None:
+            logger.warning(
+                f"SimilarityCalculator not available for namespace '{namespace}', "
+                f"will use fallback similarity"
+            )
+        
+        # Extract model metadata with defaults for missing fields
+        meta_name = getattr(sdk_model, 'meta_name', None) or \
+                    getattr(sdk_model, 'name', None) or \
+                    path.stem  # Filename without extension as fallback
+        short_description = getattr(sdk_model, 'short_description', '') or ''
+        long_description = getattr(sdk_model, 'long_description', '') or ''
+        
+        # Create loaded model with all components
         loaded_model = LoadedModel(
             namespace=namespace,
             model_path=str(path),
-            sdk_model=sdk_model,
-            encoder=encoder,
+            sdk_model=sdk_model,  # For metadata access only
+            encoder=encoder,  # For encoding operations
+            similarity_calculator=similarity_calculator,  # For similarity operations
             loaded_at=datetime.utcnow(),
+            meta_name=meta_name,
+            short_description=short_description,
+            long_description=long_description,
         )
         
-        # Store model config in database
+        # Store model config in database (including metadata)
         async with self._db_session_factory() as session:
             config = ModelConfig(
                 namespace=namespace,
                 model_path=str(path),
                 model_version=sdk_model.version,
                 sdk_version=await self._get_sdk_version(),
+                meta_name=meta_name,
+                short_description=short_description,
+                long_description=long_description,
             )
             session.add(config)
             await session.commit()
@@ -200,7 +267,7 @@ class ModelManager:
         self._models[namespace] = loaded_model
         
         logger.info(
-            f"Loaded model '{sdk_model.name}' v{sdk_model.version} "
+            f"Loaded model '{meta_name}' v{sdk_model.version} "
             f"into namespace '{namespace}'"
         )
         

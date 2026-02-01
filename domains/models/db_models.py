@@ -142,6 +142,7 @@ class ModelConfig(Base):
     - Similarity weights for edge types
     - Beam search parameters
     - Resource quotas
+    - Model metadata for marketplace display
     """
     __tablename__ = "model_configs"
     
@@ -149,6 +150,11 @@ class ModelConfig(Base):
     model_path = Column(Text, nullable=False)
     model_version = Column(String(50), nullable=True)
     sdk_version = Column(String(50), nullable=True)
+    
+    # Model metadata for marketplace display
+    meta_name = Column(String(255), nullable=True)  # Display name for marketplace
+    short_description = Column(String(200), nullable=True)  # Brief description (max 200 chars)
+    long_description = Column(Text, nullable=True)  # Full description (markdown supported)
     
     # Similarity weights for each edge type
     similarity_weights = Column(JSONB, default=lambda: {

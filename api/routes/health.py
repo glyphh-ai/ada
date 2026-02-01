@@ -13,6 +13,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.database import get_db
+from shared.sdk_adapter import get_sdk_adapter
+from shared.config_validator import get_config_validator
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["health"])
@@ -24,10 +26,21 @@ async def health_check() -> Dict[str, Any]:
     Liveness probe.
     
     Returns healthy if the service is running.
+    Includes SDK compatibility status.
     """
+    # Get SDK compatibility status
+    adapter = get_sdk_adapter()
+    sdk_status = adapter.get_compatibility_status()
+    
+    # Determine overall status based on SDK availability
+    status = "healthy"
+    if sdk_status["degraded"]:
+        status = "degraded"
+    
     return {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat() + "Z"
+        "status": status,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "sdk_compatibility": sdk_status,
     }
 
 
@@ -64,12 +77,33 @@ async def readiness_check(
     # Check license (placeholder)
     checks["license"] = "ok"
     
+    # Check SDK compatibility
+    adapter = get_sdk_adapter()
+    sdk_status = adapter.get_compatibility_status()
+    
+    if sdk_status["available"]:
+        if sdk_status["degraded"]:
+            checks["sdk"] = "degraded"
+        else:
+            checks["sdk"] = "ok"
+    else:
+        checks["sdk"] = "unavailable"
+    
     # Determine overall status
-    all_ok = all(v == "ok" for v in checks.values())
+    # Consider degraded SDK as acceptable (not a failure)
+    critical_checks = ["database", "model_manager", "license"]
+    critical_ok = all(checks.get(k) == "ok" for k in critical_checks)
+    sdk_acceptable = checks["sdk"] in ("ok", "degraded")
+    
+    if critical_ok and sdk_acceptable:
+        status = "ready" if checks["sdk"] == "ok" else "degraded"
+    else:
+        status = "not_ready"
     
     return {
-        "status": "ready" if all_ok else "degraded",
+        "status": status,
         "checks": checks,
+        "sdk_compatibility": sdk_status,
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
 

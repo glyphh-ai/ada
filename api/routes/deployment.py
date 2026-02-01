@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from domains.auth.service import AuthService, User
 from domains.models.manager import ModelManager
+from domains.models.schemas import ModelMetadataResponse
 from infrastructure.config import get_settings
 from shared.exceptions import ModelNotFoundException
 
@@ -278,3 +279,31 @@ async def revoke_token(token_id: str) -> Dict[str, str]:
     """
     # TODO: Implement token revocation
     return {"status": "revoked", "token_id": token_id}
+
+
+@router.get("/models/{model_id}/metadata", response_model=ModelMetadataResponse)
+async def get_model_metadata(
+    model_id: str,
+    manager: ModelManager = Depends(get_model_manager),
+) -> ModelMetadataResponse:
+    """
+    Get model metadata for marketplace display.
+    
+    Returns meta_name, short_description, and long_description
+    for rendering in the Studio marketplace.
+    """
+    try:
+        loaded_model = await manager.get_model(model_id)
+        if loaded_model is None:
+            raise ModelNotFoundException(model_id)
+        
+        return ModelMetadataResponse(
+            namespace=model_id,
+            meta_name=loaded_model.meta_name,
+            short_description=loaded_model.short_description,
+            long_description=loaded_model.long_description,
+            model_version=getattr(loaded_model.sdk_model, 'version', None),
+            sdk_version=await manager._get_sdk_version(),
+        )
+    except ModelNotFoundException:
+        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")

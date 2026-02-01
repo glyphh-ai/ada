@@ -4,12 +4,18 @@ Intent Matcher for Rules-Based NL Query Matching.
 Uses HDC similarity from the SDK's IntentEncoder to match natural language
 queries against registered intent patterns. This is the deterministic,
 rules-first approach - "When your LLM can't afford to be wrong, sidecar it with Glyphh."
+
+Updated to use the new SDK API with explicit EncoderConfig structure via
+EncoderConfigFactory.create_intent_config().
 """
 
 import logging
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+
+from shared.encoder_config_factory import EncoderConfigFactory, ConfigurationError
+from shared.sdk_adapter import get_sdk_adapter, SDKNotAvailableError
 
 logger = logging.getLogger(__name__)
 
@@ -44,20 +50,49 @@ class IntentMatcher:
         self._patterns_loaded = False
         
     def _get_encoder(self):
-        """Lazy-load the SDK IntentEncoder."""
+        """
+        Lazy-load the SDK IntentEncoder using the new explicit config API.
+        
+        Uses EncoderConfigFactory.create_intent_config() for proper
+        LayerConfig/SegmentConfig/Role structure.
+        """
         if self._encoder is None:
+            adapter = get_sdk_adapter()
+            
+            if not adapter.is_available:
+                logger.warning("SDK not available, IntentEncoder will use fallback matching")
+                return None
+            
             try:
-                from glyphh.encoder.intent import IntentEncoder
-                from glyphh.core.config import EncoderConfig
+                # Create intent-optimized config using the factory
+                config = EncoderConfigFactory.create_intent_config(
+                    dimension=10000,
+                    seed=42
+                )
                 
-                config = EncoderConfig(dimension=10000, seed=42)
-                self._encoder = IntentEncoder(config)
-                self._encoder.add_defaults()
-                self._patterns_loaded = True
-                logger.info(f"IntentEncoder initialized with {len(self._encoder.get_patterns())} patterns")
+                # Use SDK adapter to create the intent encoder
+                self._encoder = adapter.create_intent_encoder(config)
+                
+                if self._encoder is not None:
+                    self._patterns_loaded = True
+                    pattern_count = len(self._encoder.get_patterns()) if hasattr(self._encoder, 'get_patterns') else 0
+                    logger.info(f"IntentEncoder initialized with {pattern_count} patterns")
+                else:
+                    logger.warning("IntentEncoder not available in SDK, using fallback matching")
+                    
+            except SDKNotAvailableError as e:
+                logger.warning(f"SDK not available for IntentEncoder: {e}")
+                self._encoder = None
+            except ConfigurationError as e:
+                logger.error(f"Failed to create intent config: {e}")
+                self._encoder = None
             except ImportError as e:
                 logger.warning(f"SDK IntentEncoder not available: {e}")
                 self._encoder = None
+            except Exception as e:
+                logger.error(f"Unexpected error initializing IntentEncoder: {e}")
+                self._encoder = None
+                
         return self._encoder
     
     async def match_intent(self, query: str) -> Optional[IntentMatch]:
