@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     
     # Database
     database_url: str = Field(
-        default="postgresql://localhost:5432/glyphh_runtime",
+        default="postgresql+asyncpg://localhost:5432/glyphh_runtime",
         description="PostgreSQL connection URL"
     )
     

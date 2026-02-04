@@ -29,7 +29,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/glyphh_runtime
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/glyphh_runtime
       - DEPLOYMENT_MODE=local
       - LOG_LEVEL=INFO
     depends_on:
