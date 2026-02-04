@@ -1,7 +1,7 @@
 """Add model metadata columns for marketplace display.
 
 Revision ID: 002_add_model_metadata
-Revises: 001_initial_schema
+Revises: 001
 Create Date: 2026-01-31
 
 Adds meta_name, short_description, and long_description columns
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '002_add_model_metadata'
-down_revision = '001_initial_schema'
+down_revision = '001'
 branch_labels = None
 depends_on = None
 
