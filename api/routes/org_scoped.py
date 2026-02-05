@@ -1,7 +1,9 @@
 """
 Org-Scoped API Routes for Glyphh Runtime (Cloud Mode).
 
-Endpoints scoped by organization ID for multi-tenant cloud deployments.
+Endpoints scoped by organization ID and model ID for multi-tenant cloud deployments.
+The URL pattern /{org_id}/{model_id}/... ensures proper isolation between
+organizations and models.
 """
 
 import logging
@@ -20,6 +22,18 @@ from infrastructure.database import get_db
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/{org_id}/{model_id}", tags=["org-scoped"])
 settings = get_settings()
+
+
+def build_namespace(org_id: str, model_id: str) -> str:
+    """Build namespace from org_id and model_id.
+    
+    Format: {org_id}/{model_id}
+    
+    This matches the URL pattern and ensures:
+    - Multi-tenant isolation (different orgs can't access each other's data)
+    - Model-level isolation (each model has its own vector space)
+    """
+    return f"{org_id}/{model_id}"
 
 
 # Dependency injection
@@ -84,6 +98,7 @@ async def mcp_endpoint(
     MCP endpoint for org-scoped model access.
     
     Handles MCP tool calls with org-level authentication.
+    The namespace is automatically set to {org_id}_{model_id} for proper isolation.
     """
     tool_name = request.get("tool")
     arguments = request.get("arguments", {})
@@ -91,8 +106,8 @@ async def mcp_endpoint(
     if not tool_name:
         raise HTTPException(status_code=400, detail="Missing 'tool' field")
     
-    # Add namespace from model_id
-    arguments["namespace"] = model_id
+    # Build namespace from org_id and model_id for proper isolation
+    arguments["namespace"] = build_namespace(org_id, model_id)
     
     # Handle tool call (using user's token for auth)
     response = await mcp_server.handle_tool_call(
@@ -172,6 +187,7 @@ async def listener_batch(
     HTTP endpoint for batch glyph ingestion.
     
     Accepts an array of concepts and creates glyphs in batch.
+    The namespace is automatically set to {org_id}_{model_id} for proper isolation.
     """
     concepts = request.get("concepts", [])
     metadata = request.get("metadata", {})
@@ -179,9 +195,13 @@ async def listener_batch(
     if not concepts:
         raise HTTPException(status_code=400, detail="No concepts provided")
     
+    # Build namespace for proper isolation
+    namespace = build_namespace(org_id, model_id)
+    
     # TODO: Implement batch creation via listener service
     return {
         "status": "not_implemented",
         "message": "Batch listener not yet implemented",
+        "namespace": namespace,
         "concepts_received": len(concepts)
     }
