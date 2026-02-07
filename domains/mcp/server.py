@@ -264,72 +264,54 @@ class MCPServer:
         """
         Handle natural language query tool.
         
-        Performs direct similarity search against stored glyphs.
-        Returns consistent JSON response with results and confidence.
+        Uses NLQueryService which:
+        1. Tries rules-based intent matching first
+        2. Falls back to LLM if rules fail
+        3. Falls back to similarity search if both fail
         """
-        from domains.models.storage import GlyphStorage
+        from domains.nl_query.service import NLQueryService
+        from domains.nl_query.intent_matcher import IntentMatcher
         from infrastructure.database import async_session_maker
-        from shared.encoder_config_factory import EncoderConfigFactory
-        from shared.sdk_adapter import get_sdk_adapter
-        import time
+        from infrastructure.config import get_settings
         
+        settings = get_settings()
         namespace = arguments["namespace"]
         query = arguments["query"]
-        start_time = time.time()
+        debug = arguments.get("debug", False)
         
+        # Create intent matcher
+        intent_matcher = IntentMatcher(confidence_threshold=0.85)
+        
+        # Create LLM fallback if available
+        llm_fallback = None
         try:
-            # Create encoder for query encoding
-            adapter = get_sdk_adapter()
-            config = EncoderConfigFactory.create_default_config()
-            Encoder = adapter.import_encoder()
-            encoder = Encoder(config)
-            
-            # Encode the query
-            query_embedding = encoder.encode_text(query)
-            query_embedding_list = query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding)
-            
-            # Search database directly
-            async with async_session_maker() as session:
-                storage = GlyphStorage(session)
-                results = await storage.similarity_search(
-                    namespace=namespace,
-                    query_embedding=query_embedding_list,
-                    top_k=10,
-                )
-            
-            elapsed_ms = (time.time() - start_time) * 1000
-            
-            # Format results consistently
-            formatted_results = []
-            for glyph_response, similarity in results:
-                formatted_results.append({
-                    "concept_text": glyph_response.concept_text,
-                    "similarity_score": similarity,
-                    "metadata": glyph_response.metadata,
-                })
-            
-            # Calculate overall confidence from top result
-            confidence = results[0][1] if results else 0.0
-            
-            return {
-                "results": formatted_results,
-                "total_count": len(formatted_results),
-                "query_type": "similarity_search",
-                "match_method": "direct",
-                "confidence": confidence,
-                "query_time_ms": elapsed_ms,
-            }
-            
-        except Exception as e:
-            logger.error(f"NL query failed: {e}")
-            elapsed_ms = (time.time() - start_time) * 1000
-            
-            return {
-                "results": [],
-                "total_count": 0,
-                "query_type": "similarity_search",
-                "match_method": "none",
-                "confidence": 0.0,
-                "query_time_ms": elapsed_ms,
-                "error": str(e),
-            }
+            from domains.nl_query.llm_fallback import LLMFallback
+            llm_fallback = LLMFallback(model_name=settings.nl_model)
+            if not llm_fallback.is_available():
+                llm_fallback = None
+        except ImportError:
+            pass
+        
+        # Create NL query service
+        nl_service = NLQueryService(
+            query_service=self._query_service,
+            intent_matcher=intent_matcher,
+            llm_fallback=llm_fallback,
+            confidence_threshold=0.85,
+        )
+        
+        # Execute query
+        result = await nl_service.execute_nl_query(
+            namespace=namespace,
+            query=query,
+            debug=debug,
+        )
+        
+        return {
+            "result": result.result,
+            "query_type": result.query_type,
+            "match_method": result.match_method,
+            "confidence": result.confidence,
+            "query_time_ms": result.query_time_ms,
+            "translated_query": result.translated_query if debug else None,
+        }
