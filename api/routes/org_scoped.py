@@ -95,16 +95,16 @@ async def validate_org_access(
 async def get_mcp_server(
     org_id: str,
     model_id: str,
-    db: AsyncSession = Depends(get_db),
 ) -> MCPServer:
     """Get MCP server for org/model."""
     from main import model_manager
+    from infrastructure.database import async_session_maker
     
     if model_manager is None:
         raise HTTPException(status_code=503, detail="Model manager not initialized")
     
-    storage = GlyphStorage(db)
-    query_service = QueryService(storage, model_manager)
+    # QueryService expects (model_manager, session_factory)
+    query_service = QueryService(model_manager, async_session_maker)
     auth_service = AuthService()
     
     return MCPServer(query_service, auth_service)

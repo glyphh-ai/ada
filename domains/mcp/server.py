@@ -44,12 +44,23 @@ class MCPResponse:
     """Response from an MCP tool invocation."""
     content: List[Dict[str, Any]]
     is_error: bool = False
+    # Additional fields for consistent JSON response
+    result: Optional[Any] = None
+    query_type: Optional[str] = None
+    match_method: Optional[str] = None
+    confidence: float = 0.0
+    query_time_ms: float = 0.0
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to MCP-compatible dict."""
+        """Convert to MCP-compatible dict with consistent JSON structure."""
         return {
             "content": self.content,
             "isError": self.is_error,
+            "result": self.result,
+            "query_type": self.query_type,
+            "match_method": self.match_method,
+            "confidence": self.confidence,
+            "query_time_ms": self.query_time_ms,
         }
 
 
@@ -168,9 +179,15 @@ class MCPServer:
             elapsed = (datetime.utcnow() - start_time).total_seconds() * 1000
             logger.info(f"MCP tool {tool_name} completed in {elapsed:.2f}ms")
             
+            # Return consistent JSON response
             return MCPResponse(
-                content=[{"type": "text", "text": str(result)}],
+                content=[{"type": "json", "data": result}],
                 is_error=False,
+                result=result.get("result"),
+                query_type=result.get("query_type"),
+                match_method=result.get("match_method"),
+                confidence=result.get("confidence", 0.0),
+                query_time_ms=result.get("query_time_ms", elapsed),
             )
             
         except AuthenticationException as e:
