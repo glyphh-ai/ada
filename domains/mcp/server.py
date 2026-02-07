@@ -86,160 +86,27 @@ class MCPServer:
     def _build_tool_schemas(self) -> Dict[str, MCPToolSchema]:
         """Build MCP tool schemas."""
         return {
-            "glyph_similarity_search": MCPToolSchema(
-                name="glyph_similarity_search",
-                description="Search for glyphs similar to a query text. Returns ranked results with similarity scores.",
+            "nl_query": MCPToolSchema(
+                name="nl_query",
+                description="Execute a natural language query. Uses rules-based intent matching first, falls back to LLM if needed.",
                 input_schema={
                     "type": "object",
                     "properties": {
                         "namespace": {
                             "type": "string",
-                            "description": "Model namespace to search in"
+                            "description": "Model namespace to query"
                         },
                         "query": {
                             "type": "string",
-                            "description": "Query text to search for"
+                            "description": "Natural language query"
                         },
-                        "top_k": {
-                            "type": "integer",
-                            "description": "Number of results to return (default: 10)",
-                            "default": 10,
-                            "minimum": 1,
-                            "maximum": 100
-                        },
-                        "filters": {
-                            "type": "object",
-                            "description": "Optional metadata filters",
-                            "additionalProperties": True
+                        "debug": {
+                            "type": "boolean",
+                            "description": "Include translation details in response",
+                            "default": False
                         }
                     },
                     "required": ["namespace", "query"]
-                }
-            ),
-            "glyph_fact_tree": MCPToolSchema(
-                name="glyph_fact_tree",
-                description="Generate a fact tree to verify a claim. Returns a hierarchical verification report with citations.",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "namespace": {
-                            "type": "string",
-                            "description": "Model namespace"
-                        },
-                        "claim": {
-                            "type": "string",
-                            "description": "Claim to verify"
-                        },
-                        "max_depth": {
-                            "type": "integer",
-                            "description": "Maximum tree depth (default: 3)",
-                            "default": 3,
-                            "minimum": 1,
-                            "maximum": 10
-                        }
-                    },
-                    "required": ["namespace", "claim"]
-                }
-            ),
-            "glyph_temporal_predict": MCPToolSchema(
-                name="glyph_temporal_predict",
-                description="Predict future states based on current state using temporal edges.",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "namespace": {
-                            "type": "string",
-                            "description": "Model namespace"
-                        },
-                        "current_state": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Current state concepts"
-                        },
-                        "steps_ahead": {
-                            "type": "integer",
-                            "description": "Number of steps to predict (default: 1)",
-                            "default": 1,
-                            "minimum": 1,
-                            "maximum": 10
-                        },
-                        "beam_width": {
-                            "type": "integer",
-                            "description": "Beam width for search (default: 5)",
-                            "default": 5,
-                            "minimum": 1,
-                            "maximum": 20
-                        }
-                    },
-                    "required": ["namespace", "current_state"]
-                }
-            ),
-            "glyph_create": MCPToolSchema(
-                name="glyph_create",
-                description="Create a new glyph from concept text.",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "namespace": {
-                            "type": "string",
-                            "description": "Model namespace"
-                        },
-                        "concept": {
-                            "type": "string",
-                            "description": "Concept text to encode"
-                        },
-                        "metadata": {
-                            "type": "object",
-                            "description": "Optional metadata",
-                            "additionalProperties": True
-                        }
-                    },
-                    "required": ["namespace", "concept"]
-                }
-            ),
-            "glyph_get": MCPToolSchema(
-                name="glyph_get",
-                description="Retrieve a glyph by ID.",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "namespace": {
-                            "type": "string",
-                            "description": "Model namespace"
-                        },
-                        "glyph_id": {
-                            "type": "string",
-                            "description": "Glyph UUID"
-                        }
-                    },
-                    "required": ["namespace", "glyph_id"]
-                }
-            ),
-            "glyph_list": MCPToolSchema(
-                name="glyph_list",
-                description="List glyphs in a namespace with pagination.",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "namespace": {
-                            "type": "string",
-                            "description": "Model namespace"
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum results (default: 100)",
-                            "default": 100,
-                            "minimum": 1,
-                            "maximum": 1000
-                        },
-                        "offset": {
-                            "type": "integer",
-                            "description": "Pagination offset (default: 0)",
-                            "default": 0,
-                            "minimum": 0
-                        }
-                    },
-                    "required": ["namespace"]
                 }
             ),
         }
@@ -389,131 +256,62 @@ class MCPServer:
     # Tool Handlers
     # =========================================================================
     
-    async def _handle_glyph_similarity_search(
+    async def _handle_nl_query(
         self,
         arguments: Dict[str, Any],
         user: User,
     ) -> Dict[str, Any]:
-        """Handle similarity search tool."""
-        results = await self._query_service.similarity_search(
-            namespace=arguments["namespace"],
-            query=arguments["query"],
-            top_k=arguments.get("top_k", 10),
-            user_permissions=user,
-            filters=arguments.get("filters"),
+        """
+        Handle natural language query tool.
+        
+        Uses NLQueryService which:
+        1. Tries rules-based intent matching first
+        2. Falls back to LLM if rules fail
+        3. Falls back to similarity search if both fail
+        """
+        from domains.nl_query.service import NLQueryService
+        from domains.nl_query.intent_matcher import IntentMatcher
+        from infrastructure.database import async_session_maker
+        from infrastructure.config import get_settings
+        
+        settings = get_settings()
+        namespace = arguments["namespace"]
+        query = arguments["query"]
+        debug = arguments.get("debug", False)
+        
+        # Create intent matcher
+        intent_matcher = IntentMatcher(confidence_threshold=0.85)
+        
+        # Create LLM fallback if available
+        llm_fallback = None
+        try:
+            from domains.nl_query.llm_fallback import LLMFallback
+            llm_fallback = LLMFallback(model_name=settings.nl_model)
+            if not llm_fallback.is_available():
+                llm_fallback = None
+        except ImportError:
+            pass
+        
+        # Create NL query service
+        nl_service = NLQueryService(
+            query_service=self._query_service,
+            intent_matcher=intent_matcher,
+            llm_fallback=llm_fallback,
+            confidence_threshold=0.85,
+        )
+        
+        # Execute query
+        result = await nl_service.execute_nl_query(
+            namespace=namespace,
+            query=query,
+            debug=debug,
         )
         
         return {
-            "results": [
-                {
-                    "glyph_id": str(r.glyph.id),
-                    "concept_text": r.glyph.concept_text,
-                    "similarity_score": r.similarity_score,
-                    "final_score": r.final_score,
-                    "metadata": r.glyph.metadata,
-                }
-                for r in results
-            ],
-            "total_count": len(results),
-        }
-    
-    async def _handle_glyph_fact_tree(
-        self,
-        arguments: Dict[str, Any],
-        user: User,
-    ) -> Dict[str, Any]:
-        """Handle fact tree generation tool."""
-        fact_tree = await self._query_service.generate_fact_tree(
-            namespace=arguments["namespace"],
-            claim=arguments["claim"],
-            max_depth=arguments.get("max_depth", 3),
-            user_permissions=user,
-        )
-        
-        return fact_tree.to_dict() if hasattr(fact_tree, 'to_dict') else fact_tree
-    
-    async def _handle_glyph_temporal_predict(
-        self,
-        arguments: Dict[str, Any],
-        user: User,
-    ) -> Dict[str, Any]:
-        """Handle temporal prediction tool."""
-        predictions = await self._query_service.predict_temporal(
-            namespace=arguments["namespace"],
-            current_state=arguments["current_state"],
-            steps_ahead=arguments.get("steps_ahead", 1),
-            beam_width=arguments.get("beam_width", 5),
-            user_permissions=user,
-        )
-        
-        return {
-            "predictions": [
-                {
-                    "state": p.state if hasattr(p, 'state') else str(p),
-                    "confidence": p.confidence if hasattr(p, 'confidence') else 0.0,
-                }
-                for p in predictions
-            ]
-        }
-    
-    async def _handle_glyph_create(
-        self,
-        arguments: Dict[str, Any],
-        user: User,
-    ) -> Dict[str, Any]:
-        """Handle glyph creation tool."""
-        result = await self._query_service.create_glyph(
-            namespace=arguments["namespace"],
-            concept=arguments["concept"],
-            metadata=arguments.get("metadata", {}),
-        )
-        
-        return {
-            "glyph_id": str(result.glyph_id),
-            "namespace": result.namespace,
-            "created_at": result.created_at.isoformat() if result.created_at else None,
-        }
-    
-    async def _handle_glyph_get(
-        self,
-        arguments: Dict[str, Any],
-        user: User,
-    ) -> Dict[str, Any]:
-        """Handle glyph retrieval tool."""
-        glyph = await self._query_service.get_glyph(
-            namespace=arguments["namespace"],
-            glyph_id=UUID(arguments["glyph_id"]),
-        )
-        
-        return {
-            "id": str(glyph.id),
-            "namespace": glyph.namespace,
-            "concept_text": glyph.concept_text,
-            "metadata": glyph.metadata,
-            "created_at": glyph.created_at.isoformat() if glyph.created_at else None,
-        }
-    
-    async def _handle_glyph_list(
-        self,
-        arguments: Dict[str, Any],
-        user: User,
-    ) -> Dict[str, Any]:
-        """Handle glyph listing tool."""
-        glyphs = await self._query_service.list_glyphs(
-            namespace=arguments["namespace"],
-            limit=arguments.get("limit", 100),
-            offset=arguments.get("offset", 0),
-        )
-        
-        return {
-            "glyphs": [
-                {
-                    "id": str(g.id),
-                    "concept_text": g.concept_text,
-                    "metadata": g.metadata,
-                    "created_at": g.created_at.isoformat() if g.created_at else None,
-                }
-                for g in glyphs
-            ],
-            "count": len(glyphs),
+            "result": result.result,
+            "query_type": result.query_type,
+            "match_method": result.match_method,
+            "confidence": result.confidence,
+            "query_time_ms": result.query_time_ms,
+            "translated_query": result.translated_query if debug else None,
         }
