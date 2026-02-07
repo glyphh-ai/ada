@@ -232,6 +232,99 @@ async def listener_batch(
     }
 
 
+# Batch Glyph Creation Request
+class BatchGlyphRequest(BaseModel):
+    """Request to create multiple glyphs."""
+    concepts: List[str] = Field(..., description="List of concept texts to encode")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Shared metadata for all glyphs")
+
+
+# Batch Glyph Creation Endpoint
+@router.post("/glyphs/batch")
+async def create_glyphs_batch_org_scoped(
+    org_id: str,
+    model_id: str,
+    request: BatchGlyphRequest,
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Create multiple glyphs in a batch for an org-scoped model.
+    
+    Encodes all concepts and stores them with the org/model namespace.
+    Uses the model's encoder config if available, otherwise falls back to default.
+    """
+    from main import model_manager
+    from domains.models.storage import GlyphStorage
+    from shared.encoder_config_factory import EncoderConfigFactory
+    from shared.sdk_adapter import get_sdk_adapter
+    
+    if model_manager is None:
+        raise HTTPException(status_code=503, detail="Model manager not initialized")
+    
+    namespace = build_namespace(org_id, model_id)
+    storage = GlyphStorage(db)
+    
+    # Try to get encoder from loaded model first
+    encoder = None
+    try:
+        model = await model_manager.get_model(namespace)
+        if model is not None:
+            encoder = model.encoder
+            logger.info(f"Using loaded model encoder for namespace {namespace}")
+    except Exception as e:
+        logger.debug(f"No loaded model for {namespace}: {e}")
+    
+    # Fall back to creating a default encoder
+    if encoder is None:
+        try:
+            adapter = get_sdk_adapter()
+            config = EncoderConfigFactory.create_default_config()
+            Encoder = adapter.import_encoder()
+            encoder = Encoder(config)
+            logger.info(f"Using default encoder for namespace {namespace}")
+        except Exception as e:
+            logger.error(f"Failed to create encoder: {e}")
+            raise HTTPException(status_code=503, detail=f"Failed to create encoder: {e}")
+    
+    results = []
+    errors = []
+    
+    for i, concept in enumerate(request.concepts):
+        try:
+            # Encode the concept
+            embedding = encoder.encode_text(concept)
+            embedding_list = embedding.tolist() if hasattr(embedding, 'tolist') else list(embedding)
+            
+            # Store the glyph
+            result = await storage.create_glyph(
+                namespace=namespace,
+                concept_text=concept,
+                embedding=embedding_list,
+                metadata=request.metadata,
+            )
+            results.append({
+                "index": i,
+                "glyph_id": str(result.glyph_id),
+                "status": "created"
+            })
+        except Exception as e:
+            logger.error(f"Failed to create glyph {i}: {e}")
+            errors.append({
+                "index": i,
+                "concept": concept[:50] + "..." if len(concept) > 50 else concept,
+                "error": str(e)
+            })
+    
+    logger.info(f"Batch create for {namespace}: {len(results)} created, {len(errors)} failed")
+    
+    return {
+        "created": len(results),
+        "failed": len(errors),
+        "results": results,
+        "errors": errors if errors else None,
+    }
+
+
 # NL Query Service Factory
 def get_nl_query_service_for_org():
     """Get NL query service instance for org-scoped queries."""
