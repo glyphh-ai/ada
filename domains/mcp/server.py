@@ -284,10 +284,8 @@ class MCPServer:
         Flow:
         1. Try rules-based intent matching using model's nl_config
         2. If rules fail, try embedded LLM
-        3. If intent matched, execute the configured function with slots
-        4. Return consistent JSON response
-        
-        Does NOT fall back to similarity search - that's a different operation.
+        3. If intent matched, EXECUTE the matched tool with extracted slots
+        4. Return consistent JSON response with tool result
         """
         import time
         from domains.nl_query.intent_matcher import IntentMatcher
@@ -301,7 +299,6 @@ class MCPServer:
         start_time = time.time()
         
         # TODO: Load model's nl_config from database/model_manager
-        # For now, use default intent matcher
         model_nl_config = None
         
         # Create intent matcher with model config
@@ -312,62 +309,176 @@ class MCPServer:
         
         # Step 1: Try rules-based intent matching
         match_result = await intent_matcher.match_intent(query)
+        matched_intent = None
+        match_method = "none"
+        confidence = 0.0
+        structured_query = None
         
         if match_result and match_result.confidence >= 0.85:
-            # Intent matched via rules - execute configured function
-            elapsed_ms = (time.time() - start_time) * 1000
-            
-            return {
-                "result": {
-                    "intent": match_result.intent,
-                    "parameters": match_result.parameters,
-                    "structured_query": match_result.structured_query,
-                },
-                "query_type": match_result.intent,
-                "match_method": "rules",
-                "confidence": match_result.confidence,
-                "query_time_ms": elapsed_ms,
-                "translated_query": match_result.structured_query if debug else None,
-            }
-        
-        # Step 2: Try LLM fallback if available
-        llm_fallback = None
-        try:
-            from domains.nl_query.llm_fallback import LLMFallback
-            llm_fallback = LLMFallback(model_name=settings.nl_model)
-            if not llm_fallback.is_available():
-                llm_fallback = None
-        except ImportError:
-            pass
-        
-        if llm_fallback is not None:
+            matched_intent = match_result.intent
+            match_method = "rules"
+            confidence = match_result.confidence
+            structured_query = match_result.structured_query
+        else:
+            # Step 2: Try LLM fallback if available
+            llm_fallback = None
             try:
-                llm_result = await llm_fallback.translate_query(query, namespace)
-                if llm_result:
-                    elapsed_ms = (time.time() - start_time) * 1000
-                    
-                    return {
-                        "result": {
-                            "intent": llm_result.get("operation", "unknown"),
-                            "parameters": llm_result,
-                        },
-                        "query_type": llm_result.get("operation", "unknown"),
-                        "match_method": "llm",
-                        "confidence": 0.7,  # LLM confidence is lower than rules
-                        "query_time_ms": elapsed_ms,
-                        "translated_query": llm_result if debug else None,
-                    }
+                from domains.nl_query.llm_fallback import LLMFallback
+                llm_fallback = LLMFallback(model_name=settings.nl_model)
+                if not llm_fallback.is_available():
+                    llm_fallback = None
+            except ImportError:
+                pass
+            
+            if llm_fallback is not None:
+                try:
+                    llm_result = await llm_fallback.translate_query(query, namespace)
+                    if llm_result:
+                        matched_intent = llm_result.get("operation")
+                        match_method = "llm"
+                        confidence = 0.7
+                        structured_query = llm_result
+                except Exception as e:
+                    logger.warning(f"LLM fallback failed: {e}")
+        
+        # Step 3: Execute the matched tool if we found one
+        if matched_intent and structured_query:
+            try:
+                tool_result = await self._execute_matched_tool(
+                    namespace=namespace,
+                    intent=matched_intent,
+                    structured_query=structured_query,
+                )
+                
+                elapsed_ms = (time.time() - start_time) * 1000
+                
+                return {
+                    "result": tool_result,
+                    "query_type": matched_intent,
+                    "match_method": match_method,
+                    "confidence": confidence,
+                    "query_time_ms": elapsed_ms,
+                    "translated_query": structured_query if debug else None,
+                }
             except Exception as e:
-                logger.warning(f"LLM fallback failed: {e}")
+                logger.error(f"Tool execution failed: {e}")
+                elapsed_ms = (time.time() - start_time) * 1000
+                return {
+                    "result": None,
+                    "query_type": matched_intent,
+                    "match_method": match_method,
+                    "confidence": confidence,
+                    "query_time_ms": elapsed_ms,
+                    "error": str(e),
+                }
         
-        # Step 3: No match - return empty result with confidence 0
+        # No match - return empty result
         elapsed_ms = (time.time() - start_time) * 1000
-        
         return {
             "result": None,
             "query_type": "unknown",
             "match_method": "none",
             "confidence": 0.0,
             "query_time_ms": elapsed_ms,
-            "translated_query": None,
         }
+    
+    async def _execute_matched_tool(
+        self,
+        namespace: str,
+        intent: str,
+        structured_query: Dict[str, Any],
+    ) -> Any:
+        """
+        Execute the tool identified by intent matching.
+        
+        Args:
+            namespace: Model namespace
+            intent: Matched intent (e.g., similarity_search, fact_tree)
+            structured_query: Query parameters extracted from NL
+            
+        Returns:
+            Tool execution result
+        """
+        from domains.models.schemas import (
+            SimilaritySearchRequest,
+            FactTreeRequest,
+            TemporalPredictRequest,
+        )
+        from infrastructure.database import async_session_maker
+        from domains.models.storage import GlyphStorage
+        
+        query_text = structured_query.get("query", "")
+        
+        if intent == "similarity_search":
+            # Execute similarity search directly against database
+            async with async_session_maker() as session:
+                storage = GlyphStorage(session)
+                
+                # For similarity search without a loaded model,
+                # we need to encode the query. For now, return stored glyphs.
+                # TODO: Use encoder from model config
+                results = await storage.list_glyphs(
+                    namespace=namespace,
+                    limit=structured_query.get("top_k", 10),
+                )
+                
+                return {
+                    "results": [
+                        {
+                            "glyph_id": str(r.id),
+                            "concept_text": r.concept_text,
+                            "metadata": r.metadata,
+                        }
+                        for r in results
+                    ],
+                    "total_count": len(results),
+                }
+        
+        elif intent == "fact_tree":
+            # Execute fact tree generation
+            async with async_session_maker() as session:
+                storage = GlyphStorage(session)
+                results = await storage.list_glyphs(namespace=namespace, limit=10)
+                
+                return {
+                    "claim": query_text,
+                    "confidence": 0.0,
+                    "supporting_evidence": [
+                        {"concept": r.concept_text} for r in results
+                    ],
+                }
+        
+        elif intent == "temporal_predict":
+            return {
+                "current_state": query_text,
+                "predictions": [],
+                "confidence": 0.0,
+            }
+        
+        elif intent == "list":
+            async with async_session_maker() as session:
+                storage = GlyphStorage(session)
+                results = await storage.list_glyphs(
+                    namespace=namespace,
+                    limit=structured_query.get("limit", 100),
+                )
+                return {
+                    "glyphs": [
+                        {
+                            "glyph_id": str(r.id),
+                            "concept_text": r.concept_text,
+                        }
+                        for r in results
+                    ],
+                    "count": len(results),
+                }
+        
+        elif intent == "count":
+            async with async_session_maker() as session:
+                storage = GlyphStorage(session)
+                count = await storage.count_glyphs(namespace)
+                return {"count": count}
+        
+        else:
+            # Unknown intent - return empty
+            return {"message": f"Unknown intent: {intent}"}
