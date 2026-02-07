@@ -7,9 +7,11 @@ organizations and models.
 """
 
 import logging
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domains.auth.service import AuthService, User
@@ -22,6 +24,29 @@ from infrastructure.database import get_db
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/{org_id}/{model_id}", tags=["org-scoped"])
 settings = get_settings()
+
+
+# Request/Response Models for NL Query
+class NLQueryRequest(BaseModel):
+    """Natural language query request."""
+    query: str = Field(..., description="Natural language query", min_length=1)
+    debug: bool = Field(default=False, description="Include translation details")
+
+
+class NLQueryResponse(BaseModel):
+    """Natural language query response."""
+    result: Any
+    query_type: str
+    match_method: str
+    confidence: float
+    translated_query: Optional[Dict[str, Any]] = None
+    query_time_ms: float
+
+
+class IntentsResponse(BaseModel):
+    """Available intents response."""
+    intents: List[str]
+    patterns: Dict[str, List[str]]
 
 
 def build_namespace(org_id: str, model_id: str) -> str:
@@ -205,3 +230,142 @@ async def listener_batch(
         "namespace": namespace,
         "concepts_received": len(concepts)
     }
+
+
+# NL Query Service Factory
+def get_nl_query_service_for_org():
+    """Get NL query service instance for org-scoped queries."""
+    from main import model_manager
+    from domains.nl_query.intent_matcher import IntentMatcher
+    from domains.nl_query.service import NLQueryService
+    from infrastructure.database import async_session_maker
+    from shared.encoder_config_factory import EncoderConfigFactory
+    
+    if model_manager is None:
+        raise HTTPException(status_code=503, detail="Model manager not initialized")
+    
+    if not settings.enable_nl_query:
+        raise HTTPException(
+            status_code=501,
+            detail="Natural language query is not enabled. Set ENABLE_NL_QUERY=true"
+        )
+    
+    # Try to extract NL encoder config from loaded model
+    model_nl_config = None
+    try:
+        model = model_manager.get_current_model() if hasattr(model_manager, 'get_current_model') else None
+        if model is not None:
+            model_nl_config = EncoderConfigFactory.extract_nl_encoder_config(model)
+            if model_nl_config:
+                logger.info(f"Using NL encoder config from model with {len(model_nl_config.get('patterns', []))} patterns")
+    except Exception as e:
+        logger.warning(f"Failed to extract NL config from model: {e}")
+    
+    # Create services
+    query_service = QueryService(model_manager, async_session_maker)
+    intent_matcher = IntentMatcher(
+        confidence_threshold=0.85,
+        model_nl_config=model_nl_config
+    )
+    
+    # Create LLM fallback if available
+    llm_fallback = None
+    try:
+        from domains.nl_query.llm_fallback import LLMFallback
+        llm_fallback = LLMFallback(model_name=settings.nl_model)
+        if not llm_fallback.is_available():
+            llm_fallback = None
+            logger.info("LLM fallback disabled (transformers not available)")
+    except ImportError:
+        logger.info("LLM fallback disabled (import error)")
+    
+    return NLQueryService(
+        query_service=query_service,
+        intent_matcher=intent_matcher,
+        llm_fallback=llm_fallback,
+        confidence_threshold=0.85,
+    )
+
+
+# NL Query Endpoints
+@router.post("/query", response_model=NLQueryResponse)
+async def execute_nl_query(
+    org_id: str,
+    model_id: str,
+    request: NLQueryRequest,
+    user: User = Depends(validate_org_access),
+) -> NLQueryResponse:
+    """
+    Execute a natural language query against the model.
+    
+    URL: POST /{org_id}/{model_id}/query
+    
+    Translates the query using rules-first approach with optional
+    LLM fallback, then executes the translated query.
+    
+    Returns 422 if translation fails and LLM is disabled.
+    """
+    service = get_nl_query_service_for_org()
+    namespace = build_namespace(org_id, model_id)
+    
+    logger.info(f"NL query: org={org_id}, model={model_id}, namespace={namespace}, query='{request.query}'")
+    
+    start_time = time.time()
+    
+    result = await service.execute_nl_query(
+        namespace=namespace,
+        query=request.query,
+        debug=request.debug,
+    )
+    
+    query_time_ms = (time.time() - start_time) * 1000
+    
+    if result.match_method == "none":
+        # Translation failed
+        suggestions = [
+            "Try rephrasing your query",
+            "Use keywords like 'find', 'similar', 'verify', 'predict'",
+            "Example: 'find similar to machine learning'",
+            "Example: 'verify that X is related to Y'",
+            "Example: 'predict what comes after X'",
+        ]
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Could not understand query",
+                "suggestions": suggestions,
+                "original_query": request.query,
+                "confidence": result.confidence,
+            }
+        )
+    
+    return NLQueryResponse(
+        result=result.result,
+        query_type=result.query_type,
+        match_method=result.match_method,
+        confidence=result.confidence,
+        translated_query=result.translated_query if request.debug else None,
+        query_time_ms=query_time_ms,
+    )
+
+
+@router.get("/intents", response_model=IntentsResponse)
+async def get_intents(
+    org_id: str,
+    model_id: str,
+    user: User = Depends(validate_org_access),
+) -> IntentsResponse:
+    """
+    Get available intents and patterns for the model.
+    
+    URL: GET /{org_id}/{model_id}/intents
+    
+    Returns the list of supported query types and their pattern templates.
+    """
+    service = get_nl_query_service_for_org()
+    intents = service.get_intents()
+    
+    return IntentsResponse(
+        intents=intents["intents"],
+        patterns=intents["patterns"],
+    )
