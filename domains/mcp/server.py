@@ -283,9 +283,10 @@ class MCPServer:
         
         Flow:
         1. Try rules-based intent matching using model's nl_config
-        2. If rules fail, try embedded LLM
-        3. If intent matched, EXECUTE the matched tool with extracted slots
-        4. Return consistent JSON response with tool result
+        2. If rules fail → LLM handles both intent AND slot extraction
+        3. If rules match but slots are unclear → LLM can help with slotting
+        4. Execute the matched tool with extracted slots
+        5. Return consistent JSON response with tool result
         """
         import time
         from domains.nl_query.intent_matcher import IntentMatcher
@@ -307,6 +308,16 @@ class MCPServer:
             model_nl_config=model_nl_config
         )
         
+        # Initialize LLM fallback
+        llm_fallback = None
+        try:
+            from domains.nl_query.llm_fallback import LLMFallback
+            llm_fallback = LLMFallback(model_name=settings.nl_model)
+            if not llm_fallback.is_available():
+                llm_fallback = None
+        except ImportError:
+            pass
+        
         # Step 1: Try rules-based intent matching
         match_result = await intent_matcher.match_intent(query)
         matched_intent = None
@@ -315,31 +326,34 @@ class MCPServer:
         structured_query = None
         
         if match_result and match_result.confidence >= 0.85:
+            # Rules matched - use rules for intent
             matched_intent = match_result.intent
             match_method = "rules"
             confidence = match_result.confidence
             structured_query = match_result.structured_query
-        else:
-            # Step 2: Try LLM fallback if available
-            llm_fallback = None
-            try:
-                from domains.nl_query.llm_fallback import LLMFallback
-                llm_fallback = LLMFallback(model_name=settings.nl_model)
-                if not llm_fallback.is_available():
-                    llm_fallback = None
-            except ImportError:
-                pass
             
-            if llm_fallback is not None:
+            # If slots seem incomplete, use LLM to help extract better parameters
+            if llm_fallback and self._needs_slot_refinement(structured_query):
                 try:
                     llm_result = await llm_fallback.translate_query(query, namespace)
-                    if llm_result:
-                        matched_intent = llm_result.get("operation")
-                        match_method = "llm"
-                        confidence = 0.7
-                        structured_query = llm_result
+                    if llm_result and llm_result.get("operation") == matched_intent:
+                        # LLM agrees on intent - merge slot data
+                        structured_query = self._merge_slots(structured_query, llm_result)
+                        match_method = "rules+llm"
                 except Exception as e:
-                    logger.warning(f"LLM fallback failed: {e}")
+                    logger.warning(f"LLM slot refinement failed: {e}")
+        
+        elif llm_fallback:
+            # Step 2: Rules failed - LLM handles both intent AND slots
+            try:
+                llm_result = await llm_fallback.translate_query(query, namespace)
+                if llm_result:
+                    matched_intent = llm_result.get("operation")
+                    match_method = "llm"
+                    confidence = 0.7
+                    structured_query = llm_result
+            except Exception as e:
+                logger.warning(f"LLM fallback failed: {e}")
         
         # Step 3: Execute the matched tool if we found one
         if matched_intent and structured_query:
@@ -381,6 +395,41 @@ class MCPServer:
             "confidence": 0.0,
             "query_time_ms": elapsed_ms,
         }
+    
+    def _needs_slot_refinement(self, structured_query: Dict[str, Any]) -> bool:
+        """Check if the structured query needs LLM help for better slot extraction."""
+        if not structured_query:
+            return True
+        
+        # Check if query parameter is too short or generic
+        query_param = structured_query.get("query", "")
+        if len(query_param) < 3:
+            return True
+        
+        return False
+    
+    def _merge_slots(
+        self,
+        rules_query: Dict[str, Any],
+        llm_query: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Merge slot data from rules and LLM, preferring LLM for specific values."""
+        merged = rules_query.copy()
+        
+        # LLM often extracts better specific values
+        for key in ["query", "claim", "current_state", "top_k", "max_depth"]:
+            if key in llm_query and llm_query[key]:
+                # Prefer LLM value if it's more specific
+                llm_val = llm_query[key]
+                rules_val = rules_query.get(key)
+                
+                if isinstance(llm_val, str) and isinstance(rules_val, str):
+                    if len(llm_val) > len(rules_val):
+                        merged[key] = llm_val
+                elif llm_val and not rules_val:
+                    merged[key] = llm_val
+        
+        return merged
     
     async def _execute_matched_tool(
         self,
