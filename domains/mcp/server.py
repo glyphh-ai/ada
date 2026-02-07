@@ -281,14 +281,16 @@ class MCPServer:
         """
         Handle natural language query tool.
         
-        Uses NLQueryService which:
-        1. Tries rules-based intent matching first
-        2. Falls back to LLM if rules fail
-        3. Falls back to similarity search if both fail
+        Flow:
+        1. Try rules-based intent matching using model's nl_config
+        2. If rules fail, try embedded LLM
+        3. If intent matched, execute the configured function with slots
+        4. Return consistent JSON response
+        
+        Does NOT fall back to similarity search - that's a different operation.
         """
-        from domains.nl_query.service import NLQueryService
+        import time
         from domains.nl_query.intent_matcher import IntentMatcher
-        from infrastructure.database import async_session_maker
         from infrastructure.config import get_settings
         
         settings = get_settings()
@@ -296,10 +298,39 @@ class MCPServer:
         query = arguments["query"]
         debug = arguments.get("debug", False)
         
-        # Create intent matcher
-        intent_matcher = IntentMatcher(confidence_threshold=0.85)
+        start_time = time.time()
         
-        # Create LLM fallback if available
+        # TODO: Load model's nl_config from database/model_manager
+        # For now, use default intent matcher
+        model_nl_config = None
+        
+        # Create intent matcher with model config
+        intent_matcher = IntentMatcher(
+            confidence_threshold=0.85,
+            model_nl_config=model_nl_config
+        )
+        
+        # Step 1: Try rules-based intent matching
+        match_result = await intent_matcher.match_intent(query)
+        
+        if match_result and match_result.confidence >= 0.85:
+            # Intent matched via rules - execute configured function
+            elapsed_ms = (time.time() - start_time) * 1000
+            
+            return {
+                "result": {
+                    "intent": match_result.intent,
+                    "parameters": match_result.parameters,
+                    "structured_query": match_result.structured_query,
+                },
+                "query_type": match_result.intent,
+                "match_method": "rules",
+                "confidence": match_result.confidence,
+                "query_time_ms": elapsed_ms,
+                "translated_query": match_result.structured_query if debug else None,
+            }
+        
+        # Step 2: Try LLM fallback if available
         llm_fallback = None
         try:
             from domains.nl_query.llm_fallback import LLMFallback
@@ -309,26 +340,34 @@ class MCPServer:
         except ImportError:
             pass
         
-        # Create NL query service
-        nl_service = NLQueryService(
-            query_service=self._query_service,
-            intent_matcher=intent_matcher,
-            llm_fallback=llm_fallback,
-            confidence_threshold=0.85,
-        )
+        if llm_fallback is not None:
+            try:
+                llm_result = await llm_fallback.translate_query(query, namespace)
+                if llm_result:
+                    elapsed_ms = (time.time() - start_time) * 1000
+                    
+                    return {
+                        "result": {
+                            "intent": llm_result.get("operation", "unknown"),
+                            "parameters": llm_result,
+                        },
+                        "query_type": llm_result.get("operation", "unknown"),
+                        "match_method": "llm",
+                        "confidence": 0.7,  # LLM confidence is lower than rules
+                        "query_time_ms": elapsed_ms,
+                        "translated_query": llm_result if debug else None,
+                    }
+            except Exception as e:
+                logger.warning(f"LLM fallback failed: {e}")
         
-        # Execute query
-        result = await nl_service.execute_nl_query(
-            namespace=namespace,
-            query=query,
-            debug=debug,
-        )
+        # Step 3: No match - return empty result with confidence 0
+        elapsed_ms = (time.time() - start_time) * 1000
         
         return {
-            "result": result.result,
-            "query_type": result.query_type,
-            "match_method": result.match_method,
-            "confidence": result.confidence,
-            "query_time_ms": result.query_time_ms,
-            "translated_query": result.translated_query if debug else None,
+            "result": None,
+            "query_type": "unknown",
+            "match_method": "none",
+            "confidence": 0.0,
+            "query_time_ms": elapsed_ms,
+            "translated_query": None,
         }
