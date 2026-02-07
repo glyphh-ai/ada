@@ -51,9 +51,9 @@ class Settings(BaseSettings):
         description="Grace period in days when license validation fails"
     )
     
-    # NL Query (optional)
+    # NL Query (enabled by default for studio chat functionality)
     enable_nl_query: bool = Field(
-        default=False,
+        default=True,
         description="Enable natural language query interface"
     )
     nl_model: str = Field(
