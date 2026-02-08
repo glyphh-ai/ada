@@ -29,7 +29,8 @@ settings = get_settings()
 class ConnectionInfo:
     """Information about an active WebSocket connection."""
     connection_id: str
-    namespace: str
+    org_id: str
+    model_id: str
     connected_at: datetime
     last_activity: datetime
     messages_received: int = 0
@@ -39,7 +40,7 @@ class ConnectionInfo:
 
 @dataclass
 class RateLimitInfo:
-    """Rate limiting state for a connection or namespace."""
+    """Rate limiting state for a connection or model scope."""
     requests: List[float] = field(default_factory=list)
     window_seconds: int = 60
     max_requests: int = 60
@@ -80,7 +81,7 @@ class ListenerService:
     Responsibilities:
     - Handle WebSocket connections for streaming glyph creation
     - Handle HTTP batch ingestion
-    - Rate limiting per connection/namespace
+    - Rate limiting per connection/model scope
     - Connection health monitoring (ping/pong)
     - Graceful connection cleanup
     """
@@ -101,7 +102,7 @@ class ListenerService:
         
         Args:
             session_maker: Async session maker for database access
-            encoder_getter: Callable to get encoder for namespace
+            encoder_getter: Callable to get encoder for org_id/model_id
         """
         self._session_maker = session_maker
         self._encoder_getter = encoder_getter
@@ -115,38 +116,25 @@ class ListenerService:
     async def handle_websocket(
         self,
         websocket: WebSocket,
-        namespace: str,
+        org_id: str,
+        model_id: str,
     ) -> None:
-        """
-        Handle a WebSocket connection for streaming glyph creation.
-        
-        Protocol:
-        - Client sends: {"type": "create_glyph", "concept": "...", "metadata": {...}}
-        - Server responds: {"type": "glyph_created", "glyph_id": "...", "status": "success"}
-        - Client can send: {"type": "ping"}
-        - Server responds: {"type": "pong"}
-        
-        Args:
-            websocket: FastAPI WebSocket connection
-            namespace: Model namespace for glyph creation
-        """
+        """Handle a WebSocket connection for streaming glyph creation."""
         connection_id = str(uuid4())
         
-        # Accept connection
         await websocket.accept()
         
-        # Register connection
         self._connections[connection_id] = ConnectionInfo(
             connection_id=connection_id,
-            namespace=namespace,
+            org_id=org_id,
+            model_id=model_id,
             connected_at=datetime.utcnow(),
             last_activity=datetime.utcnow(),
         )
         self._websockets[connection_id] = websocket
         
-        logger.info(f"WebSocket connected: {connection_id} for namespace '{namespace}'")
+        logger.info(f"WebSocket connected: {connection_id} for org={org_id}, model={model_id}")
         
-        # Start heartbeat task
         self._heartbeat_tasks[connection_id] = asyncio.create_task(
             self._heartbeat_loop(connection_id),
             name=f"heartbeat_{connection_id}"
@@ -154,7 +142,6 @@ class ListenerService:
         
         try:
             while True:
-                # Receive message
                 try:
                     data = await asyncio.wait_for(
                         websocket.receive_json(),
@@ -164,12 +151,10 @@ class ListenerService:
                     logger.info(f"Connection {connection_id} timed out")
                     break
                 
-                # Update activity
                 self._connections[connection_id].last_activity = datetime.utcnow()
                 self._connections[connection_id].messages_received += 1
                 
-                # Check rate limit
-                rate_key = f"{namespace}:{connection_id}"
+                rate_key = f"{org_id}:{model_id}:{connection_id}"
                 if not self._rate_limits[rate_key].is_allowed():
                     wait_time = self._rate_limits[rate_key].time_until_allowed()
                     await websocket.send_json({
@@ -182,8 +167,7 @@ class ListenerService:
                 
                 self._rate_limits[rate_key].record_request()
                 
-                # Handle message
-                await self._handle_message(connection_id, namespace, data)
+                await self._handle_message(connection_id, org_id, model_id, data)
                 
         except WebSocketDisconnect:
             logger.info(f"WebSocket disconnected: {connection_id}")
@@ -196,7 +180,8 @@ class ListenerService:
     async def _handle_message(
         self,
         connection_id: str,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         data: Dict[str, Any],
     ) -> None:
         """Handle a single WebSocket message."""
@@ -210,10 +195,10 @@ class ListenerService:
             await websocket.send_json({"type": "pong"})
             
         elif message_type == "create_glyph":
-            await self._handle_create_glyph(connection_id, namespace, data)
+            await self._handle_create_glyph(connection_id, org_id, model_id, data)
             
         elif message_type == "batch_create":
-            await self._handle_batch_create_ws(connection_id, namespace, data)
+            await self._handle_batch_create_ws(connection_id, org_id, model_id, data)
             
         else:
             await websocket.send_json({
@@ -225,7 +210,8 @@ class ListenerService:
     async def _handle_create_glyph(
         self,
         connection_id: str,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         data: Dict[str, Any],
     ) -> None:
         """Handle a create_glyph message."""
@@ -245,21 +231,19 @@ class ListenerService:
             return
         
         try:
-            # Get encoder
             if self._encoder_getter:
-                encoder = await self._encoder_getter(namespace)
+                encoder = await self._encoder_getter(org_id, model_id)
             else:
                 raise ValueError("Encoder not configured")
             
-            # Encode concept
             embedding = encoder.encode_text(concept)
             embedding_list = embedding.tolist() if hasattr(embedding, 'tolist') else list(embedding)
             
-            # Store glyph
             async with self._session_maker() as session:
                 storage = GlyphStorage(session)
                 result = await storage.create_glyph(
-                    namespace=namespace,
+                    org_id=org_id,
+                    model_id=model_id,
                     concept_text=concept,
                     embedding=embedding_list,
                     metadata=metadata,
@@ -294,7 +278,8 @@ class ListenerService:
     async def _handle_batch_create_ws(
         self,
         connection_id: str,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         data: Dict[str, Any],
     ) -> None:
         """Handle a batch_create message over WebSocket."""
@@ -313,7 +298,7 @@ class ListenerService:
             })
             return
         
-        result = await self.handle_batch_create(namespace, concepts, metadata)
+        result = await self.handle_batch_create(org_id, model_id, concepts, metadata)
         
         self._connections[connection_id].glyphs_created += result.created
         self._connections[connection_id].errors += result.failed
@@ -329,30 +314,18 @@ class ListenerService:
 
     async def handle_batch_create(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         concepts: List[str],
         metadata: Optional[Dict[str, Any]] = None,
     ) -> BatchResult:
-        """
-        Handle batch glyph creation via HTTP.
-        
-        Encodes all concepts and stores them in a single transaction.
-        If any concept fails, the entire batch is rolled back.
-        
-        Args:
-            namespace: Model namespace
-            concepts: List of concept texts
-            metadata: Optional shared metadata for all glyphs
-            
-        Returns:
-            BatchResult with creation results
-        """
+        """Handle batch glyph creation via HTTP."""
         results = []
         errors = []
         
-        # Check rate limit for namespace
-        if not self._rate_limits[namespace].is_allowed():
-            wait_time = self._rate_limits[namespace].time_until_allowed()
+        rate_key = f"{org_id}:{model_id}"
+        if not self._rate_limits[rate_key].is_allowed():
+            wait_time = self._rate_limits[rate_key].time_until_allowed()
             return BatchResult(
                 total=len(concepts),
                 created=0,
@@ -364,12 +337,11 @@ class ListenerService:
                 }],
             )
         
-        self._rate_limits[namespace].record_request()
+        self._rate_limits[rate_key].record_request()
         
         try:
-            # Get encoder
             if self._encoder_getter:
-                encoder = await self._encoder_getter(namespace)
+                encoder = await self._encoder_getter(org_id, model_id)
             else:
                 raise ValueError("Encoder not configured")
             
@@ -378,13 +350,12 @@ class ListenerService:
                 
                 for i, concept in enumerate(concepts):
                     try:
-                        # Encode concept
                         embedding = encoder.encode_text(concept)
                         embedding_list = embedding.tolist() if hasattr(embedding, 'tolist') else list(embedding)
                         
-                        # Store glyph
                         result = await storage.create_glyph(
-                            namespace=namespace,
+                            org_id=org_id,
+                            model_id=model_id,
                             concept_text=concept,
                             embedding=embedding_list,
                             metadata=metadata,
@@ -476,7 +447,8 @@ class ListenerService:
             "connections": [
                 {
                     "connection_id": info.connection_id,
-                    "namespace": info.namespace,
+                    "org_id": info.org_id,
+                    "model_id": info.model_id,
                     "connected_at": info.connected_at.isoformat(),
                     "messages_received": info.messages_received,
                     "glyphs_created": info.glyphs_created,

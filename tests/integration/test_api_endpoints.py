@@ -78,7 +78,7 @@ class TestGlyphEndpoints:
     def test_create_glyph(self, client: TestClient):
         """Test glyph creation endpoint."""
         response = client.post(
-            "/api/v1/test_namespace/glyphs",
+            "/test_org/test_model/glyphs",
             json={
                 "concept": "test concept",
                 "metadata": {"test": True},
@@ -92,7 +92,7 @@ class TestGlyphEndpoints:
     @pytest.mark.skip(reason="Requires model to be loaded")
     def test_list_glyphs(self, client: TestClient):
         """Test glyph listing endpoint."""
-        response = client.get("/api/v1/test_namespace/glyphs")
+        response = client.get("/test_org/test_model/glyphs")
         
         assert response.status_code == 200
         data = response.json()
@@ -107,7 +107,7 @@ class TestQueryEndpoints:
     def test_similarity_search(self, client: TestClient):
         """Test similarity search endpoint."""
         response = client.post(
-            "/api/v1/test_namespace/search",
+            "/test_org/test_model/search",
             json={
                 "query": "test query",
                 "top_k": 10,
@@ -123,7 +123,7 @@ class TestQueryEndpoints:
     def test_fact_tree(self, client: TestClient):
         """Test fact tree generation endpoint."""
         response = client.post(
-            "/api/v1/test_namespace/fact-tree",
+            "/test_org/test_model/fact-tree",
             json={
                 "claim": "test claim",
                 "max_depth": 3,
@@ -155,7 +155,7 @@ class TestErrorHandling:
         """Test validation error response."""
         # Missing required fields
         response = client.post(
-            "/api/v1/test_namespace/search",
+            "/test_org/test_model/search",
             json={}
         )
         

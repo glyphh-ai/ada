@@ -99,9 +99,15 @@ async def async_client() -> AsyncGenerator[AsyncClient, None]:
 
 
 @pytest.fixture
-def sample_namespace() -> str:
-    """Generate a unique test namespace"""
-    return f"test_namespace_{uuid4().hex[:8]}"
+def sample_org_id() -> str:
+    """Generate a unique test org_id"""
+    return f"test_org_{uuid4().hex[:8]}"
+
+
+@pytest.fixture
+def sample_model_id() -> str:
+    """Generate a unique test model_id"""
+    return f"test_model_{uuid4().hex[:8]}"
 
 
 @pytest.fixture
@@ -112,10 +118,11 @@ def sample_embedding() -> list:
 
 
 @pytest.fixture
-def sample_glyph_data(sample_namespace, sample_embedding) -> dict:
+def sample_glyph_data(sample_org_id, sample_model_id, sample_embedding) -> dict:
     """Generate sample glyph data"""
     return {
-        "namespace": sample_namespace,
+        "org_id": sample_org_id,
+        "model_id": sample_model_id,
         "concept_text": "test concept",
         "embedding": sample_embedding,
         "metadata": {"test": True},

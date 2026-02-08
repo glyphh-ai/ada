@@ -63,7 +63,8 @@ class TestSerializationPerformance:
         iterations = 10000
         data = {
             "id": str(uuid4()),
-            "namespace": "test_namespace",
+            "org_id": "test_org",
+            "model_id": "test_model",
             "concept_text": "This is a test concept with some text",
             "metadata": {"key1": "value1", "key2": 123, "key3": [1, 2, 3]},
             "embedding": list(np.random.randn(768).astype(float)),
@@ -87,7 +88,8 @@ class TestSerializationPerformance:
         iterations = 10000
         data = {
             "id": str(uuid4()),
-            "namespace": "test_namespace",
+            "org_id": "test_org",
+            "model_id": "test_model",
             "concept_text": "This is a test concept with some text",
             "metadata": {"key1": "value1", "key2": 123, "key3": [1, 2, 3]},
             "embedding": list(np.random.randn(768).astype(float)),
@@ -157,7 +159,8 @@ class TestMemoryPerformance:
         
         glyph = {
             "id": str(uuid4()),
-            "namespace": "test_namespace",
+            "org_id": "test_org",
+            "model_id": "test_model",
             "concept_text": "This is a test concept",
             "metadata": {"key": "value"},
             "embedding": list(np.random.randn(768).astype(float)),

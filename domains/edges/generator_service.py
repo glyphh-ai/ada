@@ -17,7 +17,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domains.models.db_models import Edge, Glyph
-from shared.exceptions import GlyphNotFoundException, NamespaceNotFoundException
+from shared.exceptions import GlyphNotFoundException
 from shared.similarity_service import SimilarityService
 
 logger = logging.getLogger(__name__)
@@ -101,46 +101,30 @@ class EdgeGeneratorService:
     
     async def generate_edges_for_glyph(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         glyph_id: UUID,
         glyph_data: Dict[str, Any],
         strategy: EdgeGenerationStrategy = EdgeGenerationStrategy.EAGER,
         ttl: Optional[timedelta] = None,
     ) -> List[UUID]:
-        """
-        Generate edges for a glyph based on the specified strategy.
-        
-        For EAGER strategy, generates edges to all existing glyphs in namespace.
-        For LAZY/ON_DEMAND, marks glyph as needing edge generation.
-        
-        Args:
-            namespace: Model namespace
-            glyph_id: UUID of the glyph to generate edges for
-            glyph_data: Glyph data including embedding and metadata
-            strategy: Edge generation strategy
-            ttl: Time-to-live for cached edges (default: 7 days)
-            
-        Returns:
-            List of created edge UUIDs
-        """
+        """Generate edges for a glyph based on the specified strategy."""
         if ttl is None:
             ttl = self.DEFAULT_EDGE_TTL
         
         expires_at = datetime.utcnow() + ttl
         
         if strategy == EdgeGenerationStrategy.LAZY:
-            # Mark glyph as needing edge generation (done on first query)
-            logger.debug(f"Lazy edge generation for glyph {glyph_id} - edges will be generated on first query")
+            logger.debug(f"Lazy edge generation for glyph {glyph_id}")
             return []
         
         if strategy == EdgeGenerationStrategy.ON_DEMAND:
-            # Don't generate edges automatically
-            logger.debug(f"On-demand edge generation for glyph {glyph_id} - edges must be explicitly requested")
+            logger.debug(f"On-demand edge generation for glyph {glyph_id}")
             return []
         
-        # EAGER strategy: Generate edges to all existing glyphs
         return await self._generate_spatial_edges(
-            namespace=namespace,
+            org_id=org_id,
+            model_id=model_id,
             source_glyph_id=glyph_id,
             source_embedding=glyph_data.get("embedding", []),
             expires_at=expires_at,
@@ -148,33 +132,19 @@ class EdgeGeneratorService:
     
     async def _generate_spatial_edges(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         source_glyph_id: UUID,
         source_embedding: List[float],
         expires_at: datetime,
         target_glyph_ids: Optional[List[UUID]] = None,
     ) -> List[UUID]:
-        """
-        Generate spatial edges from source glyph to target glyphs.
-        
-        If target_glyph_ids is None, generates edges to all glyphs in namespace.
-        
-        Args:
-            namespace: Model namespace
-            source_glyph_id: Source glyph UUID
-            source_embedding: Source glyph embedding
-            expires_at: Edge expiration time
-            target_glyph_ids: Optional list of target glyph IDs
-            
-        Returns:
-            List of created edge UUIDs
-        """
-        # Get target glyphs
+        """Generate spatial edges from source glyph to target glyphs."""
         if target_glyph_ids is None:
-            # Get all glyphs in namespace except source
             result = await self._session.execute(
                 select(Glyph).where(
-                    Glyph.namespace == namespace,
+                    Glyph.org_id == org_id,
+                    Glyph.model_id == model_id,
                     Glyph.id != source_glyph_id,
                 )
             )
@@ -182,28 +152,28 @@ class EdgeGeneratorService:
         else:
             result = await self._session.execute(
                 select(Glyph).where(
-                    Glyph.namespace == namespace,
+                    Glyph.org_id == org_id,
+                    Glyph.model_id == model_id,
                     Glyph.id.in_(target_glyph_ids),
                 )
             )
             target_glyphs = result.scalars().all()
         
         if not target_glyphs:
-            logger.debug(f"No target glyphs found for edge generation in namespace '{namespace}'")
+            logger.debug(f"No target glyphs found for edge generation in org={org_id}, model={model_id}")
             return []
         
         created_edge_ids = []
         
         for target_glyph in target_glyphs:
-            # Compute similarity using SimilarityService
             similarity = self._similarity_service.compute_similarity(
                 source_embedding,
                 target_glyph.embedding
             )
             
-            # Create neural_cortex edge (global similarity)
             edge = Edge(
-                namespace=namespace,
+                org_id=org_id,
+                model_id=model_id,
                 source_glyph_id=source_glyph_id,
                 target_glyph_id=target_glyph.id,
                 edge_type="neural_cortex",
@@ -218,48 +188,38 @@ class EdgeGeneratorService:
         
         logger.info(
             f"Generated {len(created_edge_ids)} spatial edges for glyph {source_glyph_id} "
-            f"in namespace '{namespace}'"
+            f"in org={org_id}, model={model_id}"
         )
         
         return created_edge_ids
     
     async def generate_temporal_edges(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         glyph_v1_id: UUID,
         glyph_v2_id: UUID,
         ttl: Optional[timedelta] = None,
     ) -> List[UUID]:
-        """
-        Generate temporal edges between two versions of a glyph.
-        
-        Args:
-            namespace: Model namespace
-            glyph_v1_id: Earlier version glyph UUID
-            glyph_v2_id: Later version glyph UUID
-            ttl: Time-to-live for cached edges
-            
-        Returns:
-            List of created edge UUIDs
-        """
+        """Generate temporal edges between two versions of a glyph."""
         if ttl is None:
             ttl = self.DEFAULT_EDGE_TTL
         
         expires_at = datetime.utcnow() + ttl
         
-        # Get both glyphs
         result = await self._session.execute(
             select(Glyph).where(
-                Glyph.namespace == namespace,
+                Glyph.org_id == org_id,
+                Glyph.model_id == model_id,
                 Glyph.id.in_([glyph_v1_id, glyph_v2_id]),
             )
         )
         glyphs = {g.id: g for g in result.scalars().all()}
         
         if glyph_v1_id not in glyphs:
-            raise GlyphNotFoundException(str(glyph_v1_id), namespace)
+            raise GlyphNotFoundException(str(glyph_v1_id), org_id, model_id)
         if glyph_v2_id not in glyphs:
-            raise GlyphNotFoundException(str(glyph_v2_id), namespace)
+            raise GlyphNotFoundException(str(glyph_v2_id), org_id, model_id)
         
         glyph_v1 = glyphs[glyph_v1_id]
         glyph_v2 = glyphs[glyph_v2_id]
@@ -272,7 +232,8 @@ class EdgeGeneratorService:
         
         # Create temporal_cortex edge
         edge = Edge(
-            namespace=namespace,
+            org_id=org_id,
+            model_id=model_id,
             source_glyph_id=glyph_v1_id,
             target_glyph_id=glyph_v2_id,
             edge_type="temporal_cortex",
@@ -289,21 +250,23 @@ class EdgeGeneratorService:
         
         logger.info(
             f"Generated temporal edge from {glyph_v1_id} to {glyph_v2_id} "
-            f"in namespace '{namespace}' (delta: {delta_magnitude:.4f})"
+            f"in org={org_id}, model={model_id} (delta: {delta_magnitude:.4f})"
         )
         
         return [edge.id]
 
     async def refresh_stale_edges(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         ttl: Optional[timedelta] = None,
     ) -> int:
         """
         Refresh edges that have expired or are about to expire.
         
         Args:
-            namespace: Model namespace
+            org_id: Organization ID
+            model_id: Model ID
             ttl: New TTL for refreshed edges
             
         Returns:
@@ -320,7 +283,8 @@ class EdgeGeneratorService:
         
         result = await self._session.execute(
             select(Edge).where(
-                Edge.namespace == namespace,
+                Edge.org_id == org_id,
+                Edge.model_id == model_id,
                 Edge.expires_at.isnot(None),
                 Edge.expires_at < stale_threshold,
             )
@@ -328,7 +292,7 @@ class EdgeGeneratorService:
         stale_edges = result.scalars().all()
         
         if not stale_edges:
-            logger.debug(f"No stale edges found in namespace '{namespace}'")
+            logger.debug(f"No stale edges found in org={org_id}, model={model_id}")
             return 0
         
         # Group edges by source glyph for batch processing
@@ -389,13 +353,14 @@ class EdgeGeneratorService:
         
         await self._session.flush()
         
-        logger.info(f"Refreshed {refreshed_count} stale edges in namespace '{namespace}'")
+        logger.info(f"Refreshed {refreshed_count} stale edges in org={org_id}, model={model_id}")
         
         return refreshed_count
     
     async def delete_edges_for_glyph(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         glyph_id: UUID,
     ) -> int:
         """
@@ -404,7 +369,8 @@ class EdgeGeneratorService:
         This is called when a glyph is deleted to maintain referential integrity.
         
         Args:
-            namespace: Model namespace
+            org_id: Organization ID
+            model_id: Model ID
             glyph_id: Glyph UUID
             
         Returns:
@@ -413,7 +379,8 @@ class EdgeGeneratorService:
         # Delete outgoing edges
         result1 = await self._session.execute(
             delete(Edge).where(
-                Edge.namespace == namespace,
+                Edge.org_id == org_id,
+                Edge.model_id == model_id,
                 Edge.source_glyph_id == glyph_id,
             )
         )
@@ -421,7 +388,8 @@ class EdgeGeneratorService:
         # Delete incoming edges
         result2 = await self._session.execute(
             delete(Edge).where(
-                Edge.namespace == namespace,
+                Edge.org_id == org_id,
+                Edge.model_id == model_id,
                 Edge.target_glyph_id == glyph_id,
             )
         )
@@ -431,20 +399,22 @@ class EdgeGeneratorService:
         if total_deleted > 0:
             logger.debug(
                 f"Deleted {total_deleted} edges for glyph {glyph_id} "
-                f"in namespace '{namespace}'"
+                f"in org={org_id}, model={model_id}"
             )
         
         return total_deleted
     
     async def delete_expired_edges(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
     ) -> int:
         """
-        Delete all expired edges in a namespace.
+        Delete all expired edges for a model.
         
         Args:
-            namespace: Model namespace
+            org_id: Organization ID
+            model_id: Model ID
             
         Returns:
             Number of edges deleted
@@ -453,7 +423,8 @@ class EdgeGeneratorService:
         
         result = await self._session.execute(
             delete(Edge).where(
-                Edge.namespace == namespace,
+                Edge.org_id == org_id,
+                Edge.model_id == model_id,
                 Edge.expires_at.isnot(None),
                 Edge.expires_at < now,
             )
@@ -462,13 +433,14 @@ class EdgeGeneratorService:
         deleted_count = result.rowcount
         
         if deleted_count > 0:
-            logger.info(f"Deleted {deleted_count} expired edges in namespace '{namespace}'")
+            logger.info(f"Deleted {deleted_count} expired edges in org={org_id}, model={model_id}")
         
         return deleted_count
     
     async def get_edges_for_query(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         glyph_id: UUID,
         edge_types: Optional[List[str]] = None,
         generate_if_missing: bool = True,
@@ -477,7 +449,8 @@ class EdgeGeneratorService:
         Get edges for a glyph, optionally generating them if missing (lazy strategy).
         
         Args:
-            namespace: Model namespace
+            org_id: Organization ID
+            model_id: Model ID
             glyph_id: Glyph UUID
             edge_types: Optional filter by edge types
             generate_if_missing: Whether to generate edges if none exist
@@ -487,7 +460,8 @@ class EdgeGeneratorService:
         """
         # Build query
         query = select(Edge).where(
-            Edge.namespace == namespace,
+            Edge.org_id == org_id,
+            Edge.model_id == model_id,
             Edge.source_glyph_id == glyph_id,
         )
         
@@ -502,7 +476,8 @@ class EdgeGeneratorService:
             # Get source glyph
             glyph_result = await self._session.execute(
                 select(Glyph).where(
-                    Glyph.namespace == namespace,
+                    Glyph.org_id == org_id,
+                    Glyph.model_id == model_id,
                     Glyph.id == glyph_id,
                 )
             )
@@ -510,7 +485,8 @@ class EdgeGeneratorService:
             
             if glyph:
                 await self._generate_spatial_edges(
-                    namespace=namespace,
+                    org_id=org_id,
+                    model_id=model_id,
                     source_glyph_id=glyph_id,
                     source_embedding=glyph.embedding,
                     expires_at=datetime.utcnow() + self.DEFAULT_EDGE_TTL,
@@ -534,12 +510,13 @@ class EdgeGeneratorService:
             for edge in edges
         ]
     
-    async def count_edges(self, namespace: str) -> Dict[str, int]:
+    async def count_edges(self, org_id: str, model_id: str) -> Dict[str, int]:
         """
-        Count edges by type in a namespace.
+        Count edges by type for a model.
         
         Args:
-            namespace: Model namespace
+            org_id: Organization ID
+            model_id: Model ID
             
         Returns:
             Dict mapping edge type to count
@@ -548,7 +525,7 @@ class EdgeGeneratorService:
         
         result = await self._session.execute(
             select(Edge.edge_type, func.count(Edge.id))
-            .where(Edge.namespace == namespace)
+            .where(Edge.org_id == org_id, Edge.model_id == model_id)
             .group_by(Edge.edge_type)
         )
         

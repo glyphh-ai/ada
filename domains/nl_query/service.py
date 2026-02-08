@@ -58,7 +58,8 @@ class NLQueryService:
     
     async def execute_nl_query(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         query: str,
         debug: bool = False,
     ) -> NLQueryResult:
@@ -70,32 +71,23 @@ class NLQueryService:
         2. If confidence >= threshold: execute directly
         3. If confidence < threshold AND LLM enabled: use LLM fallback
         4. If confidence < threshold AND no LLM: return "none" match_method
-        
-        Args:
-            namespace: Model namespace to query
-            query: Natural language query
-            debug: Include translation details in response
-            
-        Returns:
-            NLQueryResult with result and match metadata
         """
         start_time = time.time()
         
-        # Log the incoming query
-        logger.info(f"NL query received: '{query}' for namespace '{namespace}'")
+        logger.info(f"NL query received: '{query}' for org={org_id}, model={model_id}")
         
         # Step 1: Try rules-based matching
         match_result = await self.intent_matcher.match_intent(query)
         
         if match_result and match_result.confidence >= self.confidence_threshold:
-            # High confidence - execute directly with rules
             logger.info(
                 f"Rules match: intent={match_result.intent}, "
                 f"confidence={match_result.confidence:.3f}"
             )
             
             result = await self._execute_structured_query(
-                namespace,
+                org_id,
+                model_id,
                 match_result.intent,
                 match_result.structured_query,
             )
@@ -116,11 +108,12 @@ class NLQueryService:
             logger.info("Rules confidence too low, trying LLM fallback")
             
             try:
-                llm_result = await self.llm_fallback.translate_query(query, namespace)
+                llm_result = await self.llm_fallback.translate_query(query, f"org={org_id}, model={model_id}")
                 
                 if llm_result:
                     result = await self._execute_structured_query(
-                        namespace,
+                        org_id,
+                        model_id,
                         llm_result.get("operation", "similarity_search"),
                         llm_result,
                     )
@@ -138,7 +131,7 @@ class NLQueryService:
             except Exception as e:
                 logger.warning(f"LLM fallback failed: {e}")
         
-        # Step 3: No match from rules or LLM — return clean "none" result
+        # Step 3: No match
         logger.info(f"No intent match for query: '{query}'")
         
         elapsed_ms = (time.time() - start_time) * 1000
@@ -191,21 +184,12 @@ class NLQueryService:
     
     async def _execute_structured_query(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         operation: str,
         query: Dict[str, Any],
     ) -> Any:
-        """
-        Execute a structured query against the QueryService.
-        
-        Args:
-            namespace: Model namespace
-            operation: Query operation type
-            query: Structured query parameters
-            
-        Returns:
-            Query result
-        """
+        """Execute a structured query against the QueryService."""
         from domains.models.schemas import (
             SimilaritySearchRequest,
             FactTreeRequest,
@@ -219,7 +203,8 @@ class NLQueryService:
                     top_k=query.get("top_k", 10),
                 )
                 result = await self.query_service.similarity_search(
-                    namespace=namespace,
+                    org_id=org_id,
+                    model_id=model_id,
                     request=request,
                 )
                 return result.model_dump() if hasattr(result, 'model_dump') else result
@@ -230,7 +215,8 @@ class NLQueryService:
                     max_depth=query.get("max_depth", 3),
                 )
                 result = await self.query_service.generate_fact_tree(
-                    namespace=namespace,
+                    org_id=org_id,
+                    model_id=model_id,
                     request=request,
                 )
                 return result.model_dump() if hasattr(result, 'model_dump') else result
@@ -246,56 +232,54 @@ class NLQueryService:
                     beam_width=query.get("beam_width", 3),
                 )
                 result = await self.query_service.predict_temporal(
-                    namespace=namespace,
+                    org_id=org_id,
+                    model_id=model_id,
                     request=request,
                 )
                 return result.model_dump() if hasattr(result, 'model_dump') else result
             
             elif operation == "list":
-                # List operation - use similarity search with empty query
                 request = SimilaritySearchRequest(
                     query="",
                     top_k=query.get("limit", 100),
                 )
                 result = await self.query_service.similarity_search(
-                    namespace=namespace,
+                    org_id=org_id,
+                    model_id=model_id,
                     request=request,
                 )
                 return result.model_dump() if hasattr(result, 'model_dump') else result
             
             elif operation == "count":
-                # Count operation - use similarity search and return count
-                request = SimilaritySearchRequest(
-                    query="",
-                    top_k=1000,  # Get a large sample
-                )
+                request = SimilaritySearchRequest(query="", top_k=1000)
                 result = await self.query_service.similarity_search(
-                    namespace=namespace,
+                    org_id=org_id,
+                    model_id=model_id,
                     request=request,
                 )
                 return {"count": result.total_count}
             
             elif operation == "compare":
-                # Compare requires two concepts - use similarity search
                 request = SimilaritySearchRequest(
                     query=query.get("query", ""),
                     top_k=2,
                 )
                 result = await self.query_service.similarity_search(
-                    namespace=namespace,
+                    org_id=org_id,
+                    model_id=model_id,
                     request=request,
                 )
                 return result.model_dump() if hasattr(result, 'model_dump') else result
             
             else:
-                # Default to similarity search
                 logger.warning(f"Unknown operation '{operation}', defaulting to similarity_search")
                 request = SimilaritySearchRequest(
                     query=query.get("query", ""),
                     top_k=10,
                 )
                 result = await self.query_service.similarity_search(
-                    namespace=namespace,
+                    org_id=org_id,
+                    model_id=model_id,
                     request=request,
                 )
                 return result.model_dump() if hasattr(result, 'model_dump') else result

@@ -147,14 +147,14 @@ JSON response:"""
     async def translate_query(
         self,
         query: str,
-        namespace: str,
+        context: str = "",
     ) -> Optional[Dict[str, Any]]:
         """
         Translate a natural language query to structured format.
         
         Args:
             query: Natural language query
-            namespace: Target namespace (for context)
+            context: Optional context string (e.g. org/model info)
             
         Returns:
             Structured query dict or None if translation fails

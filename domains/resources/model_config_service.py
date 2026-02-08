@@ -1,7 +1,7 @@
 """
-Namespace Configuration Service.
+Model Configuration Service.
 
-Manages per-namespace configuration for similarity weights, beam search,
+Manages per org/model configuration for similarity weights, beam search,
 and fact tree parameters.
 """
 
@@ -33,7 +33,6 @@ class SimilarityWeights:
     
     @classmethod
     def from_dict(cls, data: Dict[str, float]) -> "SimilarityWeights":
-        """Create from dictionary."""
         return cls(
             neural_cortex=data.get("neural_cortex", 1.0),
             neural_layer=data.get("neural_layer", 0.8),
@@ -46,7 +45,6 @@ class SimilarityWeights:
         )
     
     def to_dict(self) -> Dict[str, float]:
-        """Convert to dictionary."""
         return {
             "neural_cortex": self.neural_cortex,
             "neural_layer": self.neural_layer,
@@ -60,183 +58,103 @@ class SimilarityWeights:
 
 
 @dataclass
-class NamespaceConfig:
-    """Complete configuration for a namespace."""
-    namespace: str
+class ModelScopeConfig:
+    """Complete configuration for an org/model."""
+    org_id: str
+    model_id: str
     similarity_weights: SimilarityWeights = field(default_factory=SimilarityWeights)
     beam_width: int = 5
     max_tree_depth: int = 3
     
     @classmethod
-    def from_model_config(cls, config: ModelConfig) -> "NamespaceConfig":
-        """Create from ModelConfig database model."""
+    def from_model_config(cls, config: ModelConfig) -> "ModelScopeConfig":
         weights = SimilarityWeights.from_dict(config.similarity_weights or {})
         return cls(
-            namespace=config.namespace,
+            org_id=config.org_id,
+            model_id=config.model_id,
             similarity_weights=weights,
             beam_width=config.beam_width or settings.default_beam_width,
             max_tree_depth=config.max_tree_depth or settings.default_max_tree_depth,
         )
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
         return {
-            "namespace": self.namespace,
+            "org_id": self.org_id,
+            "model_id": self.model_id,
             "similarity_weights": self.similarity_weights.to_dict(),
             "beam_width": self.beam_width,
             "max_tree_depth": self.max_tree_depth,
         }
 
 
-class NamespaceConfigService:
-    """
-    Service for managing per-namespace configuration.
-    
-    Responsibilities:
-    - Get/set similarity weights per namespace
-    - Get/set beam search parameters per namespace
-    - Get/set fact tree parameters per namespace
-    """
+class ModelConfigService:
+    """Service for managing per org/model configuration."""
     
     def __init__(self, session: AsyncSession):
-        """
-        Initialize NamespaceConfigService.
-        
-        Args:
-            session: Async SQLAlchemy session
-        """
         self._session = session
     
-    async def get_config(self, namespace: str) -> NamespaceConfig:
-        """
-        Get configuration for a namespace.
-        
-        Args:
-            namespace: Model namespace
-            
-        Returns:
-            NamespaceConfig with all settings
-        """
+    async def get_config(self, org_id: str, model_id: str) -> ModelScopeConfig:
+        """Get configuration for an org/model."""
         result = await self._session.execute(
-            select(ModelConfig).where(ModelConfig.namespace == namespace)
+            select(ModelConfig).where(
+                ModelConfig.org_id == org_id, ModelConfig.model_id == model_id
+            )
         )
         config = result.scalar_one_or_none()
         
         if config:
-            return NamespaceConfig.from_model_config(config)
+            return ModelScopeConfig.from_model_config(config)
         
-        # Return defaults
-        return NamespaceConfig(
-            namespace=namespace,
+        return ModelScopeConfig(
+            org_id=org_id,
+            model_id=model_id,
             similarity_weights=SimilarityWeights(),
             beam_width=settings.default_beam_width,
             max_tree_depth=settings.default_max_tree_depth,
         )
     
     async def update_similarity_weights(
-        self,
-        namespace: str,
-        weights: Dict[str, float],
+        self, org_id: str, model_id: str, weights: Dict[str, float],
     ) -> SimilarityWeights:
-        """
-        Update similarity weights for a namespace.
-        
-        Args:
-            namespace: Model namespace
-            weights: Dict of edge type -> weight
-            
-        Returns:
-            Updated SimilarityWeights
-        """
-        # Get current weights
-        current = await self.get_config(namespace)
+        """Update similarity weights for an org/model."""
+        current = await self.get_config(org_id, model_id)
         current_dict = current.similarity_weights.to_dict()
-        
-        # Merge with new weights
         current_dict.update(weights)
         new_weights = SimilarityWeights.from_dict(current_dict)
         
-        # Update in database
         await self._session.execute(
             update(ModelConfig)
-            .where(ModelConfig.namespace == namespace)
+            .where(ModelConfig.org_id == org_id, ModelConfig.model_id == model_id)
             .values(similarity_weights=new_weights.to_dict())
         )
         
-        logger.info(f"Updated similarity weights for namespace '{namespace}'")
-        
+        logger.info(f"Updated similarity weights for org={org_id}, model={model_id}")
         return new_weights
     
-    async def update_beam_width(
-        self,
-        namespace: str,
-        beam_width: int,
-    ) -> int:
-        """
-        Update beam width for a namespace.
-        
-        Args:
-            namespace: Model namespace
-            beam_width: New beam width (1-20)
-            
-        Returns:
-            Updated beam width
-        """
-        # Validate
+    async def update_beam_width(self, org_id: str, model_id: str, beam_width: int) -> int:
         beam_width = max(1, min(20, beam_width))
-        
-        # Update in database
         await self._session.execute(
             update(ModelConfig)
-            .where(ModelConfig.namespace == namespace)
+            .where(ModelConfig.org_id == org_id, ModelConfig.model_id == model_id)
             .values(beam_width=beam_width)
         )
-        
-        logger.info(f"Updated beam width for namespace '{namespace}': {beam_width}")
-        
+        logger.info(f"Updated beam width for org={org_id}, model={model_id}: {beam_width}")
         return beam_width
     
-    async def update_max_tree_depth(
-        self,
-        namespace: str,
-        max_depth: int,
-    ) -> int:
-        """
-        Update max tree depth for a namespace.
-        
-        Args:
-            namespace: Model namespace
-            max_depth: New max depth (1-10)
-            
-        Returns:
-            Updated max depth
-        """
-        # Validate
+    async def update_max_tree_depth(self, org_id: str, model_id: str, max_depth: int) -> int:
         max_depth = max(1, min(10, max_depth))
-        
-        # Update in database
         await self._session.execute(
             update(ModelConfig)
-            .where(ModelConfig.namespace == namespace)
+            .where(ModelConfig.org_id == org_id, ModelConfig.model_id == model_id)
             .values(max_tree_depth=max_depth)
         )
-        
-        logger.info(f"Updated max tree depth for namespace '{namespace}': {max_depth}")
-        
+        logger.info(f"Updated max tree depth for org={org_id}, model={model_id}: {max_depth}")
         return max_depth
     
-    async def reset_to_defaults(self, namespace: str) -> NamespaceConfig:
-        """
-        Reset namespace configuration to defaults.
-        
-        Args:
-            namespace: Model namespace
-            
-        Returns:
-            Reset NamespaceConfig
-        """
-        defaults = NamespaceConfig(
-            namespace=namespace,
+    async def reset_to_defaults(self, org_id: str, model_id: str) -> ModelScopeConfig:
+        defaults = ModelScopeConfig(
+            org_id=org_id,
+            model_id=model_id,
             similarity_weights=SimilarityWeights(),
             beam_width=settings.default_beam_width,
             max_tree_depth=settings.default_max_tree_depth,
@@ -244,7 +162,7 @@ class NamespaceConfigService:
         
         await self._session.execute(
             update(ModelConfig)
-            .where(ModelConfig.namespace == namespace)
+            .where(ModelConfig.org_id == org_id, ModelConfig.model_id == model_id)
             .values(
                 similarity_weights=defaults.similarity_weights.to_dict(),
                 beam_width=defaults.beam_width,
@@ -252,6 +170,5 @@ class NamespaceConfigService:
             )
         )
         
-        logger.info(f"Reset configuration for namespace '{namespace}' to defaults")
-        
+        logger.info(f"Reset configuration for org={org_id}, model={model_id} to defaults")
         return defaults

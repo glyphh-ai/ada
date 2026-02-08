@@ -68,13 +68,13 @@ class Settings(BaseSettings):
     )
     
     # Resource quotas
-    default_namespace_memory_mb: int = Field(
+    default_model_memory_mb: int = Field(
         default=1024,
-        description="Default memory quota per namespace in MB"
+        description="Default memory quota per model in MB"
     )
-    default_namespace_storage_gb: int = Field(
+    default_model_storage_gb: int = Field(
         default=10,
-        description="Default storage quota per namespace in GB"
+        description="Default storage quota per model in GB"
     )
     
     # Local mode limits (development)

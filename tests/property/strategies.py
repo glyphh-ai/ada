@@ -3,7 +3,7 @@ Custom Hypothesis strategies for Glyphh Runtime property-based tests.
 
 Provides generators for:
 - Glyphs (concept text, embeddings, metadata)
-- Models (namespaces, configurations)
+- Models (org_id, model_id, configurations)
 - Users (permissions, tokens)
 - Queries (search, fact tree, temporal)
 """
@@ -22,9 +22,21 @@ from hypothesis.strategies import SearchStrategy
 # =============================================================================
 
 @st.composite
-def valid_namespace(draw) -> str:
-    """Generate a valid namespace string."""
-    prefix = draw(st.sampled_from(["model", "test", "prod", "dev"]))
+def valid_org_id(draw) -> str:
+    """Generate a valid org_id string."""
+    prefix = draw(st.sampled_from(["org", "test", "prod", "dev"]))
+    suffix = draw(st.text(
+        alphabet="abcdefghijklmnopqrstuvwxyz0123456789",
+        min_size=4,
+        max_size=8,
+    ))
+    return f"{prefix}_{suffix}"
+
+
+@st.composite
+def valid_model_id(draw) -> str:
+    """Generate a valid model_id string."""
+    prefix = draw(st.sampled_from(["model", "test", "demo"]))
     suffix = draw(st.text(
         alphabet="abcdefghijklmnopqrstuvwxyz0123456789",
         min_size=4,
@@ -92,10 +104,11 @@ def glyph_create_request(draw) -> Dict[str, Any]:
 
 
 @st.composite
-def glyph_data(draw, namespace: Optional[str] = None) -> Dict[str, Any]:
+def glyph_data(draw, org_id: Optional[str] = None, model_id: Optional[str] = None) -> Dict[str, Any]:
     """Generate complete glyph data for storage."""
     return {
-        "namespace": namespace or draw(valid_namespace()),
+        "org_id": org_id or draw(valid_org_id()),
+        "model_id": model_id or draw(valid_model_id()),
         "concept_text": draw(valid_concept_text()),
         "embedding": draw(valid_embedding()),
         "metadata": draw(valid_metadata()),
@@ -208,7 +221,7 @@ def user_permissions(draw) -> Dict[str, Any]:
     """Generate user permissions."""
     return {
         "user_id": str(uuid4()),
-        "namespaces": draw(st.lists(valid_namespace(), min_size=1, max_size=5)),
+        "org_ids": draw(st.lists(valid_org_id(), min_size=1, max_size=5)),
         "security_level": draw(st.floats(min_value=0.0, max_value=1.0)),
     }
 
@@ -220,7 +233,7 @@ def jwt_claims(draw) -> Dict[str, Any]:
         "sub": str(uuid4()),
         "exp": int((datetime.utcnow() + timedelta(hours=1)).timestamp()),
         "iat": int(datetime.utcnow().timestamp()),
-        "namespaces": draw(st.lists(valid_namespace(), min_size=1, max_size=3)),
+        "org_id": draw(valid_org_id()),
         "permissions": draw(st.lists(
             st.sampled_from(["read", "write", "admin"]),
             min_size=1,
@@ -243,10 +256,11 @@ def edge_type(draw) -> str:
 
 
 @st.composite
-def edge_data(draw, namespace: Optional[str] = None) -> Dict[str, Any]:
+def edge_data(draw, org_id: Optional[str] = None, model_id: Optional[str] = None) -> Dict[str, Any]:
     """Generate edge data."""
     return {
-        "namespace": namespace or draw(valid_namespace()),
+        "org_id": org_id or draw(valid_org_id()),
+        "model_id": model_id or draw(valid_model_id()),
         "source_glyph_id": uuid4(),
         "target_glyph_id": uuid4(),
         "edge_type": draw(edge_type()),

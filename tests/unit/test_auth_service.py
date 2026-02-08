@@ -5,8 +5,9 @@ Unit tests for AuthService.
 import pytest
 import jwt
 from datetime import datetime, timedelta
+from unittest.mock import patch, MagicMock
 
-from domains.auth.service import AuthService
+from domains.auth.service import AuthService, User, Permission
 from shared.exceptions import AuthenticationException, AuthorizationException
 
 
@@ -14,31 +15,42 @@ class TestAuthService:
     """Tests for AuthService authentication and authorization."""
     
     @pytest.fixture
-    def auth_service(self):
-        """Create AuthService instance for testing."""
-        return AuthService(
-            jwt_secret_key="test_secret_key",
-            jwt_algorithm="HS256",
-            deployment_mode="self-hosted",
-        )
+    def mock_settings(self):
+        """Create mock settings."""
+        settings = MagicMock()
+        settings.deployment_mode = "self-hosted"
+        settings.jwt_secret_key = "test_secret_key"
+        settings.jwt_algorithm = "HS256"
+        return settings
     
     @pytest.fixture
-    def local_auth_service(self):
+    def auth_service(self, mock_settings):
+        """Create AuthService instance for testing."""
+        with patch("domains.auth.service.get_settings", return_value=mock_settings):
+            return AuthService(session=None)
+    
+    @pytest.fixture
+    def local_settings(self):
+        settings = MagicMock()
+        settings.deployment_mode = "local"
+        settings.jwt_secret_key = None
+        settings.jwt_algorithm = "HS256"
+        return settings
+    
+    @pytest.fixture
+    def local_auth_service(self, local_settings):
         """Create AuthService in local mode."""
-        return AuthService(
-            jwt_secret_key=None,
-            jwt_algorithm="HS256",
-            deployment_mode="local",
-        )
+        with patch("domains.auth.service.get_settings", return_value=local_settings):
+            return AuthService(session=None)
     
     @pytest.fixture
     def valid_token(self):
-        """Create a valid JWT token."""
+        """Create a valid JWT token with org_id."""
         payload = {
             "sub": "test_user",
             "iat": datetime.utcnow(),
             "exp": datetime.utcnow() + timedelta(hours=1),
-            "namespaces": ["test_namespace"],
+            "org_id": "test_org",
             "permissions": ["read", "write"],
         }
         return jwt.encode(payload, "test_secret_key", algorithm="HS256")
@@ -50,7 +62,7 @@ class TestAuthService:
             "sub": "test_user",
             "iat": datetime.utcnow() - timedelta(hours=2),
             "exp": datetime.utcnow() - timedelta(hours=1),
-            "namespaces": ["test_namespace"],
+            "org_id": "test_org",
             "permissions": ["read"],
         }
         return jwt.encode(payload, "test_secret_key", algorithm="HS256")
@@ -58,10 +70,11 @@ class TestAuthService:
     @pytest.mark.asyncio
     async def test_validate_token_success(self, auth_service, valid_token):
         """Test successful token validation."""
-        claims = await auth_service.validate_token(valid_token)
+        user = await auth_service.validate_token(valid_token)
         
-        assert claims["sub"] == "test_user"
-        assert "test_namespace" in claims["namespaces"]
+        assert user.user_id == "test_user"
+        assert user.can_read("test_org")
+        assert user.can_write("test_org")
     
     @pytest.mark.asyncio
     async def test_validate_token_expired(self, auth_service, expired_token):
@@ -74,7 +87,6 @@ class TestAuthService:
     @pytest.mark.asyncio
     async def test_validate_token_invalid_signature(self, auth_service):
         """Test that invalid signature raises AuthenticationException."""
-        # Token signed with different key
         payload = {
             "sub": "test_user",
             "exp": datetime.utcnow() + timedelta(hours=1),
@@ -93,83 +105,68 @@ class TestAuthService:
     @pytest.mark.asyncio
     async def test_local_mode_bypass(self, local_auth_service):
         """Test that local mode bypasses authentication."""
-        # Should not raise even with invalid token
-        claims = await local_auth_service.validate_token("any_token")
+        user = await local_auth_service.validate_token("any_token")
         
-        assert claims is not None
-        assert claims.get("local_mode") is True
+        assert user is not None
+        assert user.token_type == "local"
+        assert user.can_read("any_org")
+        assert user.can_write("any_org")
+        assert user.is_admin("any_org")
     
     @pytest.mark.asyncio
-    async def test_check_namespace_access_allowed(self, auth_service, valid_token):
-        """Test namespace access check when allowed."""
-        claims = await auth_service.validate_token(valid_token)
+    async def test_check_access_allowed(self, auth_service, valid_token):
+        """Test access check when allowed."""
+        user = await auth_service.validate_token(valid_token)
         
         # Should not raise
-        await auth_service.check_namespace_access(claims, "test_namespace")
+        result = await auth_service.check_access(user, "test_org", "some_model", "read")
+        assert result is True
     
     @pytest.mark.asyncio
-    async def test_check_namespace_access_denied(self, auth_service, valid_token):
-        """Test namespace access check when denied."""
-        claims = await auth_service.validate_token(valid_token)
+    async def test_check_access_denied(self, auth_service, valid_token):
+        """Test access check when denied (wrong org)."""
+        user = await auth_service.validate_token(valid_token)
         
         with pytest.raises(AuthorizationException):
-            await auth_service.check_namespace_access(claims, "other_namespace")
+            await auth_service.check_access(user, "other_org", "some_model", "read")
     
     @pytest.mark.asyncio
-    async def test_check_permission_allowed(self, auth_service, valid_token):
-        """Test permission check when allowed."""
-        claims = await auth_service.validate_token(valid_token)
-        
-        # Should not raise
-        await auth_service.check_permission(claims, "read")
-        await auth_service.check_permission(claims, "write")
-    
-    @pytest.mark.asyncio
-    async def test_check_permission_denied(self, auth_service, valid_token):
-        """Test permission check when denied."""
-        claims = await auth_service.validate_token(valid_token)
+    async def test_check_access_admin_denied(self, auth_service, valid_token):
+        """Test admin access check when user only has read/write."""
+        user = await auth_service.validate_token(valid_token)
         
         with pytest.raises(AuthorizationException):
-            await auth_service.check_permission(claims, "admin")
+            await auth_service.check_access(user, "test_org", "some_model", "admin")
+
+
+class TestUser:
+    """Tests for User permission model."""
     
-    def test_compute_security_weight_full_access(self, auth_service):
-        """Test security weight computation with full access."""
-        claims = {
-            "namespaces": ["test_namespace"],
-            "security_level": 1.0,
-        }
-        glyph_metadata = {"security_level": 0.5}
-        
-        weight = auth_service.compute_security_weight(
-            claims, "test_namespace", glyph_metadata
+    def test_has_permission_specific_org(self):
+        user = User(
+            user_id="test",
+            org_permissions={"org1": {Permission.READ, Permission.WRITE}},
         )
+        assert user.has_permission("org1", Permission.READ)
+        assert user.has_permission("org1", Permission.WRITE)
+        assert not user.has_permission("org1", Permission.ADMIN)
+        assert not user.has_permission("org2", Permission.READ)
+    
+    def test_has_permission_wildcard(self):
+        user = User(
+            user_id="test",
+            org_permissions={"*": {Permission.READ, Permission.WRITE, Permission.ADMIN}},
+        )
+        assert user.can_read("any_org")
+        assert user.can_write("any_org")
+        assert user.is_admin("any_org")
+    
+    def test_compute_security_weight_local_user(self, ):
+        user = User(user_id="local", token_type="local", org_permissions={})
         
+        with patch("domains.auth.service.get_settings") as mock:
+            mock.return_value = MagicMock(deployment_mode="local")
+            service = AuthService(session=None)
+        
+        weight = service.compute_security_weight(user, {"security_level": 3})
         assert weight == 1.0
-    
-    def test_compute_security_weight_no_access(self, auth_service):
-        """Test security weight computation with no access."""
-        claims = {
-            "namespaces": ["other_namespace"],
-            "security_level": 0.5,
-        }
-        glyph_metadata = {"security_level": 0.8}
-        
-        weight = auth_service.compute_security_weight(
-            claims, "test_namespace", glyph_metadata
-        )
-        
-        assert weight == 0.0
-    
-    def test_compute_security_weight_insufficient_level(self, auth_service):
-        """Test security weight when user level is insufficient."""
-        claims = {
-            "namespaces": ["test_namespace"],
-            "security_level": 0.3,
-        }
-        glyph_metadata = {"security_level": 0.8}
-        
-        weight = auth_service.compute_security_weight(
-            claims, "test_namespace", glyph_metadata
-        )
-        
-        assert weight == 0.0

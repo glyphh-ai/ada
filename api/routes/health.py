@@ -136,9 +136,9 @@ async def get_metrics() -> Dict[str, Any]:
                 "runtime_memory_mb": system_usage["process"]["memory_mb"],
                 "runtime_memory_percent": system_usage["process"]["memory_percent"],
                 "runtime_cpu_percent": system_usage["process"]["cpu_percent"],
-                "runtime_total_glyphs": system_usage["namespaces"]["total_glyphs"],
-                "runtime_total_edges": system_usage["namespaces"]["total_edges"],
-                "runtime_namespaces_count": system_usage["namespaces"]["count"],
+                "runtime_total_glyphs": system_usage["models"]["total_glyphs"],
+                "runtime_total_edges": system_usage["models"]["total_edges"],
+                "runtime_models_count": system_usage["models"]["count"],
             }
         except Exception as e:
             logger.warning(f"Failed to get resource metrics: {e}")
@@ -157,9 +157,9 @@ async def get_metrics() -> Dict[str, Any]:
 @router.get("/resources")
 async def get_resource_usage() -> Dict[str, Any]:
     """
-    Get detailed resource usage for all namespaces.
+    Get detailed resource usage for all models.
     
-    Returns memory, storage, and glyph counts per namespace.
+    Returns memory, storage, and glyph counts per org/model.
     """
     from main import resource_manager
     
@@ -172,9 +172,10 @@ async def get_resource_usage() -> Dict[str, Any]:
         
         return {
             "system": system_usage,
-            "namespaces": [
+            "models": [
                 {
-                    "namespace": u.namespace,
+                    "org_id": u.org_id,
+                    "model_id": u.model_id,
                     "memory_mb": u.memory_mb,
                     "storage_mb": u.storage_mb,
                     "glyph_count": u.glyph_count,

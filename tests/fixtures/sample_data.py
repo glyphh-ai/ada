@@ -23,7 +23,8 @@ def create_sample_embedding(seed: int = 42) -> List[float]:
 
 
 def create_sample_glyph(
-    namespace: str = "test_namespace",
+    org_id: str = "test_org",
+    model_id: str = "test_model",
     concept_text: str = "sample concept",
     glyph_id: Optional[UUID] = None,
     seed: int = 42,
@@ -32,7 +33,8 @@ def create_sample_glyph(
     """Create a sample glyph for testing."""
     return {
         "id": glyph_id or uuid4(),
-        "namespace": namespace,
+        "org_id": org_id,
+        "model_id": model_id,
         "concept_text": concept_text,
         "embedding": create_sample_embedding(seed),
         "metadata": metadata or {"source": "test"},
@@ -71,7 +73,8 @@ SAMPLE_GLYPHS = [
 # =============================================================================
 
 def create_sample_edge(
-    namespace: str = "test_namespace",
+    org_id: str = "test_org",
+    model_id: str = "test_model",
     source_glyph_id: Optional[UUID] = None,
     target_glyph_id: Optional[UUID] = None,
     edge_type: str = "similarity",
@@ -81,7 +84,8 @@ def create_sample_edge(
     """Create a sample edge for testing."""
     return {
         "id": uuid4(),
-        "namespace": namespace,
+        "org_id": org_id,
+        "model_id": model_id,
         "source_glyph_id": source_glyph_id or uuid4(),
         "target_glyph_id": target_glyph_id or uuid4(),
         "edge_type": edge_type,
@@ -107,7 +111,8 @@ SAMPLE_EDGES = [
 # =============================================================================
 
 SAMPLE_MODEL_CONFIG = {
-    "namespace": "test_namespace",
+    "org_id": "test_org",
+    "model_id": "test_model",
     "model_path": "/path/to/test.glyphh",
     "model_version": "1.0.0",
     "sdk_version": "0.1.0",
@@ -142,7 +147,7 @@ SAMPLE_MODEL_CONFIG = {
 
 def create_sample_jwt(
     user_id: str = "test_user",
-    namespaces: Optional[List[str]] = None,
+    org_ids: Optional[List[str]] = None,
     permissions: Optional[List[str]] = None,
     secret_key: str = "test_secret_key",
     expires_in_hours: int = 1,
@@ -153,7 +158,7 @@ def create_sample_jwt(
         "sub": user_id,
         "iat": now,
         "exp": now + timedelta(hours=expires_in_hours),
-        "namespaces": namespaces or ["test_namespace"],
+        "org_ids": org_ids or ["test_org"],
         "permissions": permissions or ["read", "write"],
     }
     return jwt.encode(payload, secret_key, algorithm="HS256")

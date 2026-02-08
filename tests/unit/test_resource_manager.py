@@ -3,11 +3,10 @@ Unit tests for ResourceManager.
 """
 
 import pytest
-import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from domains.resources.manager import ResourceManager, ResourceUsage, ResourceQuota, QuotaCheckResult
-from shared.exceptions import NamespaceNotFoundException, NamespaceQuotaExceededException
+from shared.exceptions import ModelNotFoundException, QuotaExceededException
 
 
 class TestResourceManager:
@@ -53,9 +52,10 @@ class TestResourceManager:
     
     def test_resource_usage_defaults(self):
         """Test ResourceUsage default values."""
-        usage = ResourceUsage(namespace="test")
+        usage = ResourceUsage(org_id="test_org", model_id="test_model")
         
-        assert usage.namespace == "test"
+        assert usage.org_id == "test_org"
+        assert usage.model_id == "test_model"
         assert usage.memory_mb == 0.0
         assert usage.storage_mb == 0.0
         assert usage.glyph_count == 0
@@ -63,34 +63,35 @@ class TestResourceManager:
     
     def test_resource_quota_defaults(self):
         """Test ResourceQuota default values."""
-        quota = ResourceQuota(namespace="test")
+        quota = ResourceQuota(org_id="test_org", model_id="test_model")
         
-        assert quota.namespace == "test"
+        assert quota.org_id == "test_org"
+        assert quota.model_id == "test_model"
         assert quota.max_memory_mb == 1024.0
         assert quota.max_storage_gb == 10.0
         assert quota.max_glyphs == 1000000
     
-    def test_invalidate_cache_specific_namespace(self, resource_manager):
-        """Test cache invalidation for specific namespace."""
-        # Populate cache
-        resource_manager._usage_cache["ns1"] = ResourceUsage(namespace="ns1")
-        resource_manager._usage_cache["ns2"] = ResourceUsage(namespace="ns2")
-        resource_manager._quota_cache["ns1"] = ResourceQuota(namespace="ns1")
+    def test_invalidate_cache_specific_model(self, resource_manager):
+        """Test cache invalidation for specific org/model."""
+        key1 = ("org1", "model1")
+        key2 = ("org2", "model2")
+        resource_manager._usage_cache[key1] = ResourceUsage(org_id="org1", model_id="model1")
+        resource_manager._usage_cache[key2] = ResourceUsage(org_id="org2", model_id="model2")
+        resource_manager._quota_cache[key1] = ResourceQuota(org_id="org1", model_id="model1")
         
-        # Invalidate ns1 only
-        resource_manager.invalidate_cache("ns1")
+        resource_manager.invalidate_cache("org1", "model1")
         
-        assert "ns1" not in resource_manager._usage_cache
-        assert "ns2" in resource_manager._usage_cache
-        assert "ns1" not in resource_manager._quota_cache
+        assert key1 not in resource_manager._usage_cache
+        assert key2 in resource_manager._usage_cache
+        assert key1 not in resource_manager._quota_cache
     
     def test_invalidate_cache_all(self, resource_manager):
-        """Test cache invalidation for all namespaces."""
-        # Populate cache
-        resource_manager._usage_cache["ns1"] = ResourceUsage(namespace="ns1")
-        resource_manager._usage_cache["ns2"] = ResourceUsage(namespace="ns2")
+        """Test cache invalidation for all models."""
+        key1 = ("org1", "model1")
+        key2 = ("org2", "model2")
+        resource_manager._usage_cache[key1] = ResourceUsage(org_id="org1", model_id="model1")
+        resource_manager._usage_cache[key2] = ResourceUsage(org_id="org2", model_id="model2")
         
-        # Invalidate all
         resource_manager.invalidate_cache()
         
         assert len(resource_manager._usage_cache) == 0
@@ -105,16 +106,18 @@ class TestResourceManagerQuotaChecks:
         """Create ResourceManager with pre-populated usage."""
         manager = ResourceManager(MagicMock())
         
-        # Pre-populate cache
-        manager._usage_cache["test_ns"] = ResourceUsage(
-            namespace="test_ns",
+        key = ("test_org", "test_model")
+        manager._usage_cache[key] = ResourceUsage(
+            org_id="test_org",
+            model_id="test_model",
             memory_mb=500.0,
             storage_mb=5000.0,
             glyph_count=50000,
             edge_count=100000,
         )
-        manager._quota_cache["test_ns"] = ResourceQuota(
-            namespace="test_ns",
+        manager._quota_cache[key] = ResourceQuota(
+            org_id="test_org",
+            model_id="test_model",
             max_memory_mb=1024.0,
             max_storage_gb=10.0,
             max_glyphs=100000,
@@ -127,13 +130,13 @@ class TestResourceManagerQuotaChecks:
     async def test_check_quota_within_limits(self, resource_manager_with_usage):
         """Test quota check when within limits."""
         manager = resource_manager_with_usage
+        key = ("test_org", "test_model")
         
-        # Mock get_usage and get_quota to return cached values
-        manager.get_usage = AsyncMock(return_value=manager._usage_cache["test_ns"])
-        manager.get_quota = AsyncMock(return_value=manager._quota_cache["test_ns"])
+        manager.get_usage = AsyncMock(return_value=manager._usage_cache[key])
+        manager.get_quota = AsyncMock(return_value=manager._quota_cache[key])
         
         result = await manager.check_quota(
-            "test_ns",
+            "test_org", "test_model",
             additional_glyphs=1000,
         )
         
@@ -143,13 +146,14 @@ class TestResourceManagerQuotaChecks:
     async def test_check_quota_exceeds_glyphs(self, resource_manager_with_usage):
         """Test quota check when glyph limit exceeded."""
         manager = resource_manager_with_usage
+        key = ("test_org", "test_model")
         
-        manager.get_usage = AsyncMock(return_value=manager._usage_cache["test_ns"])
-        manager.get_quota = AsyncMock(return_value=manager._quota_cache["test_ns"])
+        manager.get_usage = AsyncMock(return_value=manager._usage_cache[key])
+        manager.get_quota = AsyncMock(return_value=manager._quota_cache[key])
         
         result = await manager.check_quota(
-            "test_ns",
-            additional_glyphs=60000,  # Would exceed 100000 limit
+            "test_org", "test_model",
+            additional_glyphs=60000,
         )
         
         assert result.allowed is False
@@ -159,13 +163,14 @@ class TestResourceManagerQuotaChecks:
     async def test_check_quota_exceeds_edges(self, resource_manager_with_usage):
         """Test quota check when edge limit exceeded."""
         manager = resource_manager_with_usage
+        key = ("test_org", "test_model")
         
-        manager.get_usage = AsyncMock(return_value=manager._usage_cache["test_ns"])
-        manager.get_quota = AsyncMock(return_value=manager._quota_cache["test_ns"])
+        manager.get_usage = AsyncMock(return_value=manager._usage_cache[key])
+        manager.get_quota = AsyncMock(return_value=manager._quota_cache[key])
         
         result = await manager.check_quota(
-            "test_ns",
-            additional_edges=500000,  # Would exceed 500000 limit
+            "test_org", "test_model",
+            additional_edges=500000,
         )
         
         assert result.allowed is False
@@ -175,15 +180,13 @@ class TestResourceManagerQuotaChecks:
     async def test_enforce_quota_raises_exception(self, resource_manager_with_usage):
         """Test that enforce_quota raises exception when exceeded."""
         manager = resource_manager_with_usage
+        key = ("test_org", "test_model")
         
-        manager.get_usage = AsyncMock(return_value=manager._usage_cache["test_ns"])
-        manager.get_quota = AsyncMock(return_value=manager._quota_cache["test_ns"])
+        manager.get_usage = AsyncMock(return_value=manager._usage_cache[key])
+        manager.get_quota = AsyncMock(return_value=manager._quota_cache[key])
         
-        with pytest.raises(NamespaceQuotaExceededException) as exc_info:
+        with pytest.raises(QuotaExceededException):
             await manager.enforce_quota(
-                "test_ns",
+                "test_org", "test_model",
                 additional_glyphs=60000,
             )
-        
-        assert exc_info.value.namespace == "test_ns"
-        assert exc_info.value.resource == "max_glyphs"
