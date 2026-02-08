@@ -199,9 +199,10 @@ class ModelManager:
         if namespace is None:
             namespace = f"{sdk_model.name}_{uuid4().hex[:8]}"
         
-        # Check if namespace already exists
+        # If namespace already exists, unload the old model first (re-deploy)
         if namespace in self._models:
-            raise ModelLoadException(f"Namespace already in use: {namespace}")
+            logger.info(f"Re-deploying: unloading existing model from namespace '{namespace}'")
+            await self.unload_model(namespace, delete_data=False)
         
         # Extract encoder config from model and validate
         try:
