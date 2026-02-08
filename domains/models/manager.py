@@ -554,9 +554,6 @@ class ModelManager:
         if not hasattr(sdk_model, 'encoder_config'):
             errors.append("Model missing encoder_config")
         
-        if not hasattr(sdk_model, 'glyphs'):
-            errors.append("Model missing glyphs")
-        
         # Validate model completeness
         if hasattr(sdk_model, 'validate_completeness'):
             validation_errors = sdk_model.validate_completeness()
