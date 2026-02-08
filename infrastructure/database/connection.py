@@ -3,6 +3,7 @@ Database connection management with async SQLAlchemy and pgvector.
 """
 
 import logging
+import subprocess
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
@@ -55,9 +56,8 @@ async def init_db() -> None:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         logger.info("pgvector extension enabled")
     
-    # Run Alembic migrations automatically
-    from alembic.config import Config
-    from alembic import command
+    # Run Alembic migrations automatically using subprocess
+    # to avoid async context issues with Alembic's asyncio.run()
     import os
     
     # Find alembic.ini relative to the app root
@@ -65,10 +65,20 @@ async def init_db() -> None:
     alembic_ini = os.path.join(app_root, "alembic.ini")
     
     if os.path.exists(alembic_ini):
-        alembic_cfg = Config(alembic_ini)
-        alembic_cfg.set_main_option("script_location", os.path.join(app_root, "migrations"))
-        command.upgrade(alembic_cfg, "head")
-        logger.info("Database migrations applied successfully")
+        try:
+            # Run alembic as subprocess to avoid async context issues
+            result = subprocess.run(
+                [".venv/bin/alembic", "upgrade", "head"],
+                cwd=app_root,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                logger.info("Database migrations applied successfully")
+            else:
+                logger.error(f"Migration failed: {result.stderr}")
+        except Exception as e:
+            logger.error(f"Failed to run migrations: {e}")
     else:
         logger.warning(f"alembic.ini not found at {alembic_ini}, skipping migrations")
 
