@@ -158,14 +158,10 @@ class ModelManager:
             )
         
         key = (org_id, model_id)
+        is_redeploy = key in self._models
         
-        # Re-deploy: unload existing first
-        if key in self._models:
-            logger.info(f"Re-deploying: unloading existing model org={org_id}, model={model_id}")
-            await self.unload_model(org_id, model_id, delete_data=False)
-        
-        # Check local mode model limit (after re-deploy unload)
-        if settings.deployment_mode == "local":
+        # Check local mode model limit (only for new deploys, not re-deploys)
+        if not is_redeploy and settings.deployment_mode == "local":
             if len(self._models) >= settings.local_mode_max_models:
                 raise ModelLoadException(
                     f"Local mode limit: maximum {settings.local_mode_max_models} model(s). "
@@ -212,20 +208,51 @@ class ModelManager:
             long_description=long_description,
         )
         
-        # Store model config in database
+        # Serialize encoder config for DB storage
+        encoder_config_dict = None
+        if hasattr(encoder_config, 'to_dict'):
+            encoder_config_dict = encoder_config.to_dict()
+        
+        # DB upsert first — if this fails, the old model stays intact in memory
         async with self._db_session_factory() as session:
-            config = ModelConfig(
-                org_id=org_id,
-                model_id=model_id,
-                model_path=str(path),
-                model_version=sdk_model.version,
-                sdk_version=await self._get_sdk_version(),
-                meta_name=meta_name,
-                short_description=short_description,
-                long_description=long_description,
+            result = await session.execute(
+                select(ModelConfig).where(
+                    ModelConfig.org_id == org_id,
+                    ModelConfig.model_id == model_id,
+                )
             )
-            session.add(config)
+            existing = result.scalar_one_or_none()
+
+            if existing:
+                existing.model_path = str(path)
+                existing.model_version = sdk_model.version
+                existing.sdk_version = await self._get_sdk_version()
+                existing.meta_name = meta_name
+                existing.short_description = short_description
+                existing.long_description = long_description
+                existing.encoder_config = encoder_config_dict
+                existing.updated_at = datetime.utcnow()
+            else:
+                config = ModelConfig(
+                    org_id=org_id,
+                    model_id=model_id,
+                    model_path=str(path),
+                    model_version=sdk_model.version,
+                    sdk_version=await self._get_sdk_version(),
+                    meta_name=meta_name,
+                    short_description=short_description,
+                    long_description=long_description,
+                    encoder_config=encoder_config_dict,
+                )
+                session.add(config)
             await session.commit()
+        
+        # Everything succeeded — now swap the in-memory model atomically
+        old_model = self._models.get(key)
+        if old_model is not None:
+            logger.info(f"Re-deploying: replacing model org={org_id}, model={model_id}")
+            if hasattr(old_model.encoder, 'clear_cache'):
+                old_model.encoder.clear_cache()
         
         self._models[key] = loaded_model
         
@@ -288,14 +315,10 @@ class ModelManager:
     ) -> LoadedModel:
         """Load a model from platform JSON config (no glyphs, just encoder config)."""
         key = (org_id, model_id)
+        is_redeploy = key in self._models
         
-        # Re-deploy: unload existing first
-        if key in self._models:
-            logger.info(f"Re-deploying: unloading existing model org={org_id}, model={model_id}")
-            await self.unload_model(org_id, model_id, delete_data=False)
-        
-        # Check local mode model limit
-        if settings.deployment_mode == "local":
+        # Check local mode model limit (only for new deploys)
+        if not is_redeploy and settings.deployment_mode == "local":
             if len(self._models) >= settings.local_mode_max_models:
                 raise ModelLoadException(
                     f"Local mode limit: maximum {settings.local_mode_max_models} model(s). "
@@ -351,6 +374,11 @@ class ModelManager:
             long_description="",
         )
         
+        # Serialize encoder config for DB storage
+        encoder_config_dict = None
+        if hasattr(encoder_config, 'to_dict'):
+            encoder_config_dict = encoder_config.to_dict()
+        
         # Store model config in database
         async with self._db_session_factory() as session:
             result = await session.execute(
@@ -366,6 +394,7 @@ class ModelManager:
                 existing.sdk_version = await self._get_sdk_version()
                 existing.meta_name = model_name
                 existing.short_description = config_data.get("description", "")
+                existing.encoder_config = encoder_config_dict
                 existing.updated_at = datetime.utcnow()
             else:
                 config = ModelConfig(
@@ -377,9 +406,17 @@ class ModelManager:
                     meta_name=model_name,
                     short_description=config_data.get("description", ""),
                     long_description="",
+                    encoder_config=encoder_config_dict,
                 )
                 session.add(config)
             await session.commit()
+        
+        # Everything succeeded — swap in-memory model atomically
+        old_model = self._models.get(key)
+        if old_model is not None:
+            logger.info(f"Re-deploying: replacing platform model org={org_id}, model={model_id}")
+            if hasattr(old_model.encoder, 'clear_cache'):
+                old_model.encoder.clear_cache()
         
         self._models[key] = loaded_model
         
@@ -424,8 +461,101 @@ class ModelManager:
         logger.info(f"Unloaded model org={org_id}, model={model_id}")
     
     async def get_model(self, org_id: str, model_id: str) -> Optional[LoadedModel]:
-        """Retrieve a loaded model by (org_id, model_id)."""
-        return self._models.get((org_id, model_id))
+        """
+        Retrieve a loaded model by (org_id, model_id).
+        
+        Checks in-memory cache first. If not present, attempts to
+        restore from the database (lazy-load on first request after restart).
+        """
+        key = (org_id, model_id)
+        model = self._models.get(key)
+        if model is not None:
+            return model
+        
+        # Not in memory — try to restore from DB
+        return await self._load_from_db(org_id, model_id)
+    
+    async def _load_from_db(self, org_id: str, model_id: str) -> Optional[LoadedModel]:
+        """
+        Restore a model from its DB config row.
+        
+        Reconstructs the encoder and similarity calculator from the
+        stored encoder_config JSONB. Returns None if the row doesn't
+        exist or the encoder_config is missing.
+        """
+        async with self._db_session_factory() as session:
+            result = await session.execute(
+                select(ModelConfig).where(
+                    ModelConfig.org_id == org_id,
+                    ModelConfig.model_id == model_id,
+                )
+            )
+            db_config = result.scalar_one_or_none()
+        
+        if db_config is None:
+            return None
+        
+        if not db_config.encoder_config:
+            logger.warning(
+                f"Model org={org_id}, model={model_id} exists in DB but has no "
+                f"encoder_config — redeploy required"
+            )
+            return None
+        
+        try:
+            adapter = get_sdk_adapter()
+            if not adapter.is_available:
+                logger.error("SDK not available, cannot restore model from DB")
+                return None
+            
+            encoder_config = EncoderConfigFactory.create_from_dict(db_config.encoder_config)
+            validator = get_config_validator()
+            validator.validate_encoder_config_or_raise(encoder_config)
+            encoder_config = validator.apply_defaults(encoder_config)
+            
+            encoder = adapter.create_encoder(encoder_config)
+            similarity_calculator = adapter.create_similarity_calculator()
+            
+            class RestoredModel:
+                """Minimal model proxy for DB-restored models."""
+                def __init__(self, name, version, config):
+                    self.name = name
+                    self.version = version
+                    self.encoder_config = config
+            
+            sdk_model_proxy = RestoredModel(
+                db_config.meta_name or model_id,
+                db_config.model_version or "unknown",
+                encoder_config,
+            )
+            
+            loaded_model = LoadedModel(
+                org_id=org_id,
+                model_id=model_id,
+                model_path=db_config.model_path,
+                sdk_model=sdk_model_proxy,
+                encoder=encoder,
+                similarity_calculator=similarity_calculator,
+                loaded_at=datetime.utcnow(),
+                meta_name=db_config.meta_name or model_id,
+                short_description=db_config.short_description or "",
+                long_description=db_config.long_description or "",
+            )
+            
+            self._models[(org_id, model_id)] = loaded_model
+            
+            logger.info(
+                f"Restored model '{db_config.meta_name}' v{db_config.model_version} "
+                f"from DB for org={org_id}, model={model_id}"
+            )
+            
+            return loaded_model
+            
+        except Exception as e:
+            logger.error(
+                f"Failed to restore model org={org_id}, model={model_id} from DB: {e}"
+            )
+            return None
     
     async def list_models(self) -> List[ModelInfoResponse]:
         """List all currently loaded models."""

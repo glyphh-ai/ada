@@ -77,9 +77,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     resource_manager = ResourceManager(async_session_maker)
     logger.info("Resource manager initialized")
     
-    # TODO: Initialize licensing service
-    # TODO: Load any pre-configured models
-    
     yield
     
     # Graceful shutdown

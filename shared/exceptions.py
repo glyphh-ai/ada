@@ -62,6 +62,36 @@ class ModelLoadException(GlyphhRuntimeException):
         )
 
 
+# Namespace Exceptions
+class NamespaceNotFoundException(GlyphhRuntimeException):
+    """Raised when a namespace is not found"""
+
+    def __init__(self, namespace_id: str, org_id: str):
+        super().__init__(
+            message=f"Namespace not found: {namespace_id}",
+            error_code="NAMESPACE_NOT_FOUND",
+            status_code=404,
+            details={"namespace_id": namespace_id, "org_id": org_id}
+        )
+
+
+class NamespaceQuotaExceededException(GlyphhRuntimeException):
+    """Raised when a namespace exceeds its quota"""
+
+    def __init__(self, namespace_id: str, org_id: str, limit: Any, current: Any):
+        super().__init__(
+            message=f"Namespace quota exceeded: {namespace_id}",
+            error_code="NAMESPACE_QUOTA_EXCEEDED",
+            status_code=429,
+            details={
+                "namespace_id": namespace_id,
+                "org_id": org_id,
+                "limit": limit,
+                "current": current,
+            }
+        )
+
+
 # Quota Exceptions
 class QuotaExceededException(GlyphhRuntimeException):
     """Raised when a model exceeds its resource quota"""

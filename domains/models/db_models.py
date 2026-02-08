@@ -168,6 +168,9 @@ class ModelConfig(Base):
     short_description = Column(String(200), nullable=True)
     long_description = Column(Text, nullable=True)
     
+    # Full encoder config for reconstructing the model without the .glyphh file
+    encoder_config = Column(JSONB, nullable=True)
+    
     # Similarity weights for each edge type
     similarity_weights = Column(JSONB, default=lambda: {
         "similarity": 1.0,

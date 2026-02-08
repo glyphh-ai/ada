@@ -240,7 +240,14 @@ class MCPServer:
         if loaded_model is None:
             raise ModelNotFoundException(org_id, model_id)
         
-        intent_matcher = IntentMatcher(confidence_threshold=0.85)
+        # Extract NL config from the loaded model's encoder config
+        from shared.encoder_config_factory import EncoderConfigFactory
+        model_nl_config = EncoderConfigFactory.extract_nl_encoder_config(loaded_model.sdk_model)
+        
+        intent_matcher = IntentMatcher(
+            confidence_threshold=0.85,
+            model_nl_config=model_nl_config,
+        )
         
         llm_fallback = None
         try:

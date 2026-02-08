@@ -87,6 +87,12 @@ class Settings(BaseSettings):
         description="Maximum glyphs per model in local mode (development limit)"
     )
     
+    # Model storage
+    model_storage_path: str = Field(
+        default="/data/models",
+        description="Persistent directory for deployed .glyphh model files"
+    )
+    
     # Edge generation
     edge_generation_strategy: Literal["eager", "lazy", "on-demand"] = Field(
         default="lazy",
