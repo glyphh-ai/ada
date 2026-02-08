@@ -17,6 +17,7 @@ from shared.exceptions import (
     AuthenticationException,
     AuthorizationException,
     GlyphNotFoundException,
+    ModelNotFoundException,
     ValidationException,
 )
 
@@ -44,6 +45,7 @@ class MCPResponse:
     """Response from an MCP tool invocation."""
     content: List[Dict[str, Any]]
     is_error: bool = False
+    error: Optional[str] = None
     result: Optional[Any] = None
     query_type: Optional[str] = None
     match_method: Optional[str] = None
@@ -52,7 +54,7 @@ class MCPResponse:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to MCP-compatible dict with consistent JSON structure."""
-        return {
+        response = {
             "content": self.content,
             "isError": self.is_error,
             "result": self.result,
@@ -61,6 +63,9 @@ class MCPResponse:
             "confidence": self.confidence,
             "query_time_ms": self.query_time_ms,
         }
+        if self.error is not None:
+            response["error"] = self.error
+        return response
 
 
 class MCPServer:
@@ -173,6 +178,9 @@ class MCPServer:
         except AuthorizationException as e:
             logger.warning(f"MCP authorization failed: {e}")
             return self._error_response(f"Not authorized: {e.message}")
+        except ModelNotFoundException as e:
+            logger.warning(f"MCP model not found: {e}")
+            return self._error_response(f"Model not found: {e.message}. Deploy the model to the runtime first.")
         except ValidationException as e:
             return self._error_response(f"Validation error: {e.message}")
         except GlyphNotFoundException as e:
@@ -195,6 +203,7 @@ class MCPServer:
         return MCPResponse(
             content=[{"type": "text", "text": message}],
             is_error=True,
+            error=message,
         )
 
     # =========================================================================
@@ -209,15 +218,23 @@ class MCPServer:
         """
         Handle nl_query tool. Delegates entirely to NLQueryService
         which handles rules matching, LLM fallback, and query execution.
+        
+        Requires the model to be loaded in the runtime — no fallbacks.
         """
         from domains.nl_query.service import NLQueryService
         from domains.nl_query.intent_matcher import IntentMatcher
+        from domains.models.manager import ModelManager
         from infrastructure.config import get_settings
         
         settings = get_settings()
         namespace = arguments["namespace"]
         query = arguments["query"]
         debug = arguments.get("debug", False)
+        
+        # Verify model is loaded — fail early with clear error
+        loaded_model = await self._query_service._model_manager.get_model(namespace)
+        if loaded_model is None:
+            raise ModelNotFoundException(namespace)
         
         # Create intent matcher
         intent_matcher = IntentMatcher(confidence_threshold=0.85)
@@ -246,7 +263,7 @@ class MCPServer:
             debug=debug,
         )
         
-        return {
+        response = {
             "result": result.result,
             "query_type": result.query_type,
             "match_method": result.match_method,
@@ -254,3 +271,9 @@ class MCPServer:
             "query_time_ms": result.query_time_ms,
             "translated_query": result.translated_query if debug else None,
         }
+        
+        # Include error info when no match was found
+        if result.match_method == "none":
+            response["error"] = "No intent match found for query"
+        
+        return response

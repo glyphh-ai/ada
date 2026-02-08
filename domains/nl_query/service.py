@@ -138,40 +138,19 @@ class NLQueryService:
             except Exception as e:
                 logger.warning(f"LLM fallback failed: {e}")
         
-        # Step 3: No match from rules or LLM - fall back to similarity search
-        # This allows basic queries to work even without intent patterns
-        logger.info(f"No intent match, falling back to similarity search for: '{query}'")
+        # Step 3: No match from rules or LLM — return clean "none" result
+        logger.info(f"No intent match for query: '{query}'")
         
-        try:
-            result = await self._execute_structured_query(
-                namespace,
-                "similarity_search",
-                {"query": query, "top_k": 10},
-            )
-            
-            elapsed_ms = (time.time() - start_time) * 1000
-            
-            return NLQueryResult(
-                result=result,
-                query_type="similarity_search",
-                match_method="fallback",
-                confidence=match_result.confidence if match_result else 0.0,
-                translated_query={"operation": "similarity_search", "query": query} if debug else None,
-                query_time_ms=elapsed_ms,
-            )
-        except Exception as e:
-            logger.error(f"Similarity search fallback failed: {e}")
-            
-            elapsed_ms = (time.time() - start_time) * 1000
-            
-            return NLQueryResult(
-                result=None,
-                query_type="unknown",
-                match_method="none",
-                confidence=match_result.confidence if match_result else 0.0,
-                translated_query=None,
-                query_time_ms=elapsed_ms,
-            )
+        elapsed_ms = (time.time() - start_time) * 1000
+        
+        return NLQueryResult(
+            result=None,
+            query_type="unknown",
+            match_method="none",
+            confidence=match_result.confidence if match_result else 0.0,
+            translated_query=None,
+            query_time_ms=elapsed_ms,
+        )
     
     async def translate_query(
         self,

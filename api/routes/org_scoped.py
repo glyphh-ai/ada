@@ -237,7 +237,6 @@ class BatchGlyphRequest(BaseModel):
     """Request to create multiple glyphs."""
     concepts: List[str] = Field(..., description="List of concept texts to encode")
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="Shared metadata for all glyphs")
-    encoder_config: Optional[Dict[str, Any]] = Field(default=None, description="Encoder config from model")
 
 
 # Batch Glyph Creation Endpoint
@@ -252,85 +251,26 @@ async def create_glyphs_batch_org_scoped(
     Create multiple glyphs in a batch for an org-scoped model.
     
     Encodes all concepts and stores them with the org/model namespace.
-    Uses the provided encoder_config if available, otherwise falls back to default.
+    Requires the model to be loaded in the runtime — no fallback encoders.
     """
     from main import model_manager
     from domains.models.storage import GlyphStorage
-    from shared.encoder_config_factory import EncoderConfigFactory
-    from shared.sdk_adapter import get_sdk_adapter
     
     if model_manager is None:
         raise HTTPException(status_code=503, detail="Model manager not initialized")
     
     namespace = build_namespace(org_id, model_id)
+    
+    # Model must be loaded — no fallback
+    model = await model_manager.get_model(namespace)
+    if model is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Model not found: {namespace}. Deploy the model to the runtime first."
+        )
+    
+    encoder = model.encoder
     storage = GlyphStorage(db)
-    
-    # Try to create encoder from provided config first
-    encoder = None
-    adapter = get_sdk_adapter()
-    
-    if request.encoder_config and request.encoder_config.get("layers"):
-        try:
-            # Build EncoderConfig from the provided config dict
-            classes = adapter.import_config_classes()
-            EncoderConfig = classes['EncoderConfig']
-            LayerConfig = classes['LayerConfig']
-            SegmentConfig = classes['SegmentConfig']
-            Role = classes['Role']
-            
-            layers = []
-            for layer_dict in request.encoder_config.get("layers", []):
-                segments = []
-                for seg_dict in layer_dict.get("segments", []):
-                    roles = [
-                        Role(
-                            name=r.get("name", "default"),
-                            similarity_weight=r.get("similarity_weight", 1.0)
-                        )
-                        for r in seg_dict.get("roles", [{"name": "default"}])
-                    ]
-                    segments.append(SegmentConfig(
-                        name=seg_dict.get("name", "default"),
-                        roles=roles
-                    ))
-                layers.append(LayerConfig(
-                    name=layer_dict.get("name", "default"),
-                    similarity_weight=layer_dict.get("similarity_weight", 1.0),
-                    segments=segments
-                ))
-            
-            if layers:
-                config = EncoderConfig(
-                    dimension=request.encoder_config.get("dimension", 10000),
-                    seed=request.encoder_config.get("seed", 42),
-                    layers=layers
-                )
-                Encoder = adapter.import_encoder()
-                encoder = Encoder(config)
-                logger.info(f"Using model encoder config for namespace {namespace}")
-        except Exception as e:
-            logger.warning(f"Failed to create encoder from model config: {e}")
-    
-    # Try to get encoder from loaded model if no config provided
-    if encoder is None:
-        try:
-            model = await model_manager.get_model(namespace)
-            if model is not None:
-                encoder = model.encoder
-                logger.info(f"Using loaded model encoder for namespace {namespace}")
-        except Exception as e:
-            logger.debug(f"No loaded model for {namespace}: {e}")
-    
-    # Fall back to creating a default encoder
-    if encoder is None:
-        try:
-            config = EncoderConfigFactory.create_default_config()
-            Encoder = adapter.import_encoder()
-            encoder = Encoder(config)
-            logger.info(f"Using default encoder for namespace {namespace}")
-        except Exception as e:
-            logger.error(f"Failed to create encoder: {e}")
-            raise HTTPException(status_code=503, detail=f"Failed to create encoder: {e}")
     
     results = []
     errors = []
