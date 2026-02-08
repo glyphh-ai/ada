@@ -117,10 +117,16 @@ class Settings(BaseSettings):
         description="Telemetry endpoint URL"
     )
     
-    # CORS
+    # CORS - includes Studio origins for direct chat communication
     cors_origins: List[str] = Field(
-        default=["*"],
-        description="Allowed CORS origins"
+        default=[
+            "http://localhost:5173",  # Studio dev
+            "http://localhost:5174",  # Studio dev alternate
+            "http://127.0.0.1:5173",  # Studio dev localhost
+            "https://studio.glyphh.com",  # Studio production
+            "https://*.glyphh.com",  # All Glyphh subdomains
+        ],
+        description="Allowed CORS origins for Studio direct chat"
     )
     
     @field_validator("jwt_secret_key")

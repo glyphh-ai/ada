@@ -130,8 +130,8 @@ app.add_middleware(LoggingMiddleware)
 # Global exception handlers
 @app.exception_handler(GlyphhRuntimeException)
 async def runtime_exception_handler(request: Request, exc: GlyphhRuntimeException) -> JSONResponse:
-    """Handle custom runtime exceptions"""
-    return JSONResponse(
+    """Handle custom runtime exceptions with CORS headers"""
+    response = JSONResponse(
         status_code=exc.status_code,
         content={
             "error": {
@@ -143,13 +143,19 @@ async def runtime_exception_handler(request: Request, exc: GlyphhRuntimeExceptio
             }
         }
     )
+    # Add CORS headers to error responses for browser compatibility
+    origin = request.headers.get("origin")
+    if origin and _is_allowed_origin(origin):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Handle unexpected exceptions"""
+    """Handle unexpected exceptions with CORS headers"""
     logger.error(f"Unexpected error: {exc}", exc_info=True)
-    return JSONResponse(
+    response = JSONResponse(
         status_code=500,
         content={
             "error": {
@@ -160,6 +166,24 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
             }
         }
     )
+    # Add CORS headers to error responses for browser compatibility
+    origin = request.headers.get("origin")
+    if origin and _is_allowed_origin(origin):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
+
+
+def _is_allowed_origin(origin: str) -> bool:
+    """Check if origin is in allowed CORS origins list."""
+    import fnmatch
+    for allowed in settings.cors_origins:
+        if allowed == "*" or allowed == origin:
+            return True
+        # Support wildcard patterns like https://*.glyphh.com
+        if fnmatch.fnmatch(origin, allowed):
+            return True
+    return False
 
 
 # Import and include routers

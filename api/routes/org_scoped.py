@@ -21,6 +21,7 @@ from domains.models.storage import GlyphStorage
 from domains.query.service import QueryService
 from infrastructure.config import get_settings
 from infrastructure.database import get_db
+from shared.auth import AuthenticatedUser, get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/{org_id}/{model_id}", tags=["org-scoped"])
@@ -55,20 +56,30 @@ async def get_auth_service() -> AuthService:
 async def validate_org_access(
     org_id: str,
     model_id: str,
-    auth_service: AuthService = Depends(get_auth_service),
-) -> User:
-    """Validate that the user has access to the org and model."""
-    if settings.deployment_mode == "local":
-        return User(
-            user_id="local",
-            org_permissions={"*": {"read", "write", "admin"}},
-            org_id=org_id,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> AuthenticatedUser:
+    """
+    Validate that the authenticated user has access to the org and model.
+    
+    Uses JWT authentication from shared/auth.py which handles:
+    - Local mode bypass (returns mock user)
+    - JWT token validation and claim extraction
+    - Token expiry and signature verification
+    
+    Additionally validates that the JWT org_id matches the URL org_id.
+    """
+    # In local mode, the auth module returns a mock user - allow access
+    if current_user.org_id == "local-dev-org":
+        return current_user
+    
+    # Validate org_id matches the authenticated user's org
+    if current_user.org_id != org_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Organization mismatch - you don't have access to this organization"
         )
     
-    raise HTTPException(
-        status_code=501,
-        detail="Org-scoped authentication not yet implemented"
-    )
+    return current_user
 
 
 async def get_mcp_server(
@@ -95,9 +106,14 @@ async def mcp_endpoint(
     model_id: str,
     request: Dict[str, Any],
     mcp_server: MCPServer = Depends(get_mcp_server),
-    user: User = Depends(validate_org_access),
+    current_user: AuthenticatedUser = Depends(validate_org_access),
 ) -> Dict[str, Any]:
-    """MCP endpoint for org-scoped model access."""
+    """
+    MCP endpoint for org-scoped model access.
+    
+    Accepts JWT authentication from Studio for direct queries.
+    Validates org_id in URL matches org_id in JWT token.
+    """
     tool_name = request.get("tool")
     arguments = request.get("arguments", {})
     
@@ -167,7 +183,7 @@ async def listener_batch(
     org_id: str,
     model_id: str,
     request: Dict[str, Any],
-    user: User = Depends(validate_org_access),
+    current_user: AuthenticatedUser = Depends(validate_org_access),
 ) -> Dict[str, Any]:
     """HTTP endpoint for batch glyph ingestion."""
     concepts = request.get("concepts", [])
@@ -316,7 +332,7 @@ async def execute_nl_query(
     org_id: str,
     model_id: str,
     request: NLQueryRequest,
-    user: User = Depends(validate_org_access),
+    current_user: AuthenticatedUser = Depends(validate_org_access),
 ) -> NLQueryResponse:
     """Execute a natural language query against the model."""
     service = get_nl_query_service_for_org()
@@ -366,7 +382,7 @@ async def execute_nl_query(
 async def get_intents(
     org_id: str,
     model_id: str,
-    user: User = Depends(validate_org_access),
+    current_user: AuthenticatedUser = Depends(validate_org_access),
 ) -> IntentsResponse:
     """Get available intents and patterns for the model."""
     service = get_nl_query_service_for_org()
