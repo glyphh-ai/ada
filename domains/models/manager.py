@@ -273,6 +273,46 @@ class ModelManager:
         
         return loaded_model
     
+    async def load_model_from_bytes(
+        self,
+        content: bytes,
+        namespace: str,
+    ) -> LoadedModel:
+        """
+        Load a .glyphh model from raw bytes and assign it a namespace.
+        
+        Writes content to a temp file, then delegates to load_model().
+        
+        Args:
+            content: Raw bytes of the .glyphh file
+            namespace: Namespace to assign (e.g. '{org_id}/{model_id}')
+            
+        Returns:
+            LoadedModel instance
+            
+        Raises:
+            ModelLoadException: If model fails to load
+        """
+        import tempfile
+        import os
+        
+        # Write bytes to a temp file
+        tmp_dir = tempfile.mkdtemp()
+        tmp_path = os.path.join(tmp_dir, f"{namespace.replace('/', '_')}.glyphh")
+        
+        try:
+            with open(tmp_path, "wb") as f:
+                f.write(content)
+            
+            return await self.load_model(tmp_path, namespace)
+        finally:
+            # Clean up temp file (model data is already loaded into memory)
+            try:
+                os.unlink(tmp_path)
+                os.rmdir(tmp_dir)
+            except OSError:
+                pass
+    
     async def unload_model(
         self,
         namespace: str,

@@ -87,12 +87,14 @@ async def get_current_user(
 @router.post("/deploy", response_model=DeployResponse)
 async def deploy_model(
     file: UploadFile = File(..., description="The .glyphh model file"),
+    namespace: Optional[str] = Query(None, description="Namespace to assign (e.g. org_id/model_id). Generated from filename if not provided."),
     manager: ModelManager = Depends(get_model_manager),
 ) -> DeployResponse:
     """
     Deploy a .glyphh model file.
     
     Accepts a binary .glyphh file and deploys it to the runtime.
+    Optionally accepts a namespace query param for org-scoped deployments.
     Returns the namespace and endpoint URLs for accessing the model.
     """
     if not file.filename.endswith(".glyphh"):
@@ -104,8 +106,9 @@ async def deploy_model(
     # Read file content
     content = await file.read()
     
-    # Generate namespace from filename
-    namespace = file.filename.replace(".glyphh", "")
+    # Use provided namespace or generate from filename
+    if namespace is None:
+        namespace = file.filename.replace(".glyphh", "")
     
     try:
         # Load model
@@ -114,11 +117,17 @@ async def deploy_model(
         # Build endpoint URLs
         base_url = f"{settings.host}:{settings.port}"
         
+        # Extract org_id if namespace is org-scoped (org_id/model_id)
+        org_id = None
+        if "/" in namespace:
+            org_id = namespace.split("/")[0]
+        
         return DeployResponse(
             namespace=namespace,
             model_id=namespace,
-            mcp_endpoint=f"http://{base_url}/api/v1/{namespace}/mcp",
-            listener_endpoint=f"http://{base_url}/api/v1/{namespace}/listener",
+            org_id=org_id,
+            mcp_endpoint=f"http://{base_url}/{namespace}/mcp",
+            listener_endpoint=f"http://{base_url}/{namespace}/listener",
         )
     except Exception as e:
         logger.error(f"Failed to deploy model: {e}")
@@ -160,7 +169,7 @@ async def list_models(
     return {"models": models}
 
 
-@router.delete("/models/{model_id}")
+@router.delete("/models/{model_id:path}")
 async def delete_model(
     model_id: str,
     delete_data: bool = Query(True, description="Also delete glyphs and edges"),
@@ -170,6 +179,7 @@ async def delete_model(
     Remove a deployed model.
     
     Unloads the model and optionally deletes all associated data.
+    model_id can be a simple name or an org-scoped path like org_id/model_id.
     """
     try:
         await manager.unload_model(model_id, delete_data=delete_data)
@@ -178,7 +188,7 @@ async def delete_model(
         raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
 
 
-@router.patch("/models/{model_id}/config")
+@router.patch("/models/{model_id:path}/config")
 async def update_model_config(
     model_id: str,
     config: ModelConfigUpdate,
@@ -202,7 +212,7 @@ async def update_model_config(
         raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
 
 
-@router.post("/models/{model_id}/re-encode")
+@router.post("/models/{model_id:path}/re-encode")
 async def re_encode_model(
     model_id: str,
     manager: ModelManager = Depends(get_model_manager),
@@ -220,7 +230,7 @@ async def re_encode_model(
         raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
 
 
-@router.delete("/models/{model_id}/data")
+@router.delete("/models/{model_id:path}/data")
 async def clear_model_data(
     model_id: str,
     manager: ModelManager = Depends(get_model_manager),
@@ -281,7 +291,7 @@ async def revoke_token(token_id: str) -> Dict[str, str]:
     return {"status": "revoked", "token_id": token_id}
 
 
-@router.get("/models/{model_id}/metadata", response_model=ModelMetadataResponse)
+@router.get("/models/{model_id:path}/metadata", response_model=ModelMetadataResponse)
 async def get_model_metadata(
     model_id: str,
     manager: ModelManager = Depends(get_model_manager),
