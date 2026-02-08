@@ -105,6 +105,7 @@ class IntentMatcher:
                     else:
                         # Fall back to SDK defaults
                         logger.info("No model NL config provided, using SDK default patterns")
+                        self._encoder.add_defaults()
                     
                     self._patterns_loaded = True
                     pattern_count = len(self._encoder.get_patterns()) if hasattr(self._encoder, 'get_patterns') else 0
