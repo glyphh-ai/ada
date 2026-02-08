@@ -35,7 +35,8 @@ class BatchCreateGlyphRequest(BaseModel):
 class GlyphResponse(BaseModel):
     """Response containing a glyph"""
     id: UUID
-    namespace: str
+    org_id: str
+    model_id: str
     concept_text: str
     metadata: Dict[str, Any]
     created_at: datetime
@@ -48,7 +49,8 @@ class GlyphResponse(BaseModel):
 class CreateGlyphResponse(BaseModel):
     """Response after creating a glyph"""
     glyph_id: UUID
-    namespace: str
+    org_id: str
+    model_id: str
     created_at: datetime
 
 
@@ -176,8 +178,8 @@ class NLQueryResponse(BaseModel):
 
 class DeploymentResponse(BaseModel):
     """Response after deploying a model"""
+    org_id: str
     model_id: str
-    org_id: Optional[str] = None
     version: Optional[str] = None
     endpoints: Dict[str, str] = Field(default_factory=dict)
     webhook_token: Optional[str] = None
@@ -193,10 +195,10 @@ class RuntimeStatusResponse(BaseModel):
 
 class ModelInfoResponse(BaseModel):
     """Information about a deployed model"""
+    org_id: str
     model_id: str
     name: Optional[str] = None
     version: Optional[str] = None
-    org_id: Optional[str] = None
     deployed_at: Optional[datetime] = None
     status: str = "Active"
 
@@ -267,7 +269,8 @@ class ModelConfigUpdate(BaseModel):
 
 class ModelConfigResponse(BaseModel):
     """Current model configuration"""
-    namespace: str
+    org_id: str
+    model_id: str
     similarity_weights: Dict[str, float]
     beam_width: int
     max_tree_depth: int
@@ -305,7 +308,8 @@ class ReEncodeStatusResponse(BaseModel):
 
 class ClearDataResponse(BaseModel):
     """Response from clear data operation"""
-    namespace: str
+    org_id: str
+    model_id: str
     glyphs_deleted: int
     edges_deleted: int
 
@@ -330,7 +334,8 @@ class ModelMetadata(BaseModel):
 
 class ModelMetadataResponse(BaseModel):
     """API response for model metadata."""
-    namespace: str
+    org_id: str
+    model_id: str
     meta_name: str
     short_description: str
     long_description: str

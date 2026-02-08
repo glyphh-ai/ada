@@ -29,12 +29,12 @@ class GlyphhRuntimeException(Exception):
 class ModelNotFoundException(GlyphhRuntimeException):
     """Raised when a model is not found"""
     
-    def __init__(self, namespace: str):
+    def __init__(self, org_id: str, model_id: str):
         super().__init__(
-            message=f"Model not found: {namespace}",
+            message=f"Model not found: org={org_id}, model={model_id}",
             error_code="MODEL_NOT_FOUND",
             status_code=404,
-            details={"namespace": namespace}
+            details={"org_id": org_id, "model_id": model_id}
         )
 
 
@@ -62,37 +62,27 @@ class ModelLoadException(GlyphhRuntimeException):
         )
 
 
-# Namespace Exceptions
-class NamespaceNotFoundException(GlyphhRuntimeException):
-    """Raised when a namespace is not found"""
-    
-    def __init__(self, namespace: str):
-        super().__init__(
-            message=f"Namespace not found: {namespace}",
-            error_code="NAMESPACE_NOT_FOUND",
-            status_code=404,
-            details={"namespace": namespace}
-        )
-
-
-class NamespaceQuotaExceededException(GlyphhRuntimeException):
-    """Raised when a namespace exceeds its resource quota"""
+# Quota Exceptions
+class QuotaExceededException(GlyphhRuntimeException):
+    """Raised when a model exceeds its resource quota"""
     
     def __init__(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         resource: str,
         limit: Any,
         current: Any,
         message: Optional[str] = None
     ):
-        default_message = f"Namespace {namespace} exceeded {resource} quota"
+        default_message = f"Quota exceeded for org={org_id}, model={model_id}: {resource}"
         super().__init__(
             message=message or default_message,
             error_code="QUOTA_EXCEEDED",
             status_code=429,
             details={
-                "namespace": namespace,
+                "org_id": org_id,
+                "model_id": model_id,
                 "resource": resource,
                 "limit": limit,
                 "current": current
@@ -119,16 +109,23 @@ class AuthorizationException(GlyphhRuntimeException):
     def __init__(
         self,
         operation: str = "access",
-        namespace: Optional[str] = None,
+        org_id: Optional[str] = None,
+        model_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ):
+        scope = ""
+        if org_id:
+            scope = f" on org={org_id}"
+            if model_id:
+                scope += f", model={model_id}"
         super().__init__(
-            message=f"Not authorized to perform {operation}" + (f" on {namespace}" if namespace else ""),
+            message=f"Not authorized to perform {operation}{scope}",
             error_code="AUTHORIZATION_FAILED",
             status_code=403,
             details={
                 "operation": operation,
-                "namespace": namespace,
+                "org_id": org_id,
+                "model_id": model_id,
                 "user_id": user_id,
             }
         )
@@ -173,12 +170,12 @@ class ValidationException(GlyphhRuntimeException):
 class GlyphNotFoundException(GlyphhRuntimeException):
     """Raised when a glyph is not found"""
     
-    def __init__(self, glyph_id: str, namespace: str):
+    def __init__(self, glyph_id: str, org_id: str, model_id: str):
         super().__init__(
             message=f"Glyph not found: {glyph_id}",
             error_code="GLYPH_NOT_FOUND",
             status_code=404,
-            details={"glyph_id": glyph_id, "namespace": namespace}
+            details={"glyph_id": glyph_id, "org_id": org_id, "model_id": model_id}
         )
 
 

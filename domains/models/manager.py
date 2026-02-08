@@ -1,18 +1,19 @@
 """
 Model Manager for Glyphh Runtime.
 
-Handles loading, unloading, and managing multiple .glyphh models with namespace isolation.
-Uses SDK's GlyphhModel for model loading only (packaging), and creates separate Encoder
-and SimilarityCalculator instances for runtime operations.
+Handles loading, unloading, and managing multiple .glyphh models with
+org_id/model_id isolation. Uses SDK's GlyphhModel for model loading only
+(packaging), and creates separate Encoder and SimilarityCalculator instances
+for runtime operations.
 
-Updated to use the new SDK API with explicit EncoderConfig structure.
+All registry keys are (org_id, model_id) tuples. No namespace concept.
 """
 
 import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
 from sqlalchemy import delete, select, update
@@ -32,8 +33,7 @@ from shared.exceptions import (
     ModelIncompatibleException,
     ModelLoadException,
     ModelNotFoundException,
-    NamespaceNotFoundException,
-    NamespaceQuotaExceededException,
+    QuotaExceededException,
 )
 from shared.sdk_adapter import get_sdk_adapter, SDKNotAvailableError
 from shared.encoder_config_factory import EncoderConfigFactory, ConfigurationError
@@ -47,34 +47,30 @@ class LoadedModel:
     """
     In-memory representation of a loaded model.
     
-    Updated to follow correct SDK usage pattern:
-    - sdk_model: GlyphhModel for metadata only (packaging)
-    - encoder: Encoder instance for encoding operations
-    - similarity_calculator: SimilarityCalculator for similarity operations
-    - Metadata fields for marketplace display
+    Stores org_id and model_id as separate attributes.
     """
     
     def __init__(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         model_path: str,
-        sdk_model: Any,  # GlyphhModel from SDK - for metadata only
-        encoder: Any,  # Encoder from SDK - for encoding operations
-        similarity_calculator: Optional[Any],  # SimilarityCalculator from SDK
+        sdk_model: Any,
+        encoder: Any,
+        similarity_calculator: Optional[Any],
         loaded_at: datetime,
-        # Metadata fields for marketplace display
         meta_name: str,
         short_description: str,
         long_description: str,
     ):
-        self.namespace = namespace
+        self.org_id = org_id
+        self.model_id = model_id
         self.model_path = model_path
-        self.sdk_model = sdk_model  # For metadata access only
-        self.encoder = encoder  # For encoding operations
-        self.similarity_calculator = similarity_calculator  # For similarity operations
+        self.sdk_model = sdk_model
+        self.encoder = encoder
+        self.similarity_calculator = similarity_calculator
         self.loaded_at = loaded_at
-        self.lock = asyncio.Lock()  # For re-encode operations
-        # Metadata for marketplace
+        self.lock = asyncio.Lock()
         self.meta_name = meta_name
         self.short_description = short_description
         self.long_description = long_description
@@ -83,10 +79,11 @@ class LoadedModel:
 class ReEncodeJob:
     """Tracks background re-encode job status."""
     
-    def __init__(self, job_id: str, namespace: str):
+    def __init__(self, job_id: str, org_id: str, model_id: str):
         self.job_id = job_id
-        self.namespace = namespace
-        self.status = "pending"  # pending, running, completed, failed
+        self.org_id = org_id
+        self.model_id = model_id
+        self.status = "pending"
         self.progress = 0.0
         self.glyphs_total = 0
         self.glyphs_processed = 0
@@ -98,31 +95,18 @@ class ReEncodeJob:
 
 class ModelManager:
     """
-    Manages multiple .glyphh models with namespace isolation.
+    Manages multiple .glyphh models with (org_id, model_id) isolation.
     
-    Responsibilities:
-    - Load/unload models from .glyphh files
-    - Maintain in-memory registry of loaded models
-    - Validate model compatibility with SDK version
-    - Provide access to SDK components (encoder, etc.)
-    - Handle model configuration updates
-    - Manage re-encode and clear data operations
+    Registry keys are Tuple[str, str] of (org_id, model_id).
     """
     
     def __init__(self, db_session_factory):
-        """
-        Initialize ModelManager.
-        
-        Args:
-            db_session_factory: Async session factory for database access
-        """
-        self._models: Dict[str, LoadedModel] = {}
+        self._models: Dict[Tuple[str, str], LoadedModel] = {}
         self._db_session_factory = db_session_factory
         self._re_encode_jobs: Dict[str, ReEncodeJob] = {}
         self._sdk_version: Optional[str] = None
         
     async def _get_sdk_version(self) -> str:
-        """Get the SDK version (cached)."""
         if self._sdk_version is None:
             try:
                 import glyphh
@@ -134,38 +118,26 @@ class ModelManager:
     async def load_model(
         self,
         model_path: str,
-        namespace: Optional[str] = None,
+        org_id: str,
+        model_id: str,
     ) -> LoadedModel:
         """
-        Load a .glyphh model and assign it a namespace.
-        
-        Uses GlyphhModel.from_file() for loading only, then extracts
-        encoder_config to create separate Encoder and SimilarityCalculator
-        instances for runtime operations.
+        Load a .glyphh model and assign it to (org_id, model_id).
         
         Args:
             model_path: Path to .glyphh file
-            namespace: Optional namespace (generated if not provided)
-            
-        Returns:
-            LoadedModel instance
-            
-        Raises:
-            ModelLoadException: If model fails to load
-            ModelIncompatibleException: If model is incompatible with SDK
+            org_id: Organization ID
+            model_id: Model ID
         """
-        # Get SDK adapter
         adapter = get_sdk_adapter()
         if not adapter.is_available:
             raise ModelLoadException("SDK not available")
         
-        # Import GlyphhModel for loading
         try:
             from glyphh import GlyphhModel
         except ImportError as e:
             raise ModelLoadException(f"SDK not available: {e}")
         
-        # Validate file exists
         path = Path(model_path)
         if not path.exists():
             raise ModelLoadException(f"Model file not found: {model_path}")
@@ -173,13 +145,11 @@ class ModelManager:
         if not path.suffix == ".glyphh":
             raise ModelLoadException(f"Invalid file extension: {path.suffix}")
         
-        # Load model from file (GlyphhModel for packaging/loading only)
         try:
             sdk_model = GlyphhModel.from_file(str(path))
         except Exception as e:
             raise ModelLoadException(f"Failed to parse model file: {e}")
         
-        # Validate compatibility
         validation_result = await self.validate_compatibility(sdk_model)
         if not validation_result["compatible"]:
             raise ModelIncompatibleException(
@@ -187,17 +157,14 @@ class ModelManager:
                 sdk_version=await self._get_sdk_version()
             )
         
-        # Generate namespace if not provided
-        if namespace is None:
-            namespace = f"{sdk_model.name}_{uuid4().hex[:8]}"
+        key = (org_id, model_id)
         
-        # If namespace already exists, unload the old model first (re-deploy)
-        if namespace in self._models:
-            logger.info(f"Re-deploying: unloading existing model from namespace '{namespace}'")
-            await self.unload_model(namespace, delete_data=False)
+        # Re-deploy: unload existing first
+        if key in self._models:
+            logger.info(f"Re-deploying: unloading existing model org={org_id}, model={model_id}")
+            await self.unload_model(org_id, model_id, delete_data=False)
         
-        # Check local mode model limit (after re-deploy unload so we don't
-        # count the model we just removed)
+        # Check local mode model limit (after re-deploy unload)
         if settings.deployment_mode == "local":
             if len(self._models) >= settings.local_mode_max_models:
                 raise ModelLoadException(
@@ -205,56 +172,51 @@ class ModelManager:
                     f"Upgrade to a production license for unlimited models."
                 )
         
-        # Extract encoder config from model and validate
+        # Extract and validate encoder config
         try:
             encoder_config = EncoderConfigFactory.create_from_model(sdk_model)
-            
-            # Validate and apply defaults
             validator = get_config_validator()
             validator.validate_encoder_config_or_raise(encoder_config)
             encoder_config = validator.apply_defaults(encoder_config)
-            
         except ConfigurationError as e:
             raise ModelLoadException(f"Invalid model configuration: {e}")
         
-        # Create Encoder instance via SDK adapter (not using GlyphhModel directly)
         try:
             encoder = adapter.create_encoder(encoder_config)
         except Exception as e:
             raise ModelLoadException(f"Failed to create encoder: {e}")
         
-        # Create SimilarityCalculator instance via SDK adapter
         similarity_calculator = adapter.create_similarity_calculator()
         if similarity_calculator is None:
             logger.warning(
-                f"SimilarityCalculator not available for namespace '{namespace}', "
+                f"SimilarityCalculator not available for org={org_id}, model={model_id}, "
                 f"will use fallback similarity"
             )
         
-        # Extract model metadata with defaults for missing fields
         meta_name = getattr(sdk_model, 'meta_name', None) or \
                     getattr(sdk_model, 'name', None) or \
-                    path.stem  # Filename without extension as fallback
+                    path.stem
         short_description = getattr(sdk_model, 'short_description', '') or ''
         long_description = getattr(sdk_model, 'long_description', '') or ''
         
-        # Create loaded model with all components
         loaded_model = LoadedModel(
-            namespace=namespace,
+            org_id=org_id,
+            model_id=model_id,
             model_path=str(path),
-            sdk_model=sdk_model,  # For metadata access only
-            encoder=encoder,  # For encoding operations
-            similarity_calculator=similarity_calculator,  # For similarity operations
+            sdk_model=sdk_model,
+            encoder=encoder,
+            similarity_calculator=similarity_calculator,
             loaded_at=datetime.utcnow(),
             meta_name=meta_name,
             short_description=short_description,
             long_description=long_description,
         )
         
-        # Store model config in database (including metadata)
+        # Store model config in database
         async with self._db_session_factory() as session:
             config = ModelConfig(
-                namespace=namespace,
+                org_id=org_id,
+                model_id=model_id,
                 model_path=str(path),
                 model_version=sdk_model.version,
                 sdk_version=await self._get_sdk_version(),
@@ -265,58 +227,42 @@ class ModelManager:
             session.add(config)
             await session.commit()
         
-        # Add to registry
-        self._models[namespace] = loaded_model
+        self._models[key] = loaded_model
         
         logger.info(
             f"Loaded model '{meta_name}' v{sdk_model.version} "
-            f"into namespace '{namespace}'"
+            f"into org={org_id}, model={model_id}"
         )
         
         return loaded_model
-    
+
     async def load_model_from_bytes(
         self,
         content: bytes,
-        namespace: str,
+        org_id: str,
+        model_id: str,
     ) -> LoadedModel:
         """
-        Load a .glyphh model from raw bytes and assign it a namespace.
+        Load a .glyphh model from raw bytes.
         
-        Supports two formats:
-        1. Gzipped .glyphh files (from SDK's GlyphhModel.to_file)
-        2. Plain JSON config from the platform's export_glyphh
-        
-        For plain JSON, creates an encoder directly from the config
-        without requiring a full GlyphhModel with glyphs.
-        
-        Args:
-            content: Raw bytes of the .glyphh file or JSON config
-            namespace: Namespace to assign (e.g. '{org_id}/{model_id}')
-            
-        Returns:
-            LoadedModel instance
-            
-        Raises:
-            ModelLoadException: If model fails to load
+        Supports gzipped .glyphh files and plain JSON config from platform.
         """
         import gzip
         import json as json_module
         
-        # Try gzipped format first (SDK .glyphh files)
+        # Try gzipped format first
         try:
             decompressed = gzip.decompress(content)
-            # It's a gzipped .glyphh — write to temp file and use standard load
             import tempfile
             import os
             
             tmp_dir = tempfile.mkdtemp()
-            tmp_path = os.path.join(tmp_dir, f"{namespace.replace('/', '_')}.glyphh")
+            tmp_path = os.path.join(tmp_dir, f"{org_id}_{model_id}.glyphh")
             
             try:
                 with open(tmp_path, "wb") as f:
                     f.write(content)
-                return await self.load_model(tmp_path, namespace)
+                return await self.load_model(tmp_path, org_id, model_id)
             finally:
                 try:
                     os.unlink(tmp_path)
@@ -324,7 +270,7 @@ class ModelManager:
                 except OSError:
                     pass
         except gzip.BadGzipFile:
-            pass  # Not gzipped — try plain JSON config
+            pass
         
         # Plain JSON config from platform
         try:
@@ -332,33 +278,23 @@ class ModelManager:
         except json_module.JSONDecodeError as e:
             raise ModelLoadException(f"Invalid model data: not gzipped .glyphh and not valid JSON: {e}")
         
-        return await self._load_from_platform_config(config_data, namespace)
+        return await self._load_from_platform_config(config_data, org_id, model_id)
     
     async def _load_from_platform_config(
         self,
         config_data: dict,
-        namespace: str,
+        org_id: str,
+        model_id: str,
     ) -> LoadedModel:
-        """
-        Load a model from platform JSON config (no glyphs, just encoder config).
+        """Load a model from platform JSON config (no glyphs, just encoder config)."""
+        key = (org_id, model_id)
         
-        This is used when the platform deploys a model that hasn't been
-        packaged as a full .glyphh file yet. Creates an encoder from the
-        config so the runtime can encode data sent later.
+        # Re-deploy: unload existing first
+        if key in self._models:
+            logger.info(f"Re-deploying: unloading existing model org={org_id}, model={model_id}")
+            await self.unload_model(org_id, model_id, delete_data=False)
         
-        Args:
-            config_data: Platform export JSON with name, config, etc.
-            namespace: Namespace to assign
-            
-        Returns:
-            LoadedModel instance
-        """
-        # If namespace already exists, unload the old model first (re-deploy)
-        if namespace in self._models:
-            logger.info(f"Re-deploying: unloading existing model from namespace '{namespace}'")
-            await self.unload_model(namespace, delete_data=False)
-        
-        # Check local mode model limit (after re-deploy unload)
+        # Check local mode model limit
         if settings.deployment_mode == "local":
             if len(self._models) >= settings.local_mode_max_models:
                 raise ModelLoadException(
@@ -366,19 +302,16 @@ class ModelManager:
                     f"Upgrade to a production license for unlimited models."
                 )
         
-        model_name = config_data.get("name", namespace)
+        model_name = config_data.get("name", model_id)
         model_config = config_data.get("config", {})
         model_version = str(config_data.get("version", "1"))
         
-        # Get SDK adapter
         adapter = get_sdk_adapter()
         if not adapter.is_available:
             raise ModelLoadException("SDK not available")
         
-        # Build encoder config from platform config
         try:
             encoder_config = EncoderConfigFactory.create_from_dict(model_config)
-            
             validator = get_config_validator()
             validator.validate_encoder_config_or_raise(encoder_config)
             encoder_config = validator.apply_defaults(encoder_config)
@@ -387,20 +320,15 @@ class ModelManager:
         except Exception as e:
             raise ModelLoadException(f"Failed to create encoder config from platform config: {e}")
         
-        # Create Encoder instance
         try:
             encoder = adapter.create_encoder(encoder_config)
         except Exception as e:
             raise ModelLoadException(f"Failed to create encoder: {e}")
         
-        # Create SimilarityCalculator
         similarity_calculator = adapter.create_similarity_calculator()
         if similarity_calculator is None:
-            logger.warning(
-                f"SimilarityCalculator not available for namespace '{namespace}'"
-            )
+            logger.warning(f"SimilarityCalculator not available for org={org_id}, model={model_id}")
         
-        # Create a minimal sdk_model-like object for metadata
         class PlatformModel:
             """Minimal model object for platform-originated deployments."""
             def __init__(self, name, version, config):
@@ -411,7 +339,8 @@ class ModelManager:
         sdk_model_proxy = PlatformModel(model_name, model_version, encoder_config)
         
         loaded_model = LoadedModel(
-            namespace=namespace,
+            org_id=org_id,
+            model_id=model_id,
             model_path="platform-deploy",
             sdk_model=sdk_model_proxy,
             encoder=encoder,
@@ -424,9 +353,11 @@ class ModelManager:
         
         # Store model config in database
         async with self._db_session_factory() as session:
-            # Check if config already exists
             result = await session.execute(
-                select(ModelConfig).where(ModelConfig.namespace == namespace)
+                select(ModelConfig).where(
+                    ModelConfig.org_id == org_id,
+                    ModelConfig.model_id == model_id,
+                )
             )
             existing = result.scalar_one_or_none()
             
@@ -438,7 +369,8 @@ class ModelManager:
                 existing.updated_at = datetime.utcnow()
             else:
                 config = ModelConfig(
-                    namespace=namespace,
+                    org_id=org_id,
+                    model_id=model_id,
                     model_path="platform-deploy",
                     model_version=model_version,
                     sdk_version=await self._get_sdk_version(),
@@ -449,79 +381,59 @@ class ModelManager:
                 session.add(config)
             await session.commit()
         
-        # Add to registry
-        self._models[namespace] = loaded_model
+        self._models[key] = loaded_model
         
         logger.info(
             f"Loaded platform model '{model_name}' v{model_version} "
-            f"into namespace '{namespace}'"
+            f"into org={org_id}, model={model_id}"
         )
         
         return loaded_model
-    
+
     async def unload_model(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         delete_data: bool = False,
     ) -> None:
-        """
-        Unload a model and optionally clean up its data.
+        """Unload a model and optionally clean up its data."""
+        key = (org_id, model_id)
         
-        Args:
-            namespace: Namespace of model to unload
-            delete_data: If True, delete all glyphs and edges
-            
-        Raises:
-            ModelNotFoundException: If model not found
-        """
-        if namespace not in self._models:
-            raise ModelNotFoundException(namespace)
+        if key not in self._models:
+            raise ModelNotFoundException(org_id, model_id)
         
-        loaded_model = self._models[namespace]
+        loaded_model = self._models[key]
         
-        # Delete data if requested
         if delete_data:
-            await self.clear_namespace_data(namespace)
+            await self.clear_model_data(org_id, model_id)
             
-            # Also delete model config
             async with self._db_session_factory() as session:
                 await session.execute(
-                    delete(ModelConfig).where(ModelConfig.namespace == namespace)
+                    delete(ModelConfig).where(
+                        ModelConfig.org_id == org_id,
+                        ModelConfig.model_id == model_id,
+                    )
                 )
                 await session.commit()
         
-        # Remove from registry
-        del self._models[namespace]
+        del self._models[key]
         
-        # Clear encoder cache to release memory
         if hasattr(loaded_model.encoder, 'clear_cache'):
             loaded_model.encoder.clear_cache()
         
-        logger.info(f"Unloaded model from namespace '{namespace}'")
+        logger.info(f"Unloaded model org={org_id}, model={model_id}")
     
-    async def get_model(self, namespace: str) -> Optional[LoadedModel]:
-        """
-        Retrieve a loaded model by namespace.
-        
-        Args:
-            namespace: Namespace to look up
-            
-        Returns:
-            LoadedModel if found, None otherwise
-        """
-        return self._models.get(namespace)
+    async def get_model(self, org_id: str, model_id: str) -> Optional[LoadedModel]:
+        """Retrieve a loaded model by (org_id, model_id)."""
+        return self._models.get((org_id, model_id))
     
     async def list_models(self) -> List[ModelInfoResponse]:
-        """
-        List all currently loaded models.
-        
-        Returns:
-            List of ModelInfoResponse
-        """
+        """List all currently loaded models."""
         models = []
-        for namespace, loaded_model in self._models.items():
+        for (org_id, model_id), loaded_model in self._models.items():
             models.append(ModelInfoResponse(
-                model_id=namespace,
+                org_id=org_id,
+                model_id=model_id,
                 name=loaded_model.sdk_model.name,
                 version=loaded_model.sdk_model.version,
                 deployed_at=loaded_model.loaded_at,
@@ -530,32 +442,19 @@ class ModelManager:
         return models
     
     async def validate_compatibility(self, sdk_model: Any) -> Dict[str, Any]:
-        """
-        Validate model compatibility with current SDK version.
-        
-        Args:
-            sdk_model: GlyphhModel instance
-            
-        Returns:
-            Dict with 'compatible' bool and 'errors' list
-        """
+        """Validate model compatibility with current SDK version."""
         errors = []
         sdk_version = await self._get_sdk_version()
         
-        # Check model has required attributes
         if not hasattr(sdk_model, 'version'):
             errors.append("Model missing version attribute")
         
         if not hasattr(sdk_model, 'encoder_config'):
             errors.append("Model missing encoder_config")
         
-        # Validate model completeness
         if hasattr(sdk_model, 'validate_completeness'):
             validation_errors = sdk_model.validate_completeness()
             errors.extend(validation_errors)
-        
-        # Version compatibility check (basic - could be more sophisticated)
-        # For now, we accept all versions
         
         return {
             "compatible": len(errors) == 0,
@@ -563,51 +462,39 @@ class ModelManager:
             "model_version": getattr(sdk_model, 'version', 'unknown'),
             "sdk_version": sdk_version,
         }
-
     
     async def update_config(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         config_update: ModelConfigUpdate,
     ) -> ModelConfigResponse:
-        """
-        Update model configuration (weights, beam params) without re-encoding.
-        
-        Args:
-            namespace: Namespace of model to update
-            config_update: Configuration updates to apply
-            
-        Returns:
-            Updated ModelConfigResponse
-            
-        Raises:
-            ModelNotFoundException: If model not found
-        """
-        if namespace not in self._models:
-            raise ModelNotFoundException(namespace)
+        """Update model configuration (weights, beam params) without re-encoding."""
+        key = (org_id, model_id)
+        if key not in self._models:
+            raise ModelNotFoundException(org_id, model_id)
         
         async with self._db_session_factory() as session:
-            # Get current config
             result = await session.execute(
-                select(ModelConfig).where(ModelConfig.namespace == namespace)
+                select(ModelConfig).where(
+                    ModelConfig.org_id == org_id,
+                    ModelConfig.model_id == model_id,
+                )
             )
             config = result.scalar_one_or_none()
             
             if config is None:
-                raise NamespaceNotFoundException(namespace)
+                raise ModelNotFoundException(org_id, model_id)
             
-            # Update similarity weights if provided
             if config_update.similarity_weights:
                 current_weights = config.similarity_weights or {}
                 weights_dict = config_update.similarity_weights.model_dump(exclude_none=True)
                 current_weights.update(weights_dict)
                 config.similarity_weights = current_weights
             
-            # Update beam width if provided
             if config_update.beam_width is not None:
                 config.beam_width = config_update.beam_width
             
-            # Update max tree depth if provided
             if config_update.max_tree_depth is not None:
                 config.max_tree_depth = config_update.max_tree_depth
             
@@ -615,10 +502,11 @@ class ModelManager:
             await session.commit()
             await session.refresh(config)
             
-            logger.info(f"Updated config for namespace '{namespace}'")
+            logger.info(f"Updated config for org={org_id}, model={model_id}")
             
             return ModelConfigResponse(
-                namespace=config.namespace,
+                org_id=config.org_id,
+                model_id=config.model_id,
                 similarity_weights=config.similarity_weights,
                 beam_width=config.beam_width,
                 max_tree_depth=config.max_tree_depth,
@@ -627,53 +515,33 @@ class ModelManager:
                 updated_at=config.updated_at,
             )
     
-    async def re_encode_namespace(
+    async def re_encode_model(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         regenerate_edges: bool = True,
         background: bool = True,
     ) -> ReEncodeResponse:
-        """
-        Re-encode all glyphs in a namespace with the current encoder.
+        """Re-encode all glyphs for an org/model with the current encoder."""
+        key = (org_id, model_id)
+        if key not in self._models:
+            raise ModelNotFoundException(org_id, model_id)
         
-        Args:
-            namespace: Namespace to re-encode
-            regenerate_edges: Whether to regenerate edges after re-encoding
-            background: Whether to run as background job
-            
-        Returns:
-            ReEncodeResponse with job status
-            
-        Raises:
-            ModelNotFoundException: If model not found
-        """
-        if namespace not in self._models:
-            raise ModelNotFoundException(namespace)
-        
-        loaded_model = self._models[namespace]
+        loaded_model = self._models[key]
         
         if background:
-            # Create background job
             job_id = str(uuid4())
-            job = ReEncodeJob(job_id, namespace)
+            job = ReEncodeJob(job_id, org_id, model_id)
             self._re_encode_jobs[job_id] = job
             
-            # Start background task
             asyncio.create_task(
                 self._run_re_encode(job, loaded_model, regenerate_edges)
             )
             
-            return ReEncodeResponse(
-                status="started",
-                job_id=job_id,
-            )
+            return ReEncodeResponse(status="started", job_id=job_id)
         else:
-            # Run synchronously
-            result = await self._run_re_encode_sync(
-                loaded_model, regenerate_edges
-            )
-            return result
-    
+            return await self._run_re_encode_sync(loaded_model, regenerate_edges)
+
     async def _run_re_encode(
         self,
         job: ReEncodeJob,
@@ -686,22 +554,21 @@ class ModelManager:
                 job.status = "running"
                 
                 async with self._db_session_factory() as session:
-                    # Count total glyphs
                     result = await session.execute(
-                        select(Glyph).where(Glyph.namespace == loaded_model.namespace)
+                        select(Glyph).where(
+                            Glyph.org_id == loaded_model.org_id,
+                            Glyph.model_id == loaded_model.model_id,
+                        )
                     )
                     glyphs = result.scalars().all()
                     job.glyphs_total = len(glyphs)
                     
-                    # Re-encode each glyph
                     for i, glyph in enumerate(glyphs):
-                        # Re-encode using SDK encoder
                         new_embedding = await self._encode_concept(
                             loaded_model.encoder,
                             glyph.concept_text,
                         )
                         
-                        # Update glyph embedding
                         await session.execute(
                             update(Glyph)
                             .where(Glyph.id == glyph.id)
@@ -716,17 +583,16 @@ class ModelManager:
                     
                     await session.commit()
                 
-                # Regenerate edges if requested
                 if regenerate_edges:
                     job.edges_regenerated = await self._regenerate_edges(
-                        loaded_model.namespace
+                        loaded_model.org_id, loaded_model.model_id
                     )
                 
                 job.status = "completed"
                 job.completed_at = datetime.utcnow()
                 
                 logger.info(
-                    f"Re-encode completed for namespace '{loaded_model.namespace}': "
+                    f"Re-encode completed for org={loaded_model.org_id}, model={loaded_model.model_id}: "
                     f"{job.glyphs_processed} glyphs, {job.edges_regenerated} edges"
                 )
                 
@@ -734,7 +600,7 @@ class ModelManager:
             job.status = "failed"
             job.error = str(e)
             job.completed_at = datetime.utcnow()
-            logger.error(f"Re-encode failed for namespace '{loaded_model.namespace}': {e}")
+            logger.error(f"Re-encode failed for org={loaded_model.org_id}, model={loaded_model.model_id}: {e}")
     
     async def _run_re_encode_sync(
         self,
@@ -749,13 +615,14 @@ class ModelManager:
             glyphs_processed = 0
             
             async with self._db_session_factory() as session:
-                # Get all glyphs
                 result = await session.execute(
-                    select(Glyph).where(Glyph.namespace == loaded_model.namespace)
+                    select(Glyph).where(
+                        Glyph.org_id == loaded_model.org_id,
+                        Glyph.model_id == loaded_model.model_id,
+                    )
                 )
                 glyphs = result.scalars().all()
                 
-                # Re-encode each glyph
                 for glyph in glyphs:
                     new_embedding = await self._encode_concept(
                         loaded_model.encoder,
@@ -774,11 +641,10 @@ class ModelManager:
                 
                 await session.commit()
             
-            # Regenerate edges if requested
             edges_regenerated = 0
             if regenerate_edges:
                 edges_regenerated = await self._regenerate_edges(
-                    loaded_model.namespace
+                    loaded_model.org_id, loaded_model.model_id
                 )
             
             duration_ms = (time.time() - start_time) * 1000
@@ -791,60 +657,37 @@ class ModelManager:
             )
     
     async def _encode_concept(self, encoder: Any, concept_text: str) -> List[float]:
-        """
-        Encode a concept text using the SDK encoder.
-        
-        Returns the global cortex embedding as a list of floats.
-        """
+        """Encode a concept text using the SDK encoder."""
         try:
             from glyphh import Concept
             
-            # Create concept from text
             concept = Concept(
                 name=concept_text,
                 attributes={"text": concept_text},
             )
-            
-            # Encode to glyph
             glyph = encoder.encode(concept)
-            
-            # Return global cortex as float list
             return glyph.global_cortex.data.astype(float).tolist()
             
         except Exception as e:
             logger.error(f"Failed to encode concept: {e}")
             raise
     
-    async def _regenerate_edges(self, namespace: str) -> int:
-        """
-        Regenerate all edges for a namespace.
-        
-        Returns the number of edges regenerated.
-        """
-        # Delete existing edges
+    async def _regenerate_edges(self, org_id: str, model_id: str) -> int:
+        """Regenerate all edges for an org/model."""
         async with self._db_session_factory() as session:
             await session.execute(
-                delete(Edge).where(Edge.namespace == namespace)
+                delete(Edge).where(
+                    Edge.org_id == org_id,
+                    Edge.model_id == model_id,
+                )
             )
             await session.commit()
         
-        # Edge generation will be handled by EdgeGeneratorService (Task 8)
-        # For now, return 0 as placeholder
+        # Edge generation handled by EdgeGeneratorService
         return 0
     
     async def get_re_encode_status(self, job_id: str) -> ReEncodeStatusResponse:
-        """
-        Get status of a re-encode job.
-        
-        Args:
-            job_id: Job ID to look up
-            
-        Returns:
-            ReEncodeStatusResponse
-            
-        Raises:
-            ValueError: If job not found
-        """
+        """Get status of a re-encode job."""
         job = self._re_encode_jobs.get(job_id)
         if job is None:
             raise ValueError(f"Re-encode job not found: {job_id}")
@@ -860,39 +703,35 @@ class ModelManager:
             error=job.error,
         )
     
-    async def clear_namespace_data(self, namespace: str) -> ClearDataResponse:
-        """
-        Clear all glyphs and edges in a namespace, preserving model config.
-        
-        Args:
-            namespace: Namespace to clear
-            
-        Returns:
-            ClearDataResponse with deletion counts
-            
-        Raises:
-            ModelNotFoundException: If model not found
-        """
-        if namespace not in self._models:
-            raise ModelNotFoundException(namespace)
+    async def clear_model_data(self, org_id: str, model_id: str) -> ClearDataResponse:
+        """Clear all glyphs and edges for an org/model, preserving config."""
+        key = (org_id, model_id)
+        if key not in self._models:
+            raise ModelNotFoundException(org_id, model_id)
         
         async with self._db_session_factory() as session:
-            # Delete edges first (foreign key constraint)
             edge_result = await session.execute(
-                delete(Edge).where(Edge.namespace == namespace)
+                delete(Edge).where(
+                    Edge.org_id == org_id,
+                    Edge.model_id == model_id,
+                )
             )
             edges_deleted = edge_result.rowcount
             
-            # Delete glyphs
             glyph_result = await session.execute(
-                delete(Glyph).where(Glyph.namespace == namespace)
+                delete(Glyph).where(
+                    Glyph.org_id == org_id,
+                    Glyph.model_id == model_id,
+                )
             )
             glyphs_deleted = glyph_result.rowcount
             
-            # Update resource usage in config
             await session.execute(
                 update(ModelConfig)
-                .where(ModelConfig.namespace == namespace)
+                .where(
+                    ModelConfig.org_id == org_id,
+                    ModelConfig.model_id == model_id,
+                )
                 .values(
                     resource_usage={"memory_mb": 0, "storage_gb": 0, "glyph_count": 0},
                     updated_at=datetime.utcnow(),
@@ -902,40 +741,34 @@ class ModelManager:
             await session.commit()
         
         logger.info(
-            f"Cleared namespace '{namespace}': "
+            f"Cleared data org={org_id}, model={model_id}: "
             f"{glyphs_deleted} glyphs, {edges_deleted} edges"
         )
         
         return ClearDataResponse(
-            namespace=namespace,
+            org_id=org_id,
+            model_id=model_id,
             glyphs_deleted=glyphs_deleted,
             edges_deleted=edges_deleted,
         )
     
-    async def get_config(self, namespace: str) -> ModelConfigResponse:
-        """
-        Get current model configuration.
-        
-        Args:
-            namespace: Namespace to get config for
-            
-        Returns:
-            ModelConfigResponse
-            
-        Raises:
-            NamespaceNotFoundException: If namespace not found
-        """
+    async def get_config(self, org_id: str, model_id: str) -> ModelConfigResponse:
+        """Get current model configuration."""
         async with self._db_session_factory() as session:
             result = await session.execute(
-                select(ModelConfig).where(ModelConfig.namespace == namespace)
+                select(ModelConfig).where(
+                    ModelConfig.org_id == org_id,
+                    ModelConfig.model_id == model_id,
+                )
             )
             config = result.scalar_one_or_none()
             
             if config is None:
-                raise NamespaceNotFoundException(namespace)
+                raise ModelNotFoundException(org_id, model_id)
             
             return ModelConfigResponse(
-                namespace=config.namespace,
+                org_id=config.org_id,
+                model_id=config.model_id,
                 similarity_weights=config.similarity_weights,
                 beam_width=config.beam_width,
                 max_tree_depth=config.max_tree_depth,
@@ -946,53 +779,44 @@ class ModelManager:
     
     async def check_quota(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         additional_glyphs: int = 0,
         additional_storage_mb: float = 0,
     ) -> bool:
-        """
-        Check if namespace has quota for additional resources.
-        
-        Args:
-            namespace: Namespace to check
-            additional_glyphs: Number of glyphs to add
-            additional_storage_mb: Storage to add in MB
-            
-        Returns:
-            True if within quota, False otherwise
-            
-        Raises:
-            NamespaceQuotaExceededException: If quota would be exceeded
-        """
+        """Check if org/model has quota for additional resources."""
         async with self._db_session_factory() as session:
             result = await session.execute(
-                select(ModelConfig).where(ModelConfig.namespace == namespace)
+                select(ModelConfig).where(
+                    ModelConfig.org_id == org_id,
+                    ModelConfig.model_id == model_id,
+                )
             )
             config = result.scalar_one_or_none()
             
             if config is None:
-                raise NamespaceNotFoundException(namespace)
+                raise ModelNotFoundException(org_id, model_id)
             
             quotas = config.resource_quotas or {}
             usage = config.resource_usage or {}
             
-            # Check glyph count
             max_glyphs = quotas.get("max_glyphs", 1000000)
             current_glyphs = usage.get("glyph_count", 0)
             if current_glyphs + additional_glyphs > max_glyphs:
-                raise NamespaceQuotaExceededException(
-                    namespace=namespace,
+                raise QuotaExceededException(
+                    org_id=org_id,
+                    model_id=model_id,
                     resource="max_glyphs",
                     limit=max_glyphs,
                     current=current_glyphs + additional_glyphs,
                 )
             
-            # Check storage
-            max_storage = quotas.get("storage_gb", 10) * 1024  # Convert to MB
+            max_storage = quotas.get("storage_gb", 10) * 1024
             current_storage = usage.get("storage_mb", 0)
             if current_storage + additional_storage_mb > max_storage:
-                raise NamespaceQuotaExceededException(
-                    namespace=namespace,
+                raise QuotaExceededException(
+                    org_id=org_id,
+                    model_id=model_id,
                     resource="storage_gb",
                     limit=quotas.get("storage_gb", 10),
                     current=(current_storage + additional_storage_mb) / 1024,
@@ -1000,8 +824,9 @@ class ModelManager:
             
             return True
     
-    def is_namespace_locked(self, namespace: str) -> bool:
-        """Check if namespace is locked (e.g., during re-encode)."""
-        if namespace not in self._models:
+    def is_model_locked(self, org_id: str, model_id: str) -> bool:
+        """Check if model is locked (e.g., during re-encode)."""
+        key = (org_id, model_id)
+        if key not in self._models:
             return False
-        return self._models[namespace].lock.locked()
+        return self._models[key].lock.locked()

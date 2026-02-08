@@ -33,7 +33,6 @@ from domains.models.schemas import (
 )
 from shared.exceptions import (
     ModelNotFoundException,
-    NamespaceNotFoundException,
     ValidationException,
 )
 from shared.similarity_service import SimilarityService
@@ -45,7 +44,7 @@ logger = logging.getLogger(__name__)
 class Permissions:
     """User permissions for query filtering."""
     user_id: str
-    namespaces: List[str]
+    org_ids: List[str]
     security_level: float = 1.0  # 0-1, higher = more access
 
 
@@ -96,7 +95,8 @@ class QueryService:
     
     async def similarity_search(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         request: SimilaritySearchRequest,
         permissions: Optional[Permissions] = None,
     ) -> SimilaritySearchResponse:
@@ -104,21 +104,13 @@ class QueryService:
         Search for similar glyphs with weighted similarity and security filtering.
         
         Uses SimilarityService for consistent similarity calculations.
-        
-        Args:
-            namespace: Model namespace
-            request: Search request with query and parameters
-            permissions: User permissions for filtering
-            
-        Returns:
-            SimilaritySearchResponse with ranked results
         """
         start_time = time.time()
         
         # Get loaded model
-        loaded_model = await self._model_manager.get_model(namespace)
+        loaded_model = await self._model_manager.get_model(org_id, model_id)
         if loaded_model is None:
-            raise ModelNotFoundException(namespace)
+            raise ModelNotFoundException(org_id, model_id)
         
         # Get similarity service for this model
         similarity_service = self._get_similarity_service(loaded_model)
@@ -130,7 +122,7 @@ class QueryService:
         )
         
         # Get model config for weights
-        config = await self._model_manager.get_config(namespace)
+        config = await self._model_manager.get_config(org_id, model_id)
         similarity_weights = config.similarity_weights
         
         async with self._session_factory() as session:
@@ -138,7 +130,8 @@ class QueryService:
             
             # Get all glyphs for similarity computation
             raw_results = await storage.get_glyphs_with_embeddings(
-                namespace=namespace,
+                org_id=org_id,
+                model_id=model_id,
                 filters=request.filters,
             )
             
@@ -191,30 +184,19 @@ class QueryService:
     
     async def generate_fact_tree(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         request: FactTreeRequest,
         permissions: Optional[Permissions] = None,
     ) -> FactTreeResponse:
-        """
-        Generate an explainable verification report with citations.
-        
-        Args:
-            namespace: Model namespace
-            request: Fact tree request with claim and parameters
-            permissions: User permissions for filtering
-            
-        Returns:
-            FactTreeResponse with hierarchical tree
-        """
+        """Generate an explainable verification report with citations."""
         start_time = time.time()
         
-        # Get loaded model
-        loaded_model = await self._model_manager.get_model(namespace)
+        loaded_model = await self._model_manager.get_model(org_id, model_id)
         if loaded_model is None:
-            raise ModelNotFoundException(namespace)
+            raise ModelNotFoundException(org_id, model_id)
         
-        # Get model config
-        config = await self._model_manager.get_config(namespace)
+        config = await self._model_manager.get_config(org_id, model_id)
         max_depth = min(request.max_depth, config.max_tree_depth)
         
         # Build fact tree using SDK's FactTreeBuilder
@@ -224,7 +206,8 @@ class QueryService:
             # Use SDK fact tree builder if available
             fact_tree = await self._build_fact_tree_with_sdk(
                 loaded_model,
-                namespace,
+                org_id,
+                model_id,
                 request.claim,
                 max_depth,
                 request.branching_factor,
@@ -234,7 +217,8 @@ class QueryService:
             # Fallback to simple implementation
             fact_tree = await self._build_fact_tree_simple(
                 loaded_model,
-                namespace,
+                org_id,
+                model_id,
                 request.claim,
                 max_depth,
                 request.branching_factor,
@@ -253,30 +237,19 @@ class QueryService:
     
     async def predict_temporal(
         self,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         request: TemporalPredictRequest,
         permissions: Optional[Permissions] = None,
     ) -> TemporalPredictResponse:
-        """
-        Predict future states using beam search over temporal edges.
-        
-        Args:
-            namespace: Model namespace
-            request: Prediction request with current state and parameters
-            permissions: User permissions for filtering
-            
-        Returns:
-            TemporalPredictResponse with predicted states
-        """
+        """Predict future states using beam search over temporal edges."""
         start_time = time.time()
         
-        # Get loaded model
-        loaded_model = await self._model_manager.get_model(namespace)
+        loaded_model = await self._model_manager.get_model(org_id, model_id)
         if loaded_model is None:
-            raise ModelNotFoundException(namespace)
+            raise ModelNotFoundException(org_id, model_id)
         
-        # Get model config
-        config = await self._model_manager.get_config(namespace)
+        config = await self._model_manager.get_config(org_id, model_id)
         beam_width = min(request.beam_width, config.beam_width)
         
         # Encode current state concepts
@@ -291,7 +264,8 @@ class QueryService:
             
             predictions = await self._predict_with_sdk(
                 loaded_model,
-                namespace,
+                org_id,
+                model_id,
                 state_embeddings,
                 request.steps_ahead,
                 beam_width,
@@ -302,7 +276,8 @@ class QueryService:
             # Fallback to simple implementation
             predictions = await self._predict_simple(
                 loaded_model,
-                namespace,
+                org_id,
+                model_id,
                 state_embeddings,
                 request.steps_ahead,
                 beam_width,
@@ -351,15 +326,13 @@ class QueryService:
         Returns 0 if user has no access, 1 if full access.
         """
         if permissions is None:
-            # No permissions = full access (for local mode)
             return 1.0
         
-        # Check namespace access
-        if glyph.namespace not in permissions.namespaces:
+        # Check org access
+        if glyph.org_id not in permissions.org_ids:
             return 0.0
         
-        # Check security level in metadata
-        glyph_security = glyph.glyph_metadata.get("security_level", 0.0)
+        glyph_security = glyph.metadata.get("security_level", 0.0)
         if permissions.security_level < glyph_security:
             return 0.0
         
@@ -369,34 +342,25 @@ class QueryService:
     async def _build_fact_tree_simple(
         self,
         loaded_model: Any,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         claim: str,
         max_depth: int,
         branching_factor: int,
         permissions: Optional[Permissions],
     ) -> Dict[str, Any]:
-        """
-        Build a simple fact tree without SDK.
-        
-        This is a fallback implementation that uses similarity search
-        to find supporting evidence.
-        """
+        """Build a simple fact tree using similarity search."""
         nodes = []
         citations = []
-        
-        # Create root node
         root_id = "root"
         
-        # Find supporting glyphs for the claim
         async with self._session_factory() as session:
             storage = GlyphStorage(session)
-            
-            # Encode claim
             claim_embedding = await self._encode_query(loaded_model.encoder, claim)
             
-            # Search for supporting evidence
             results = await storage.similarity_search(
-                namespace=namespace,
+                org_id=org_id,
+                model_id=model_id,
                 query_embedding=claim_embedding,
                 top_k=branching_factor,
             )
@@ -441,59 +405,45 @@ class QueryService:
     async def _build_fact_tree_with_sdk(
         self,
         loaded_model: Any,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         claim: str,
         max_depth: int,
         branching_factor: int,
         permissions: Optional[Permissions],
     ) -> Dict[str, Any]:
-        """
-        Build fact tree using SDK's FactTreeBuilder.
-        """
-        # For now, use simple implementation
-        # TODO: Integrate with SDK FactTreeBuilder when available
+        """Build fact tree using SDK's FactTreeBuilder."""
         return await self._build_fact_tree_simple(
-            loaded_model,
-            namespace,
-            claim,
-            max_depth,
-            branching_factor,
-            permissions,
+            loaded_model, org_id, model_id, claim, max_depth, branching_factor, permissions,
         )
     
     async def _predict_simple(
         self,
         loaded_model: Any,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         state_embeddings: List[List[float]],
         steps_ahead: int,
         beam_width: int,
         direction: str,
         permissions: Optional[Permissions],
     ) -> List[PredictedState]:
-        """
-        Simple temporal prediction without SDK.
-        
-        Uses similarity search to find temporally related glyphs.
-        """
+        """Simple temporal prediction using similarity search."""
         predictions = []
         
         async with self._session_factory() as session:
             storage = GlyphStorage(session)
             
-            # For each state embedding, find similar glyphs
-            # and look for temporal edges
             for step in range(steps_ahead):
-                # Use average of state embeddings as query
                 if state_embeddings:
                     import numpy as np
                     avg_embedding = np.mean(state_embeddings, axis=0).tolist()
                 else:
                     continue
                 
-                # Find similar glyphs
                 results = await storage.similarity_search(
-                    namespace=namespace,
+                    org_id=org_id,
+                    model_id=model_id,
                     query_embedding=avg_embedding,
                     top_k=beam_width,
                 )
@@ -513,10 +463,10 @@ class QueryService:
                         state_glyphs.append(glyph_response.id)
                         path_score += similarity
                         
-                        # Look for temporal edges
                         edge_type = "follows" if direction == "forward" else "precedes"
                         edges = await storage.get_edges(
-                            namespace=namespace,
+                            org_id=org_id,
+                            model_id=model_id,
                             glyph_id=glyph_response.id,
                             edge_type=edge_type,
                             direction="outgoing",
@@ -543,24 +493,16 @@ class QueryService:
     async def _predict_with_sdk(
         self,
         loaded_model: Any,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         state_embeddings: List[List[float]],
         steps_ahead: int,
         beam_width: int,
         direction: str,
         permissions: Optional[Permissions],
     ) -> List[PredictedState]:
-        """
-        Temporal prediction using SDK's BeamSearchPredictor.
-        """
-        # For now, use simple implementation
-        # TODO: Integrate with SDK BeamSearchPredictor when available
+        """Temporal prediction using SDK's BeamSearchPredictor."""
         return await self._predict_simple(
-            loaded_model,
-            namespace,
-            state_embeddings,
-            steps_ahead,
-            beam_width,
-            direction,
-            permissions,
+            loaded_model, org_id, model_id, state_embeddings,
+            steps_ahead, beam_width, direction, permissions,
         )

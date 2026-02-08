@@ -2,6 +2,7 @@
 Deployment API Routes for Glyphh Runtime.
 
 CLI-facing endpoints for model deployment and management.
+All models identified by (org_id, model_id) — no namespace concept.
 """
 
 import logging
@@ -32,9 +33,8 @@ class ModelConfigUpdate(BaseModel):
 
 class DeployResponse(BaseModel):
     """Deployment response."""
-    namespace: str
+    org_id: str
     model_id: str
-    org_id: Optional[str] = None
     mcp_endpoint: str
     listener_endpoint: str
     status: str = "deployed"
@@ -51,24 +51,19 @@ class StatusResponse(BaseModel):
 
 # Dependency injection
 async def get_model_manager() -> ModelManager:
-    """Get model manager from app state."""
     from main import model_manager
     return model_manager
 
 
 async def get_auth_service() -> AuthService:
-    """Get auth service."""
     return AuthService()
 
 
 async def get_current_user(
     auth_service: AuthService = Depends(get_auth_service),
 ) -> Optional[User]:
-    """Get current user (optional in local mode)."""
     if settings.deployment_mode == "local":
         return None
-    # In production, extract token from header and validate
-    # For now, return None (will be implemented with middleware)
     return None
 
 
@@ -76,47 +71,31 @@ async def get_current_user(
 @router.post("/deploy", response_model=DeployResponse)
 async def deploy_model(
     file: UploadFile = File(..., description="The .glyphh model file"),
-    namespace: Optional[str] = Query(None, description="Namespace to assign (e.g. org_id/model_id). Generated from filename if not provided."),
+    org_id: str = Query(..., description="Organization ID"),
+    model_id: str = Query(..., description="Model ID"),
     manager: ModelManager = Depends(get_model_manager),
 ) -> DeployResponse:
     """
     Deploy a .glyphh model file.
     
     Accepts a binary .glyphh file and deploys it to the runtime.
-    Optionally accepts a namespace query param for org-scoped deployments.
-    Returns the namespace and endpoint URLs for accessing the model.
+    Requires org_id and model_id as separate query params.
     """
     if not file.filename.endswith(".glyphh"):
-        raise HTTPException(
-            status_code=400,
-            detail="File must have .glyphh extension"
-        )
+        raise HTTPException(status_code=400, detail="File must have .glyphh extension")
     
-    # Read file content
     content = await file.read()
     
-    # Use provided namespace or generate from filename
-    if namespace is None:
-        namespace = file.filename.replace(".glyphh", "")
-    
     try:
-        # Load model
-        model_info = await manager.load_model_from_bytes(content, namespace)
+        model_info = await manager.load_model_from_bytes(content, org_id, model_id)
         
-        # Build endpoint URLs
         base_url = f"{settings.host}:{settings.port}"
         
-        # Extract org_id if namespace is org-scoped (org_id/model_id)
-        org_id = None
-        if "/" in namespace:
-            org_id = namespace.split("/")[0]
-        
         return DeployResponse(
-            namespace=namespace,
-            model_id=namespace,
             org_id=org_id,
-            mcp_endpoint=f"http://{base_url}/{namespace}/mcp",
-            listener_endpoint=f"http://{base_url}/{namespace}/listener",
+            model_id=model_id,
+            mcp_endpoint=f"http://{base_url}/{org_id}/{model_id}/mcp",
+            listener_endpoint=f"http://{base_url}/{org_id}/{model_id}/listener",
         )
     except Exception as e:
         logger.error(f"Failed to deploy model: {e}")
@@ -127,11 +106,7 @@ async def deploy_model(
 async def get_status(
     manager: ModelManager = Depends(get_model_manager),
 ) -> StatusResponse:
-    """
-    Get runtime status.
-    
-    Returns version, loaded models count, uptime, and deployment mode.
-    """
+    """Get runtime status."""
     from main import _start_time
     
     uptime = datetime.utcnow() - _start_time
@@ -149,155 +124,113 @@ async def get_status(
 async def list_models(
     manager: ModelManager = Depends(get_model_manager),
 ) -> Dict[str, Any]:
-    """
-    List all deployed models.
-    
-    Returns an array of model info objects.
-    """
+    """List all deployed models."""
     models = await manager.list_models()
     return {"models": [m.model_dump() for m in models]}
 
 
-@router.delete("/models/{model_id:path}")
+@router.delete("/models/{org_id}/{model_id}")
 async def delete_model(
+    org_id: str,
     model_id: str,
     delete_data: bool = Query(True, description="Also delete glyphs and edges"),
     manager: ModelManager = Depends(get_model_manager),
 ) -> Dict[str, str]:
-    """
-    Remove a deployed model.
-    
-    Unloads the model and optionally deletes all associated data.
-    model_id can be a simple name or an org-scoped path like org_id/model_id.
-    """
+    """Remove a deployed model identified by org_id and model_id."""
     try:
-        await manager.unload_model(model_id, delete_data=delete_data)
-        return {"status": "deleted", "model_id": model_id}
+        await manager.unload_model(org_id, model_id, delete_data=delete_data)
+        return {"status": "deleted", "org_id": org_id, "model_id": model_id}
     except ModelNotFoundException:
-        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
+        raise HTTPException(status_code=404, detail=f"Model not found: org={org_id}, model={model_id}")
 
 
-@router.patch("/models/{model_id:path}/config")
+@router.patch("/models/{org_id}/{model_id}/config")
 async def update_model_config(
+    org_id: str,
     model_id: str,
     config: ModelConfigUpdate,
     manager: ModelManager = Depends(get_model_manager),
 ) -> Dict[str, Any]:
-    """
-    Update model configuration.
-    
-    Updates similarity weights, beam width, or max tree depth.
-    Changes take effect immediately without re-encoding.
-    """
+    """Update model configuration (weights, beam width, max tree depth)."""
     try:
         await manager.update_config(
-            namespace=model_id,
+            org_id=org_id,
+            model_id=model_id,
             similarity_weights=config.similarity_weights,
             beam_width=config.beam_width,
             max_tree_depth=config.max_tree_depth,
         )
-        return {"status": "updated", "model_id": model_id}
+        return {"status": "updated", "org_id": org_id, "model_id": model_id}
     except ModelNotFoundException:
-        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
+        raise HTTPException(status_code=404, detail=f"Model not found: org={org_id}, model={model_id}")
 
 
-@router.post("/models/{model_id:path}/re-encode")
+@router.post("/models/{org_id}/{model_id}/re-encode")
 async def re_encode_model(
+    org_id: str,
     model_id: str,
     manager: ModelManager = Depends(get_model_manager),
 ) -> Dict[str, str]:
-    """
-    Re-encode all glyphs in a model.
-    
-    Triggers re-encoding of all glyphs using the current encoder.
-    This is a long-running operation for large models.
-    """
+    """Re-encode all glyphs in a model."""
     try:
-        await manager.re_encode_namespace(model_id)
-        return {"status": "re-encoding", "model_id": model_id}
+        await manager.re_encode_model(org_id, model_id)
+        return {"status": "re-encoding", "org_id": org_id, "model_id": model_id}
     except ModelNotFoundException:
-        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
+        raise HTTPException(status_code=404, detail=f"Model not found: org={org_id}, model={model_id}")
 
 
-@router.delete("/models/{model_id:path}/data")
+@router.delete("/models/{org_id}/{model_id}/data")
 async def clear_model_data(
+    org_id: str,
     model_id: str,
     manager: ModelManager = Depends(get_model_manager),
 ) -> Dict[str, Any]:
-    """
-    Clear all glyphs and edges for a model.
-    
-    Preserves the model configuration but removes all data.
-    """
+    """Clear all glyphs and edges for a model, preserving config."""
     try:
-        result = await manager.clear_namespace_data(model_id)
+        result = await manager.clear_model_data(org_id, model_id)
         return {
             "status": "cleared",
+            "org_id": org_id,
             "model_id": model_id,
-            "glyphs_deleted": result.get("glyphs_deleted", 0),
-            "edges_deleted": result.get("edges_deleted", 0),
+            "glyphs_deleted": result.glyphs_deleted,
+            "edges_deleted": result.edges_deleted,
         }
     except ModelNotFoundException:
-        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
+        raise HTTPException(status_code=404, detail=f"Model not found: org={org_id}, model={model_id}")
 
 
 @router.get("/logs")
 async def get_logs(
     lines: int = Query(100, ge=1, le=1000, description="Number of log lines"),
 ) -> Dict[str, Any]:
-    """
-    Get runtime logs.
-    
-    Returns the most recent log lines.
-    """
-    # TODO: Implement actual log retrieval
-    return {
-        "logs": [],
-        "lines_requested": lines,
-        "message": "Log retrieval not yet implemented"
-    }
+    return {"logs": [], "lines_requested": lines, "message": "Log retrieval not yet implemented"}
 
 
 @router.get("/tokens")
 async def list_tokens() -> Dict[str, List[Dict[str, Any]]]:
-    """
-    List webhook tokens.
-    
-    Returns all active webhook tokens.
-    """
-    # TODO: Implement token listing from database
     return {"tokens": []}
 
 
 @router.delete("/tokens/{token_id}")
 async def revoke_token(token_id: str) -> Dict[str, str]:
-    """
-    Revoke a webhook token.
-    
-    Marks the token as revoked, preventing further use.
-    """
-    # TODO: Implement token revocation
     return {"status": "revoked", "token_id": token_id}
 
 
-@router.get("/models/{model_id:path}/metadata", response_model=ModelMetadataResponse)
+@router.get("/models/{org_id}/{model_id}/metadata", response_model=ModelMetadataResponse)
 async def get_model_metadata(
+    org_id: str,
     model_id: str,
     manager: ModelManager = Depends(get_model_manager),
 ) -> ModelMetadataResponse:
-    """
-    Get model metadata for marketplace display.
-    
-    Returns meta_name, short_description, and long_description
-    for rendering in the Studio marketplace.
-    """
+    """Get model metadata for marketplace display."""
     try:
-        loaded_model = await manager.get_model(model_id)
+        loaded_model = await manager.get_model(org_id, model_id)
         if loaded_model is None:
-            raise ModelNotFoundException(model_id)
+            raise ModelNotFoundException(org_id, model_id)
         
         return ModelMetadataResponse(
-            namespace=model_id,
+            org_id=org_id,
+            model_id=model_id,
             meta_name=loaded_model.meta_name,
             short_description=loaded_model.short_description,
             long_description=loaded_model.long_description,
@@ -305,4 +238,4 @@ async def get_model_metadata(
             sdk_version=await manager._get_sdk_version(),
         )
     except ModelNotFoundException:
-        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
+        raise HTTPException(status_code=404, detail=f"Model not found: org={org_id}, model={model_id}")

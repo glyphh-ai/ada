@@ -97,9 +97,13 @@ class MCPServer:
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "namespace": {
+                        "org_id": {
                             "type": "string",
-                            "description": "Model namespace to query"
+                            "description": "Organization ID"
+                        },
+                        "model_id": {
+                            "type": "string",
+                            "description": "Model ID"
                         },
                         "query": {
                             "type": "string",
@@ -111,7 +115,7 @@ class MCPServer:
                             "default": False
                         }
                     },
-                    "required": ["namespace", "query"]
+                    "required": ["org_id", "model_id", "query"]
                 }
             ),
         }
@@ -146,10 +150,11 @@ class MCPServer:
             if validation_error:
                 return self._error_response(validation_error)
             
-            # Get namespace and check authorization
-            namespace = arguments.get("namespace")
-            if namespace:
-                await self._auth_service.check_namespace_access(user, namespace, "read")
+            # Get org_id/model_id and check authorization
+            org_id = arguments.get("org_id")
+            model_id = arguments.get("model_id")
+            if org_id:
+                await self._auth_service.check_access(user, org_id, model_id or "", "read")
             
             # Dispatch to handler
             handler = getattr(self, f"_handle_{tool_name}", None)
@@ -216,30 +221,27 @@ class MCPServer:
         user: User,
     ) -> Dict[str, Any]:
         """
-        Handle nl_query tool. Delegates entirely to NLQueryService
-        which handles rules matching, LLM fallback, and query execution.
+        Handle nl_query tool. Delegates entirely to NLQueryService.
         
         Requires the model to be loaded in the runtime — no fallbacks.
         """
         from domains.nl_query.service import NLQueryService
         from domains.nl_query.intent_matcher import IntentMatcher
-        from domains.models.manager import ModelManager
         from infrastructure.config import get_settings
         
         settings = get_settings()
-        namespace = arguments["namespace"]
+        org_id = arguments["org_id"]
+        model_id = arguments["model_id"]
         query = arguments["query"]
         debug = arguments.get("debug", False)
         
         # Verify model is loaded — fail early with clear error
-        loaded_model = await self._query_service._model_manager.get_model(namespace)
+        loaded_model = await self._query_service._model_manager.get_model(org_id, model_id)
         if loaded_model is None:
-            raise ModelNotFoundException(namespace)
+            raise ModelNotFoundException(org_id, model_id)
         
-        # Create intent matcher
         intent_matcher = IntentMatcher(confidence_threshold=0.85)
         
-        # Create LLM fallback if available
         llm_fallback = None
         try:
             from domains.nl_query.llm_fallback import LLMFallback
@@ -249,7 +251,6 @@ class MCPServer:
         except ImportError:
             pass
         
-        # Use NLQueryService - it handles the full flow
         nl_service = NLQueryService(
             query_service=self._query_service,
             intent_matcher=intent_matcher,
@@ -258,7 +259,8 @@ class MCPServer:
         )
         
         result = await nl_service.execute_nl_query(
-            namespace=namespace,
+            org_id=org_id,
+            model_id=model_id,
             query=query,
             debug=debug,
         )
@@ -272,7 +274,6 @@ class MCPServer:
             "translated_query": result.translated_query if debug else None,
         }
         
-        # Include error info when no match was found
         if result.match_method == "none":
             response["error"] = "No intent match found for query"
         

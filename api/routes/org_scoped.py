@@ -1,9 +1,10 @@
 """
 Org-Scoped API Routes for Glyphh Runtime (Cloud Mode).
 
-Endpoints scoped by organization ID and model ID for multi-tenant cloud deployments.
-The URL pattern /{org_id}/{model_id}/... ensures proper isolation between
-organizations and models.
+Endpoints scoped by org_id and model_id for multi-tenant cloud deployments.
+URL pattern: /{org_id}/{model_id}/...
+
+No namespace concept — org_id and model_id are passed directly to services.
 """
 
 import logging
@@ -26,15 +27,13 @@ router = APIRouter(prefix="/{org_id}/{model_id}", tags=["org-scoped"])
 settings = get_settings()
 
 
-# Request/Response Models for NL Query
+# Request/Response Models
 class NLQueryRequest(BaseModel):
-    """Natural language query request."""
     query: str = Field(..., description="Natural language query", min_length=1)
     debug: bool = Field(default=False, description="Include translation details")
 
 
 class NLQueryResponse(BaseModel):
-    """Natural language query response."""
     result: Any
     query_type: str
     match_method: str
@@ -44,26 +43,12 @@ class NLQueryResponse(BaseModel):
 
 
 class IntentsResponse(BaseModel):
-    """Available intents response."""
     intents: List[str]
     patterns: Dict[str, List[str]]
 
 
-def build_namespace(org_id: str, model_id: str) -> str:
-    """Build namespace from org_id and model_id.
-    
-    Format: {org_id}/{model_id}
-    
-    This matches the URL pattern and ensures:
-    - Multi-tenant isolation (different orgs can't access each other's data)
-    - Model-level isolation (each model has its own vector space)
-    """
-    return f"{org_id}/{model_id}"
-
-
 # Dependency injection
 async def get_auth_service() -> AuthService:
-    """Get auth service."""
     return AuthService()
 
 
@@ -72,20 +57,14 @@ async def validate_org_access(
     model_id: str,
     auth_service: AuthService = Depends(get_auth_service),
 ) -> User:
-    """
-    Validate that the user has access to the org and model.
-    
-    In cloud mode, extracts org_id from JWT claims and validates.
-    """
+    """Validate that the user has access to the org and model."""
     if settings.deployment_mode == "local":
-        # Local mode: allow all access
         return User(
             user_id="local",
-            namespaces={"*": {"read", "write", "admin"}},
+            org_permissions={"*": {"read", "write", "admin"}},
             org_id=org_id,
         )
     
-    # TODO: Extract token from request and validate org access
     raise HTTPException(
         status_code=501,
         detail="Org-scoped authentication not yet implemented"
@@ -103,7 +82,6 @@ async def get_mcp_server(
     if model_manager is None:
         raise HTTPException(status_code=503, detail="Model manager not initialized")
     
-    # QueryService expects (model_manager, session_factory)
     query_service = QueryService(model_manager, async_session_maker)
     auth_service = AuthService()
     
@@ -119,26 +97,21 @@ async def mcp_endpoint(
     mcp_server: MCPServer = Depends(get_mcp_server),
     user: User = Depends(validate_org_access),
 ) -> Dict[str, Any]:
-    """
-    MCP endpoint for org-scoped model access.
-    
-    Handles MCP tool calls with org-level authentication.
-    The namespace is automatically set to {org_id}_{model_id} for proper isolation.
-    """
+    """MCP endpoint for org-scoped model access."""
     tool_name = request.get("tool")
     arguments = request.get("arguments", {})
     
     if not tool_name:
         raise HTTPException(status_code=400, detail="Missing 'tool' field")
     
-    # Build namespace from org_id and model_id for proper isolation
-    arguments["namespace"] = build_namespace(org_id, model_id)
+    # Pass org_id and model_id directly — no namespace construction
+    arguments["org_id"] = org_id
+    arguments["model_id"] = model_id
     
-    # Handle tool call (using user's token for auth)
     response = await mcp_server.handle_tool_call(
         tool_name=tool_name,
         arguments=arguments,
-        auth_token="",  # Already validated via validate_org_access
+        auth_token="",
     )
     
     return response.to_dict()
@@ -150,36 +123,25 @@ async def list_mcp_tools(
     model_id: str,
     mcp_server: MCPServer = Depends(get_mcp_server),
 ) -> Dict[str, Any]:
-    """
-    List available MCP tools.
-    
-    Returns tool schemas for the model.
-    """
     return {"tools": mcp_server.get_tools_list()}
 
 
-# Listener Endpoint (WebSocket)
+# Listener Endpoints
 @router.websocket("/listener")
 async def listener_websocket(
     websocket: WebSocket,
     org_id: str,
     model_id: str,
 ):
-    """
-    WebSocket listener for real-time glyph ingestion.
-    
-    Accepts WebSocket connections for streaming glyph creation.
-    """
+    """WebSocket listener for real-time glyph ingestion."""
     await websocket.accept()
     
     try:
         while True:
             data = await websocket.receive_json()
-            
             message_type = data.get("type")
             
             if message_type == "create_glyph":
-                # TODO: Implement glyph creation via listener service
                 await websocket.send_json({
                     "type": "glyph_created",
                     "status": "not_implemented",
@@ -194,13 +156,12 @@ async def listener_websocket(
                 })
                 
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for {org_id}/{model_id}")
+        logger.info(f"WebSocket disconnected for org={org_id}, model={model_id}")
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         await websocket.close(code=1011, reason=str(e))
 
 
-# HTTP Listener Endpoint (batch ingestion)
 @router.post("/listener")
 async def listener_batch(
     org_id: str,
@@ -208,38 +169,28 @@ async def listener_batch(
     request: Dict[str, Any],
     user: User = Depends(validate_org_access),
 ) -> Dict[str, Any]:
-    """
-    HTTP endpoint for batch glyph ingestion.
-    
-    Accepts an array of concepts and creates glyphs in batch.
-    The namespace is automatically set to {org_id}_{model_id} for proper isolation.
-    """
+    """HTTP endpoint for batch glyph ingestion."""
     concepts = request.get("concepts", [])
     metadata = request.get("metadata", {})
     
     if not concepts:
         raise HTTPException(status_code=400, detail="No concepts provided")
     
-    # Build namespace for proper isolation
-    namespace = build_namespace(org_id, model_id)
-    
-    # TODO: Implement batch creation via listener service
     return {
         "status": "not_implemented",
         "message": "Batch listener not yet implemented",
-        "namespace": namespace,
+        "org_id": org_id,
+        "model_id": model_id,
         "concepts_received": len(concepts)
     }
 
 
-# Batch Glyph Creation Request
+# Batch Glyph Creation
 class BatchGlyphRequest(BaseModel):
-    """Request to create multiple glyphs."""
     concepts: List[str] = Field(..., description="List of concept texts to encode")
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="Shared metadata for all glyphs")
 
 
-# Batch Glyph Creation Endpoint
 @router.post("/glyphs/batch")
 async def create_glyphs_batch_org_scoped(
     org_id: str,
@@ -250,7 +201,6 @@ async def create_glyphs_batch_org_scoped(
     """
     Create multiple glyphs in a batch for an org-scoped model.
     
-    Encodes all concepts and stores them with the org/model namespace.
     Requires the model to be loaded in the runtime — no fallback encoders.
     """
     from main import model_manager
@@ -259,14 +209,12 @@ async def create_glyphs_batch_org_scoped(
     if model_manager is None:
         raise HTTPException(status_code=503, detail="Model manager not initialized")
     
-    namespace = build_namespace(org_id, model_id)
-    
     # Model must be loaded — no fallback
-    model = await model_manager.get_model(namespace)
+    model = await model_manager.get_model(org_id, model_id)
     if model is None:
         raise HTTPException(
             status_code=404,
-            detail=f"Model not found: {namespace}. Deploy the model to the runtime first."
+            detail=f"Model not found: org={org_id}, model={model_id}. Deploy the model to the runtime first."
         )
     
     encoder = model.encoder
@@ -277,13 +225,12 @@ async def create_glyphs_batch_org_scoped(
     
     for i, concept in enumerate(request.concepts):
         try:
-            # Encode the concept
             embedding = encoder.encode_text(concept)
             embedding_list = embedding.tolist() if hasattr(embedding, 'tolist') else list(embedding)
             
-            # Store the glyph
             result = await storage.create_glyph(
-                namespace=namespace,
+                org_id=org_id,
+                model_id=model_id,
                 concept_text=concept,
                 embedding=embedding_list,
                 metadata=request.metadata,
@@ -301,7 +248,7 @@ async def create_glyphs_batch_org_scoped(
                 "error": str(e)
             })
     
-    logger.info(f"Batch create for {namespace}: {len(results)} created, {len(errors)} failed")
+    logger.info(f"Batch create for org={org_id}, model={model_id}: {len(results)} created, {len(errors)} failed")
     
     return {
         "created": len(results),
@@ -329,7 +276,6 @@ def get_nl_query_service_for_org():
             detail="Natural language query is not enabled. Set ENABLE_NL_QUERY=true"
         )
     
-    # Try to extract NL encoder config from loaded model
     model_nl_config = None
     try:
         model = model_manager.get_current_model() if hasattr(model_manager, 'get_current_model') else None
@@ -340,14 +286,12 @@ def get_nl_query_service_for_org():
     except Exception as e:
         logger.warning(f"Failed to extract NL config from model: {e}")
     
-    # Create services
     query_service = QueryService(model_manager, async_session_maker)
     intent_matcher = IntentMatcher(
         confidence_threshold=0.85,
         model_nl_config=model_nl_config
     )
     
-    # Create LLM fallback if available
     llm_fallback = None
     try:
         from domains.nl_query.llm_fallback import LLMFallback
@@ -374,25 +318,16 @@ async def execute_nl_query(
     request: NLQueryRequest,
     user: User = Depends(validate_org_access),
 ) -> NLQueryResponse:
-    """
-    Execute a natural language query against the model.
-    
-    URL: POST /{org_id}/{model_id}/query
-    
-    Translates the query using rules-first approach with optional
-    LLM fallback, then executes the translated query.
-    
-    Returns 422 if translation fails and LLM is disabled.
-    """
+    """Execute a natural language query against the model."""
     service = get_nl_query_service_for_org()
-    namespace = build_namespace(org_id, model_id)
     
-    logger.info(f"NL query: org={org_id}, model={model_id}, namespace={namespace}, query='{request.query}'")
+    logger.info(f"NL query: org={org_id}, model={model_id}, query='{request.query}'")
     
     start_time = time.time()
     
     result = await service.execute_nl_query(
-        namespace=namespace,
+        org_id=org_id,
+        model_id=model_id,
         query=request.query,
         debug=request.debug,
     )
@@ -400,7 +335,6 @@ async def execute_nl_query(
     query_time_ms = (time.time() - start_time) * 1000
     
     if result.match_method == "none":
-        # Translation failed
         suggestions = [
             "Try rephrasing your query",
             "Use keywords like 'find', 'similar', 'verify', 'predict'",
@@ -434,13 +368,7 @@ async def get_intents(
     model_id: str,
     user: User = Depends(validate_org_access),
 ) -> IntentsResponse:
-    """
-    Get available intents and patterns for the model.
-    
-    URL: GET /{org_id}/{model_id}/intents
-    
-    Returns the list of supported query types and their pattern templates.
-    """
+    """Get available intents and patterns for the model."""
     service = get_nl_query_service_for_org()
     intents = service.get_intents()
     

@@ -3,11 +3,13 @@ Authentication Service for Glyphh Runtime.
 
 Handles JWT token validation, authorization checks, and security weight computation.
 Supports three deployment modes: local (no auth), self-hosted, and cloud.
+
+Permissions are keyed by org_id. No namespace concept.
 """
 
 import hashlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
@@ -27,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class Permission(str, Enum):
-    """Permission levels for namespace operations."""
+    """Permission levels for operations."""
     READ = "read"
     WRITE = "write"
     ADMIN = "admin"
@@ -35,69 +37,47 @@ class Permission(str, Enum):
 
 @dataclass
 class User:
-    """Authenticated user with permissions."""
+    """Authenticated user with org-scoped permissions."""
     user_id: str
-    namespaces: Dict[str, Set[Permission]]  # namespace -> permissions
+    org_permissions: Dict[str, Set[Permission]] = field(default_factory=dict)  # org_id -> permissions
     org_id: Optional[str] = None
     email: Optional[str] = None
     token_type: str = "jwt"  # jwt or webhook
     
-    def has_permission(self, namespace: str, permission: Permission) -> bool:
-        """Check if user has permission for namespace."""
-        if namespace not in self.namespaces:
+    def has_permission(self, org_id: str, permission: Permission) -> bool:
+        """Check if user has permission for org."""
+        # Wildcard grants access to all orgs
+        if "*" in self.org_permissions:
+            if permission in self.org_permissions["*"]:
+                return True
+        if org_id not in self.org_permissions:
             return False
-        return permission in self.namespaces[namespace]
+        return permission in self.org_permissions[org_id]
     
-    def can_read(self, namespace: str) -> bool:
-        """Check if user can read from namespace."""
-        return self.has_permission(namespace, Permission.READ)
+    def can_read(self, org_id: str) -> bool:
+        return self.has_permission(org_id, Permission.READ)
     
-    def can_write(self, namespace: str) -> bool:
-        """Check if user can write to namespace."""
-        return self.has_permission(namespace, Permission.WRITE)
+    def can_write(self, org_id: str) -> bool:
+        return self.has_permission(org_id, Permission.WRITE)
     
-    def is_admin(self, namespace: str) -> bool:
-        """Check if user is admin for namespace."""
-        return self.has_permission(namespace, Permission.ADMIN)
+    def is_admin(self, org_id: str) -> bool:
+        return self.has_permission(org_id, Permission.ADMIN)
 
 
 class AuthService:
     """
     Authentication and authorization service.
     
-    Responsibilities:
-    - Validate JWT tokens (deployment and consumer tokens)
-    - Validate webhook tokens
-    - Check namespace-level permissions
-    - Compute security weights for glyph filtering
+    Permissions are keyed by org_id. Access checks take org_id and model_id
+    as separate parameters.
     """
     
     def __init__(self, session: Optional[AsyncSession] = None):
-        """
-        Initialize AuthService.
-        
-        Args:
-            session: Optional database session for webhook token validation
-        """
         self._session = session
         self._settings = get_settings()
 
     async def validate_token(self, token: str) -> User:
-        """
-        Validate a token and return the authenticated user.
-        
-        Supports both JWT tokens and webhook tokens.
-        
-        Args:
-            token: Bearer token (JWT or webhook token)
-            
-        Returns:
-            Authenticated User object
-            
-        Raises:
-            AuthenticationException: If token is invalid or expired
-        """
-        # Local mode: skip authentication
+        """Validate a token and return the authenticated user."""
         if self._settings.deployment_mode == "local":
             logger.debug("Local mode: bypassing authentication")
             return self._create_local_user()
@@ -105,17 +85,16 @@ class AuthService:
         if not token:
             raise AuthenticationException("No token provided")
         
-        # Remove "Bearer " prefix if present
         if token.startswith("Bearer "):
             token = token[7:]
         
-        # Try JWT validation first
+        # Try JWT first
         try:
             return await self._validate_jwt_token(token)
         except jwt.InvalidTokenError:
             pass
         
-        # Try webhook token validation
+        # Try webhook token
         if self._session:
             try:
                 return await self._validate_webhook_token(token)
@@ -125,19 +104,7 @@ class AuthService:
         raise AuthenticationException("Invalid or expired token")
     
     async def _validate_jwt_token(self, token: str) -> User:
-        """
-        Validate a JWT token.
-        
-        Args:
-            token: JWT token string
-            
-        Returns:
-            Authenticated User object
-            
-        Raises:
-            jwt.InvalidTokenError: If token is invalid
-            AuthenticationException: If token is expired or malformed
-        """
+        """Validate a JWT token."""
         if not self._settings.jwt_secret_key:
             raise AuthenticationException("JWT authentication not configured")
         
@@ -152,42 +119,27 @@ class AuthService:
         except jwt.InvalidTokenError as e:
             raise AuthenticationException(f"Invalid token: {e}")
         
-        # Extract user info from payload
         user_id = payload.get("sub")
         if not user_id:
             raise AuthenticationException("Token missing 'sub' claim")
         
-        # Parse namespaces and permissions
-        namespaces = self._parse_namespace_permissions(payload)
+        org_permissions = self._parse_org_permissions(payload)
         
         return User(
             user_id=user_id,
-            namespaces=namespaces,
+            org_permissions=org_permissions,
             org_id=payload.get("org_id"),
             email=payload.get("email"),
             token_type="jwt",
         )
     
     async def _validate_webhook_token(self, token: str) -> User:
-        """
-        Validate a webhook token against the database.
-        
-        Args:
-            token: Webhook token string
-            
-        Returns:
-            Authenticated User object
-            
-        Raises:
-            AuthenticationException: If token is invalid or revoked
-        """
+        """Validate a webhook token against the database."""
         if not self._session:
             raise AuthenticationException("Webhook token validation not available")
         
-        # Hash the token for lookup
         token_hash = self._hash_token(token)
         
-        # Look up token in database
         result = await self._session.execute(
             select(Token).where(
                 Token.token_hash == token_hash,
@@ -199,116 +151,88 @@ class AuthService:
         if not db_token:
             raise AuthenticationException("Invalid webhook token")
         
-        # Check expiration
         if db_token.expires_at and db_token.expires_at < datetime.utcnow():
             raise AuthenticationException("Webhook token has expired")
         
-        # Build permissions from token
         permissions = {Permission(p) for p in db_token.permissions}
         
-        # If token is namespace-scoped, only grant access to that namespace
-        if db_token.namespace:
-            namespaces = {db_token.namespace: permissions}
+        # Token is scoped to org_id (required) and optionally model_id
+        if db_token.org_id:
+            org_permissions = {db_token.org_id: permissions}
         else:
-            # Global token - grant access to all namespaces
-            namespaces = {"*": permissions}
+            # Global token
+            org_permissions = {"*": permissions}
         
         return User(
             user_id=f"webhook:{db_token.id}",
-            namespaces=namespaces,
+            org_permissions=org_permissions,
+            org_id=db_token.org_id,
             token_type="webhook",
         )
     
-    def _parse_namespace_permissions(
+    def _parse_org_permissions(
         self,
         payload: Dict[str, Any]
     ) -> Dict[str, Set[Permission]]:
         """
-        Parse namespace permissions from JWT payload.
+        Parse org permissions from JWT payload.
         
-        Expected payload format:
-        {
-            "namespaces": ["ns1", "ns2"],
-            "permissions": {
-                "ns1": ["read", "write"],
-                "ns2": ["read"]
-            }
-        }
-        
-        Or simplified format:
-        {
-            "namespace": "ns1",
-            "permissions": ["read", "write"]
-        }
-        
-        Args:
-            payload: JWT payload dict
-            
-        Returns:
-            Dict mapping namespace to set of permissions
+        Supports formats:
+        - {"org_id": "abc", "permissions": ["read", "write"]}
+        - {"orgs": ["abc", "def"], "permissions": {"abc": ["read"], "def": ["write"]}}
+        - {"permissions": ["read"]}  (global)
         """
-        namespaces: Dict[str, Set[Permission]] = {}
+        org_permissions: Dict[str, Set[Permission]] = {}
         
-        # Check for simplified single-namespace format
-        if "namespace" in payload and isinstance(payload.get("permissions"), list):
-            ns = payload["namespace"]
+        # Single org format
+        if "org_id" in payload and isinstance(payload.get("permissions"), list):
+            org = payload["org_id"]
             perms = {Permission(p) for p in payload["permissions"] if p in Permission.__members__.values()}
-            namespaces[ns] = perms
-            return namespaces
+            org_permissions[org] = perms
+            return org_permissions
         
-        # Check for multi-namespace format
-        ns_list = payload.get("namespaces", [])
+        # Multi-org format
+        org_list = payload.get("orgs", [])
         perm_dict = payload.get("permissions", {})
         
-        for ns in ns_list:
-            if ns in perm_dict:
-                perms = {Permission(p) for p in perm_dict[ns] if p in Permission.__members__.values()}
+        for org in org_list:
+            if org in perm_dict:
+                perms = {Permission(p) for p in perm_dict[org] if p in Permission.__members__.values()}
             else:
-                # Default to read-only if namespace listed but no permissions specified
                 perms = {Permission.READ}
-            namespaces[ns] = perms
+            org_permissions[org] = perms
         
-        # If no namespaces specified, check for global permissions
-        if not namespaces and "permissions" in payload:
+        # Global permissions fallback
+        if not org_permissions and "permissions" in payload:
             if isinstance(payload["permissions"], list):
                 perms = {Permission(p) for p in payload["permissions"] if p in Permission.__members__.values()}
-                namespaces["*"] = perms
+                org_permissions["*"] = perms
         
-        return namespaces
+        return org_permissions
     
     def _create_local_user(self) -> User:
         """Create a user with full permissions for local mode."""
         return User(
             user_id="local",
-            namespaces={"*": {Permission.READ, Permission.WRITE, Permission.ADMIN}},
+            org_permissions={"*": {Permission.READ, Permission.WRITE, Permission.ADMIN}},
             token_type="local",
         )
     
     def _hash_token(self, token: str) -> str:
-        """Hash a token for secure storage/lookup."""
         return hashlib.sha256(token.encode()).hexdigest()
 
-    async def check_namespace_access(
+    async def check_access(
         self,
         user: User,
-        namespace: str,
+        org_id: str,
+        model_id: str,
         operation: str,
     ) -> bool:
         """
-        Check if user has permission for operation on namespace.
+        Check if user has permission for operation on org/model.
         
-        Args:
-            user: Authenticated user
-            namespace: Target namespace
-            operation: Operation type (read, write, admin)
-            
-        Returns:
-            True if authorized
-            
-        Raises:
-            AuthorizationException: If not authorized
+        Raises AuthorizationException if not authorized.
         """
-        # Map operation to permission
         permission_map = {
             "read": Permission.READ,
             "write": Permission.WRITE,
@@ -324,26 +248,27 @@ class AuthService:
         
         required_permission = permission_map.get(operation, Permission.READ)
         
-        # Check for wildcard access
-        if "*" in user.namespaces:
-            if required_permission in user.namespaces["*"]:
+        # Check wildcard access
+        if "*" in user.org_permissions:
+            if required_permission in user.org_permissions["*"]:
                 return True
         
-        # Check specific namespace access
-        if user.has_permission(namespace, required_permission):
+        # Check specific org access
+        if user.has_permission(org_id, required_permission):
             return True
         
-        # Admin permission implies all other permissions
-        if user.is_admin(namespace):
+        # Admin implies all
+        if user.is_admin(org_id):
             return True
         
-        # Write permission implies read
-        if required_permission == Permission.READ and user.can_write(namespace):
+        # Write implies read
+        if required_permission == Permission.READ and user.can_write(org_id):
             return True
         
         raise AuthorizationException(
             user_id=user.user_id,
-            namespace=namespace,
+            org_id=org_id,
+            model_id=model_id,
             operation=operation,
         )
     
@@ -355,48 +280,30 @@ class AuthService:
         """
         Compute security weight for a glyph based on user permissions.
         
-        Security weight is used to filter or de-rank glyphs that the user
-        doesn't have full access to.
-        
-        Args:
-            user: Authenticated user
-            glyph_metadata: Glyph metadata containing security info
-            
-        Returns:
-            Security weight (0.0 to 1.0)
-            - 1.0 = full access
-            - 0.0 = no access (should be filtered)
-            - 0.5 = partial access (de-ranked in results)
+        Returns 0.0 (no access) to 1.0 (full access).
         """
-        # Get glyph security level from metadata
         security_level = glyph_metadata.get("security_level", 0)
         required_clearance = glyph_metadata.get("required_clearance", [])
         
-        # Local mode: full access
         if user.token_type == "local":
             return 1.0
         
-        # Admin users get full access
-        if "*" in user.namespaces and Permission.ADMIN in user.namespaces["*"]:
+        if "*" in user.org_permissions and Permission.ADMIN in user.org_permissions["*"]:
             return 1.0
         
-        # Check clearance requirements
-        user_clearances = set(user.namespaces.keys())
+        user_orgs = set(user.org_permissions.keys())
         if required_clearance:
-            if not any(c in user_clearances for c in required_clearance):
-                return 0.0  # No access
+            if not any(c in user_orgs for c in required_clearance):
+                return 0.0
         
-        # Compute weight based on security level
-        # Higher security levels require higher permissions
         if security_level == 0:
-            return 1.0  # Public
+            return 1.0
         elif security_level == 1:
-            return 0.8 if Permission.READ in user.namespaces.get("*", set()) else 0.5
+            return 0.8 if Permission.READ in user.org_permissions.get("*", set()) else 0.5
         elif security_level == 2:
-            return 0.6 if Permission.WRITE in user.namespaces.get("*", set()) else 0.3
+            return 0.6 if Permission.WRITE in user.org_permissions.get("*", set()) else 0.3
         else:
-            return 0.4 if Permission.ADMIN in user.namespaces.get("*", set()) else 0.1
+            return 0.4 if Permission.ADMIN in user.org_permissions.get("*", set()) else 0.1
     
     def require_auth(self) -> bool:
-        """Check if authentication is required for current deployment mode."""
         return self._settings.deployment_mode != "local"

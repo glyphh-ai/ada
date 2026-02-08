@@ -2,6 +2,7 @@
 Natural Language Query API Routes.
 
 Endpoints for NL query translation and execution.
+All routes scoped by /{org_id}/{model_id}/...
 """
 
 import logging
@@ -13,19 +14,17 @@ from pydantic import BaseModel, Field
 from infrastructure.config import get_settings
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/v1/{namespace}", tags=["nl_query"])
+router = APIRouter(prefix="/{org_id}/{model_id}", tags=["nl_query"])
 settings = get_settings()
 
 
 # Request/Response Models
 class NLQueryRequest(BaseModel):
-    """Natural language query request."""
     query: str = Field(..., description="Natural language query", min_length=1)
     debug: bool = Field(default=False, description="Include translation details")
 
 
 class NLQueryResponse(BaseModel):
-    """Natural language query response."""
     result: Any
     query_type: str
     match_method: str
@@ -35,18 +34,15 @@ class NLQueryResponse(BaseModel):
 
 
 class IntentsResponse(BaseModel):
-    """Available intents response."""
     intents: List[str]
     patterns: Dict[str, List[str]]
 
 
 class TranslationDebugRequest(BaseModel):
-    """Debug translation request."""
     query: str = Field(..., description="Query to translate")
 
 
 class TranslationDebugResponse(BaseModel):
-    """Debug translation response."""
     intent: Optional[str]
     confidence: float
     parameters: Dict[str, str]
@@ -54,9 +50,7 @@ class TranslationDebugResponse(BaseModel):
     match_method: str
 
 
-# Service factory
 def get_nl_query_service():
-    """Get NL query service instance."""
     from main import model_manager
     from domains.query.service import QueryService
     from domains.nl_query.intent_matcher import IntentMatcher
@@ -73,10 +67,8 @@ def get_nl_query_service():
             detail="Natural language query is not enabled. Set ENABLE_NL_QUERY=true"
         )
     
-    # Try to extract NL encoder config from loaded model
     model_nl_config = None
     try:
-        # Get the currently loaded model from model manager
         model = model_manager.get_current_model() if hasattr(model_manager, 'get_current_model') else None
         if model is not None:
             model_nl_config = EncoderConfigFactory.extract_nl_encoder_config(model)
@@ -85,23 +77,20 @@ def get_nl_query_service():
     except Exception as e:
         logger.warning(f"Failed to extract NL config from model: {e}")
     
-    # Create services
     query_service = QueryService(model_manager, async_session_maker)
     intent_matcher = IntentMatcher(
         confidence_threshold=0.85,
         model_nl_config=model_nl_config
     )
     
-    # Create LLM fallback if available
     llm_fallback = None
     try:
         from domains.nl_query.llm_fallback import LLMFallback
         llm_fallback = LLMFallback(model_name=settings.nl_model)
         if not llm_fallback.is_available():
             llm_fallback = None
-            logger.info("LLM fallback disabled (transformers not available)")
     except ImportError:
-        logger.info("LLM fallback disabled (import error)")
+        pass
     
     return NLQueryService(
         query_service=query_service,
@@ -111,38 +100,29 @@ def get_nl_query_service():
     )
 
 
-# Endpoints
 @router.post("/query", response_model=NLQueryResponse)
 async def execute_nl_query(
-    namespace: str,
+    org_id: str,
+    model_id: str,
     request: NLQueryRequest,
 ) -> NLQueryResponse:
-    """
-    Execute a natural language query.
-    
-    Translates the query using rules-first approach with optional
-    LLM fallback, then executes the translated query.
-    
-    Returns 422 if translation fails and LLM is disabled.
-    """
+    """Execute a natural language query."""
     service = get_nl_query_service()
     
-    logger.info(f"NL query: namespace={namespace}, query='{request.query}'")
+    logger.info(f"NL query: org={org_id}, model={model_id}, query='{request.query}'")
     
     result = await service.execute_nl_query(
-        namespace=namespace,
+        org_id=org_id,
+        model_id=model_id,
         query=request.query,
         debug=request.debug,
     )
     
     if result.match_method == "none":
-        # Translation failed
         suggestions = [
             "Try rephrasing your query",
             "Use keywords like 'find', 'similar', 'verify', 'predict'",
             "Example: 'find similar to machine learning'",
-            "Example: 'verify that X is related to Y'",
-            "Example: 'predict what comes after X'",
         ]
         raise HTTPException(
             status_code=422,
@@ -165,36 +145,21 @@ async def execute_nl_query(
 
 
 @router.get("/intents", response_model=IntentsResponse)
-async def get_intents(namespace: str) -> IntentsResponse:
-    """
-    Get available intents and patterns.
-    
-    Returns the list of supported query types and their
-    pattern templates.
-    """
+async def get_intents(org_id: str, model_id: str) -> IntentsResponse:
+    """Get available intents and patterns."""
     service = get_nl_query_service()
     intents = service.get_intents()
-    
-    return IntentsResponse(
-        intents=intents["intents"],
-        patterns=intents["patterns"],
-    )
+    return IntentsResponse(intents=intents["intents"], patterns=intents["patterns"])
 
 
 @router.post("/query/debug", response_model=TranslationDebugResponse)
 async def debug_translation(
-    namespace: str,
+    org_id: str,
+    model_id: str,
     request: TranslationDebugRequest,
 ) -> TranslationDebugResponse:
-    """
-    Debug query translation without execution.
-    
-    Shows how the query would be translated without
-    actually executing it.
-    """
+    """Debug query translation without execution."""
     service = get_nl_query_service()
-    
-    logger.info(f"Debug translation: namespace={namespace}, query='{request.query}'")
     
     match_result, match_method = await service.translate_query(request.query)
     
@@ -208,9 +173,6 @@ async def debug_translation(
         )
     else:
         return TranslationDebugResponse(
-            intent=None,
-            confidence=0.0,
-            parameters={},
-            pattern_matched=None,
-            match_method="none",
+            intent=None, confidence=0.0, parameters={},
+            pattern_matched=None, match_method="none",
         )
