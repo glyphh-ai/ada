@@ -960,3 +960,209 @@ class ModelManager:
         if key not in self._models:
             return False
         return self._models[key].lock.locked()
+
+    async def get_active_config(
+        self,
+        org_id: str,
+        model_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Get the currently active config for a loaded model.
+        
+        Returns the encoder config as a dictionary for comparison
+        with Platform-stored config.
+        """
+        key = (org_id, model_id)
+        loaded_model = self._models.get(key)
+        
+        if loaded_model is None:
+            # Try to restore from DB
+            loaded_model = await self._load_from_db(org_id, model_id)
+        
+        if loaded_model is None:
+            raise ModelNotFoundException(org_id, model_id)
+        
+        # Extract config from loaded model
+        config = {}
+        if hasattr(loaded_model.sdk_model, 'encoder_config'):
+            ec = loaded_model.sdk_model.encoder_config
+            if hasattr(ec, 'to_dict'):
+                config = ec.to_dict()
+            elif hasattr(ec, 'dimension'):
+                # Manual extraction for proxy models
+                config = {
+                    "dimension": getattr(ec, 'dimension', 10000),
+                    "seed": getattr(ec, 'seed', 42),
+                    "similarity_weight": getattr(ec, 'similarity_weight', 1.0),
+                    "security_weight": getattr(ec, 'security_weight', 1.0),
+                    "apply_weights_during_encoding": getattr(ec, 'apply_weights_during_encoding', False),
+                    "layers": getattr(ec, 'layers', []),
+                    "nl_encoder_config": getattr(ec, 'nl_encoder_config', None),
+                }
+        
+        return config
+
+    async def apply_config_update(
+        self,
+        org_id: str,
+        model_id: str,
+        new_config: Dict[str, Any],
+        change_type: str,
+    ) -> Dict[str, Any]:
+        """
+        Apply config update to a loaded model.
+        
+        Args:
+            org_id: Organization ID
+            model_id: Model ID
+            new_config: New configuration dict
+            change_type: Type of change ("nl_only", "encoder_only", "mixed")
+        
+        Returns:
+            Dict with status, change_type, and optional job_id
+        """
+        key = (org_id, model_id)
+        loaded_model = self._models.get(key)
+        
+        if loaded_model is None:
+            # Try to restore from DB
+            loaded_model = await self._load_from_db(org_id, model_id)
+        
+        if loaded_model is None:
+            raise ModelNotFoundException(org_id, model_id)
+        
+        if change_type == "nl_only":
+            # Hot-reload NL config only
+            await self._apply_nl_config(loaded_model, new_config)
+            return {
+                "status": "applied",
+                "change_type": "nl_only",
+                "message": "NL config hot-reloaded successfully",
+            }
+        else:
+            # Encoder changes require re-encoding
+            await self._apply_encoder_config(loaded_model, new_config)
+            
+            # Start background re-encode job
+            job_result = await self.re_encode_model(
+                org_id, model_id,
+                regenerate_edges=True,
+                background=True,
+            )
+            
+            return {
+                "status": "re_encoding",
+                "change_type": change_type,
+                "job_id": job_result.job_id,
+                "message": "Encoder updated, re-encoding glyphs in background",
+            }
+
+    async def _apply_nl_config(
+        self,
+        loaded_model: LoadedModel,
+        new_config: Dict[str, Any],
+    ) -> None:
+        """Hot-reload NL encoder config (IntentMatcher patterns)."""
+        nl_config = new_config.get("nl_encoder_config")
+        
+        if nl_config is None:
+            logger.info(
+                f"No NL config to apply for {loaded_model.org_id}/{loaded_model.model_id}"
+            )
+            return
+        
+        # Update the model's NL config
+        if hasattr(loaded_model.sdk_model, 'encoder_config'):
+            ec = loaded_model.sdk_model.encoder_config
+            if hasattr(ec, 'nl_encoder_config'):
+                # Direct attribute update
+                ec.nl_encoder_config = nl_config
+            elif hasattr(ec, '__dict__'):
+                # Fallback for proxy models
+                ec.__dict__['nl_encoder_config'] = nl_config
+        
+        # Update DB config
+        async with self._db_session_factory() as session:
+            result = await session.execute(
+                select(ModelConfig).where(
+                    ModelConfig.org_id == loaded_model.org_id,
+                    ModelConfig.model_id == loaded_model.model_id,
+                )
+            )
+            db_config = result.scalar_one_or_none()
+            
+            if db_config and db_config.encoder_config:
+                encoder_config_dict = dict(db_config.encoder_config)
+                encoder_config_dict['nl_encoder_config'] = nl_config
+                
+                await session.execute(
+                    update(ModelConfig)
+                    .where(
+                        ModelConfig.org_id == loaded_model.org_id,
+                        ModelConfig.model_id == loaded_model.model_id,
+                    )
+                    .values(
+                        encoder_config=encoder_config_dict,
+                        updated_at=datetime.utcnow(),
+                    )
+                )
+                await session.commit()
+        
+        logger.info(
+            f"NL config hot-reloaded for {loaded_model.org_id}/{loaded_model.model_id}"
+        )
+
+    async def _apply_encoder_config(
+        self,
+        loaded_model: LoadedModel,
+        new_config: Dict[str, Any],
+    ) -> None:
+        """Apply encoder config changes (requires re-encoding)."""
+        adapter = get_sdk_adapter()
+        
+        # Create new encoder config from the updated config
+        try:
+            encoder_config = EncoderConfigFactory.create_from_dict(new_config)
+            validator = get_config_validator()
+            validator.validate_encoder_config_or_raise(encoder_config)
+            encoder_config = validator.apply_defaults(encoder_config)
+        except ConfigurationError as e:
+            raise ModelLoadException(f"Invalid encoder config: {e}")
+        
+        # Create new encoder with updated config
+        try:
+            new_encoder = adapter.create_encoder(encoder_config)
+        except Exception as e:
+            raise ModelLoadException(f"Failed to create encoder: {e}")
+        
+        # Swap encoder atomically
+        old_encoder = loaded_model.encoder
+        loaded_model.encoder = new_encoder
+        
+        # Update SDK model reference
+        loaded_model.sdk_model.encoder_config = encoder_config
+        
+        # Clean up old encoder
+        if hasattr(old_encoder, 'clear_cache'):
+            old_encoder.clear_cache()
+        
+        # Update DB config
+        encoder_config_dict = encoder_config.to_dict() if hasattr(encoder_config, 'to_dict') else new_config
+        
+        async with self._db_session_factory() as session:
+            await session.execute(
+                update(ModelConfig)
+                .where(
+                    ModelConfig.org_id == loaded_model.org_id,
+                    ModelConfig.model_id == loaded_model.model_id,
+                )
+                .values(
+                    encoder_config=encoder_config_dict,
+                    updated_at=datetime.utcnow(),
+                )
+            )
+            await session.commit()
+        
+        logger.info(
+            f"Encoder config updated for {loaded_model.org_id}/{loaded_model.model_id}"
+        )

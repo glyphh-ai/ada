@@ -49,6 +49,20 @@ class StatusResponse(BaseModel):
     license_status: str = "valid"
 
 
+class ConfigUpdateRequest(BaseModel):
+    """Full config update request from Platform."""
+    config: Dict[str, Any]
+    change_type: str  # "nl_only", "encoder_only", "mixed"
+
+
+class ConfigUpdateResponse(BaseModel):
+    """Response from config update."""
+    status: str  # "applied", "re_encoding"
+    change_type: str
+    job_id: Optional[str] = None
+    message: str
+
+
 # Dependency injection
 async def get_model_manager() -> ModelManager:
     from main import model_manager
@@ -239,3 +253,60 @@ async def get_model_metadata(
         )
     except ModelNotFoundException:
         raise HTTPException(status_code=404, detail=f"Model not found: org={org_id}, model={model_id}")
+
+
+@router.get("/models/{org_id}/{model_id}/config")
+async def get_model_active_config(
+    org_id: str,
+    model_id: str,
+    manager: ModelManager = Depends(get_model_manager),
+) -> Dict[str, Any]:
+    """
+    Get the currently active configuration for a deployed model.
+    
+    Returns the encoder config as stored in the loaded model,
+    used by Platform to compute config diffs for hot updates.
+    """
+    try:
+        return await manager.get_active_config(org_id, model_id)
+    except ModelNotFoundException:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Model not found: org={org_id}, model={model_id}"
+        )
+
+
+@router.post("/models/{org_id}/{model_id}/config/update", response_model=ConfigUpdateResponse)
+async def update_model_config_full(
+    org_id: str,
+    model_id: str,
+    request: ConfigUpdateRequest,
+    manager: ModelManager = Depends(get_model_manager),
+) -> ConfigUpdateResponse:
+    """
+    Apply a full config update to a deployed model.
+    
+    For NL-only changes: hot-reload IntentMatcher patterns immediately.
+    For encoder changes: update encoder and trigger background re-encode.
+    
+    This endpoint is called by Platform's push-update flow.
+    """
+    try:
+        result = await manager.apply_config_update(
+            org_id=org_id,
+            model_id=model_id,
+            new_config=request.config,
+            change_type=request.change_type,
+        )
+        return ConfigUpdateResponse(**result)
+    except ModelNotFoundException:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Model not found: org={org_id}, model={model_id}"
+        )
+    except Exception as e:
+        logger.error(f"Config update failed for org={org_id}, model={model_id}: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Config update failed: {str(e)}"
+        )
