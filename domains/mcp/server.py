@@ -2,13 +2,13 @@
 MCP Server Implementation for Glyphh Runtime.
 
 Implements the Model Context Protocol (MCP) for agent integration.
-Exposes Glyphh query tools through the MCP interface.
+Exposes the nl_query tool through the MCP interface.
 """
 
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from domains.auth.service import AuthService, User
@@ -44,7 +44,6 @@ class MCPResponse:
     """Response from an MCP tool invocation."""
     content: List[Dict[str, Any]]
     is_error: bool = False
-    # Additional fields for consistent JSON response
     result: Optional[Any] = None
     query_type: Optional[str] = None
     match_method: Optional[str] = None
@@ -68,14 +67,11 @@ class MCPServer:
     """
     MCP Server for Glyphh Runtime.
     
-    Implements the Model Context Protocol to expose Glyphh query tools
-    to AI agents. Supports:
-    - glyph_similarity_search: Find similar glyphs
-    - glyph_fact_tree: Generate verification reports
-    - glyph_temporal_predict: Predict future states
-    - glyph_create: Create new glyphs
-    - glyph_get: Retrieve glyph by ID
-    - glyph_list: List glyphs with pagination
+    Exposes one tool: nl_query.
+    Delegates all NL query logic to NLQueryService which handles:
+    - Rules-based intent matching (via IntentMatcher/SDK)
+    - LLM fallback when rules fail
+    - Executing the matched query
     """
     
     def __init__(
@@ -83,13 +79,6 @@ class MCPServer:
         query_service: QueryService,
         auth_service: AuthService,
     ):
-        """
-        Initialize MCP Server.
-        
-        Args:
-            query_service: Query service for executing queries
-            auth_service: Auth service for token validation
-        """
         self._query_service = query_service
         self._auth_service = auth_service
         self._tools = self._build_tool_schemas()
@@ -136,17 +125,7 @@ class MCPServer:
         arguments: Dict[str, Any],
         auth_token: str,
     ) -> MCPResponse:
-        """
-        Handle MCP tool invocation with authentication.
-        
-        Args:
-            tool_name: Name of the tool to invoke
-            arguments: Tool arguments
-            auth_token: Authentication token
-            
-        Returns:
-            MCPResponse with result or error
-        """
+        """Handle MCP tool invocation with authentication."""
         start_time = datetime.utcnow()
         
         try:
@@ -165,8 +144,7 @@ class MCPServer:
             # Get namespace and check authorization
             namespace = arguments.get("namespace")
             if namespace:
-                operation = "write" if tool_name == "glyph_create" else "read"
-                await self._auth_service.check_namespace_access(user, namespace, operation)
+                await self._auth_service.check_namespace_access(user, namespace, "read")
             
             # Dispatch to handler
             handler = getattr(self, f"_handle_{tool_name}", None)
@@ -179,7 +157,6 @@ class MCPServer:
             elapsed = (datetime.utcnow() - start_time).total_seconds() * 1000
             logger.info(f"MCP tool {tool_name} completed in {elapsed:.2f}ms")
             
-            # Return consistent JSON response
             return MCPResponse(
                 content=[{"type": "json", "data": result}],
                 is_error=False,
@@ -192,77 +169,28 @@ class MCPServer:
             
         except AuthenticationException as e:
             logger.warning(f"MCP authentication failed: {e}")
-            return self._error_response(f"Authentication failed: {e.message}", is_auth_error=True)
-        
+            return self._error_response(f"Authentication failed: {e.message}")
         except AuthorizationException as e:
             logger.warning(f"MCP authorization failed: {e}")
-            return self._error_response(f"Not authorized: {e.message}", is_auth_error=True)
-        
+            return self._error_response(f"Not authorized: {e.message}")
         except ValidationException as e:
             return self._error_response(f"Validation error: {e.message}")
-        
         except GlyphNotFoundException as e:
             return self._error_response(f"Glyph not found: {e.message}")
-        
         except Exception as e:
             logger.error(f"MCP tool error: {e}", exc_info=True)
             return self._error_response(f"Internal error: {str(e)}")
     
-    def _validate_arguments(
-        self,
-        tool_name: str,
-        arguments: Dict[str, Any]
-    ) -> Optional[str]:
-        """
-        Validate tool arguments against schema.
-        
-        Args:
-            tool_name: Tool name
-            arguments: Arguments to validate
-            
-        Returns:
-            Error message if invalid, None if valid
-        """
+    def _validate_arguments(self, tool_name: str, arguments: Dict[str, Any]) -> Optional[str]:
+        """Validate tool arguments against schema."""
         schema = self._tools[tool_name].input_schema
         required = schema.get("required", [])
-        
-        # Check required fields
         for field in required:
             if field not in arguments:
                 return f"Missing required field: {field}"
-        
-        # Validate types
-        properties = schema.get("properties", {})
-        for field, value in arguments.items():
-            if field not in properties:
-                continue
-            
-            prop_schema = properties[field]
-            expected_type = prop_schema.get("type")
-            
-            if expected_type == "string" and not isinstance(value, str):
-                return f"Field '{field}' must be a string"
-            elif expected_type == "integer" and not isinstance(value, int):
-                return f"Field '{field}' must be an integer"
-            elif expected_type == "array" and not isinstance(value, list):
-                return f"Field '{field}' must be an array"
-            elif expected_type == "object" and not isinstance(value, dict):
-                return f"Field '{field}' must be an object"
-            
-            # Check min/max for integers
-            if expected_type == "integer":
-                if "minimum" in prop_schema and value < prop_schema["minimum"]:
-                    return f"Field '{field}' must be >= {prop_schema['minimum']}"
-                if "maximum" in prop_schema and value > prop_schema["maximum"]:
-                    return f"Field '{field}' must be <= {prop_schema['maximum']}"
-        
         return None
     
-    def _error_response(
-        self,
-        message: str,
-        is_auth_error: bool = False
-    ) -> MCPResponse:
+    def _error_response(self, message: str) -> MCPResponse:
         """Create an error response."""
         return MCPResponse(
             content=[{"type": "text", "text": message}],
@@ -279,16 +207,10 @@ class MCPServer:
         user: User,
     ) -> Dict[str, Any]:
         """
-        Handle natural language query tool.
-        
-        Flow:
-        1. Try rules-based intent matching using model's nl_config
-        2. If rules fail → LLM handles both intent AND slot extraction
-        3. If rules match but slots are unclear → LLM can help with slotting
-        4. Execute the matched tool with extracted slots
-        5. Return consistent JSON response with tool result
+        Handle nl_query tool. Delegates entirely to NLQueryService
+        which handles rules matching, LLM fallback, and query execution.
         """
-        import time
+        from domains.nl_query.service import NLQueryService
         from domains.nl_query.intent_matcher import IntentMatcher
         from infrastructure.config import get_settings
         
@@ -297,18 +219,10 @@ class MCPServer:
         query = arguments["query"]
         debug = arguments.get("debug", False)
         
-        start_time = time.time()
+        # Create intent matcher
+        intent_matcher = IntentMatcher(confidence_threshold=0.85)
         
-        # TODO: Load model's nl_config from database/model_manager
-        model_nl_config = None
-        
-        # Create intent matcher with model config
-        intent_matcher = IntentMatcher(
-            confidence_threshold=0.85,
-            model_nl_config=model_nl_config
-        )
-        
-        # Initialize LLM fallback
+        # Create LLM fallback if available
         llm_fallback = None
         try:
             from domains.nl_query.llm_fallback import LLMFallback
@@ -318,216 +232,25 @@ class MCPServer:
         except ImportError:
             pass
         
-        # Step 1: Try rules-based intent matching
-        match_result = await intent_matcher.match_intent(query)
-        matched_intent = None
-        match_method = "none"
-        confidence = 0.0
-        structured_query = None
-        
-        if match_result and match_result.confidence >= 0.85:
-            # Rules matched - use rules for intent
-            matched_intent = match_result.intent
-            match_method = "rules"
-            confidence = match_result.confidence
-            structured_query = match_result.structured_query
-            
-            # If slots seem incomplete, use LLM to help extract better parameters
-            if llm_fallback and self._needs_slot_refinement(structured_query):
-                try:
-                    llm_result = await llm_fallback.translate_query(query, namespace)
-                    if llm_result and llm_result.get("operation") == matched_intent:
-                        # LLM agrees on intent - merge slot data
-                        structured_query = self._merge_slots(structured_query, llm_result)
-                        match_method = "rules+llm"
-                except Exception as e:
-                    logger.warning(f"LLM slot refinement failed: {e}")
-        
-        elif llm_fallback:
-            # Step 2: Rules failed - LLM handles both intent AND slots
-            try:
-                llm_result = await llm_fallback.translate_query(query, namespace)
-                if llm_result:
-                    matched_intent = llm_result.get("operation")
-                    match_method = "llm"
-                    confidence = 0.7
-                    structured_query = llm_result
-            except Exception as e:
-                logger.warning(f"LLM fallback failed: {e}")
-        
-        # Step 3: Execute the matched tool if we found one
-        if matched_intent and structured_query:
-            try:
-                tool_result = await self._execute_matched_tool(
-                    namespace=namespace,
-                    intent=matched_intent,
-                    structured_query=structured_query,
-                )
-                
-                elapsed_ms = (time.time() - start_time) * 1000
-                
-                return {
-                    "result": tool_result,
-                    "query_type": matched_intent,
-                    "match_method": match_method,
-                    "confidence": confidence,
-                    "query_time_ms": elapsed_ms,
-                    "translated_query": structured_query if debug else None,
-                }
-            except Exception as e:
-                logger.error(f"Tool execution failed: {e}")
-                elapsed_ms = (time.time() - start_time) * 1000
-                return {
-                    "result": None,
-                    "query_type": matched_intent,
-                    "match_method": match_method,
-                    "confidence": confidence,
-                    "query_time_ms": elapsed_ms,
-                    "error": str(e),
-                }
-        
-        # No match - return empty result
-        elapsed_ms = (time.time() - start_time) * 1000
-        return {
-            "result": None,
-            "query_type": "unknown",
-            "match_method": "none",
-            "confidence": 0.0,
-            "query_time_ms": elapsed_ms,
-        }
-    
-    def _needs_slot_refinement(self, structured_query: Dict[str, Any]) -> bool:
-        """Check if the structured query needs LLM help for better slot extraction."""
-        if not structured_query:
-            return True
-        
-        # Check if query parameter is too short or generic
-        query_param = structured_query.get("query", "")
-        if len(query_param) < 3:
-            return True
-        
-        return False
-    
-    def _merge_slots(
-        self,
-        rules_query: Dict[str, Any],
-        llm_query: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Merge slot data from rules and LLM, preferring LLM for specific values."""
-        merged = rules_query.copy()
-        
-        # LLM often extracts better specific values
-        for key in ["query", "claim", "current_state", "top_k", "max_depth"]:
-            if key in llm_query and llm_query[key]:
-                # Prefer LLM value if it's more specific
-                llm_val = llm_query[key]
-                rules_val = rules_query.get(key)
-                
-                if isinstance(llm_val, str) and isinstance(rules_val, str):
-                    if len(llm_val) > len(rules_val):
-                        merged[key] = llm_val
-                elif llm_val and not rules_val:
-                    merged[key] = llm_val
-        
-        return merged
-    
-    async def _execute_matched_tool(
-        self,
-        namespace: str,
-        intent: str,
-        structured_query: Dict[str, Any],
-    ) -> Any:
-        """
-        Execute the tool identified by intent matching.
-        
-        Args:
-            namespace: Model namespace
-            intent: Matched intent (e.g., similarity_search, fact_tree)
-            structured_query: Query parameters extracted from NL
-            
-        Returns:
-            Tool execution result
-        """
-        from domains.models.schemas import (
-            SimilaritySearchRequest,
-            FactTreeRequest,
-            TemporalPredictRequest,
+        # Use NLQueryService - it handles the full flow
+        nl_service = NLQueryService(
+            query_service=self._query_service,
+            intent_matcher=intent_matcher,
+            llm_fallback=llm_fallback,
+            confidence_threshold=0.85,
         )
-        from infrastructure.database import async_session_maker
-        from domains.models.storage import GlyphStorage
         
-        query_text = structured_query.get("query", "")
+        result = await nl_service.execute_nl_query(
+            namespace=namespace,
+            query=query,
+            debug=debug,
+        )
         
-        if intent == "similarity_search":
-            # Execute similarity search directly against database
-            async with async_session_maker() as session:
-                storage = GlyphStorage(session)
-                
-                # For similarity search without a loaded model,
-                # we need to encode the query. For now, return stored glyphs.
-                # TODO: Use encoder from model config
-                results = await storage.list_glyphs(
-                    namespace=namespace,
-                    limit=structured_query.get("top_k", 10),
-                )
-                
-                return {
-                    "results": [
-                        {
-                            "glyph_id": str(r.id),
-                            "concept_text": r.concept_text,
-                            "metadata": r.metadata,
-                        }
-                        for r in results
-                    ],
-                    "total_count": len(results),
-                }
-        
-        elif intent == "fact_tree":
-            # Execute fact tree generation
-            async with async_session_maker() as session:
-                storage = GlyphStorage(session)
-                results = await storage.list_glyphs(namespace=namespace, limit=10)
-                
-                return {
-                    "claim": query_text,
-                    "confidence": 0.0,
-                    "supporting_evidence": [
-                        {"concept": r.concept_text} for r in results
-                    ],
-                }
-        
-        elif intent == "temporal_predict":
-            return {
-                "current_state": query_text,
-                "predictions": [],
-                "confidence": 0.0,
-            }
-        
-        elif intent == "list":
-            async with async_session_maker() as session:
-                storage = GlyphStorage(session)
-                results = await storage.list_glyphs(
-                    namespace=namespace,
-                    limit=structured_query.get("limit", 100),
-                )
-                return {
-                    "glyphs": [
-                        {
-                            "glyph_id": str(r.id),
-                            "concept_text": r.concept_text,
-                        }
-                        for r in results
-                    ],
-                    "count": len(results),
-                }
-        
-        elif intent == "count":
-            async with async_session_maker() as session:
-                storage = GlyphStorage(session)
-                count = await storage.count_glyphs(namespace)
-                return {"count": count}
-        
-        else:
-            # Unknown intent - return empty
-            return {"message": f"Unknown intent: {intent}"}
+        return {
+            "result": result.result,
+            "query_type": result.query_type,
+            "match_method": result.match_method,
+            "confidence": result.confidence,
+            "query_time_ms": result.query_time_ms,
+            "translated_query": result.translated_query if debug else None,
+        }
