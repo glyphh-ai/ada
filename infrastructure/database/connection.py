@@ -45,15 +45,32 @@ Base = declarative_base()
 
 
 async def init_db() -> None:
-    """Initialize database - create tables and enable pgvector"""
+    """Initialize database - enable pgvector and run migrations.
+    
+    Automatically applies any pending Alembic migrations on startup,
+    making installation seamless for end users.
+    """
     async with engine.begin() as conn:
         # Enable pgvector extension
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         logger.info("pgvector extension enabled")
-        
-        # Create all tables
-        await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database tables created")
+    
+    # Run Alembic migrations automatically
+    from alembic.config import Config
+    from alembic import command
+    import os
+    
+    # Find alembic.ini relative to the app root
+    app_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    alembic_ini = os.path.join(app_root, "alembic.ini")
+    
+    if os.path.exists(alembic_ini):
+        alembic_cfg = Config(alembic_ini)
+        alembic_cfg.set_main_option("script_location", os.path.join(app_root, "migrations"))
+        command.upgrade(alembic_cfg, "head")
+        logger.info("Database migrations applied successfully")
+    else:
+        logger.warning(f"alembic.ini not found at {alembic_ini}, skipping migrations")
 
 
 async def close_db() -> None:
