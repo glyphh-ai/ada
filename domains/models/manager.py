@@ -281,10 +281,15 @@ class ModelManager:
         """
         Load a .glyphh model from raw bytes and assign it a namespace.
         
-        Writes content to a temp file, then delegates to load_model().
+        Supports two formats:
+        1. Gzipped .glyphh files (from SDK's GlyphhModel.to_file)
+        2. Plain JSON config from the platform's export_glyphh
+        
+        For plain JSON, creates an encoder directly from the config
+        without requiring a full GlyphhModel with glyphs.
         
         Args:
-            content: Raw bytes of the .glyphh file
+            content: Raw bytes of the .glyphh file or JSON config
             namespace: Namespace to assign (e.g. '{org_id}/{model_id}')
             
         Returns:
@@ -293,25 +298,171 @@ class ModelManager:
         Raises:
             ModelLoadException: If model fails to load
         """
-        import tempfile
-        import os
+        import gzip
+        import json as json_module
         
-        # Write bytes to a temp file
-        tmp_dir = tempfile.mkdtemp()
-        tmp_path = os.path.join(tmp_dir, f"{namespace.replace('/', '_')}.glyphh")
-        
+        # Try gzipped format first (SDK .glyphh files)
         try:
-            with open(tmp_path, "wb") as f:
-                f.write(content)
+            decompressed = gzip.decompress(content)
+            # It's a gzipped .glyphh — write to temp file and use standard load
+            import tempfile
+            import os
             
-            return await self.load_model(tmp_path, namespace)
-        finally:
-            # Clean up temp file (model data is already loaded into memory)
+            tmp_dir = tempfile.mkdtemp()
+            tmp_path = os.path.join(tmp_dir, f"{namespace.replace('/', '_')}.glyphh")
+            
             try:
-                os.unlink(tmp_path)
-                os.rmdir(tmp_dir)
-            except OSError:
-                pass
+                with open(tmp_path, "wb") as f:
+                    f.write(content)
+                return await self.load_model(tmp_path, namespace)
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                    os.rmdir(tmp_dir)
+                except OSError:
+                    pass
+        except gzip.BadGzipFile:
+            pass  # Not gzipped — try plain JSON config
+        
+        # Plain JSON config from platform
+        try:
+            config_data = json_module.loads(content)
+        except json_module.JSONDecodeError as e:
+            raise ModelLoadException(f"Invalid model data: not gzipped .glyphh and not valid JSON: {e}")
+        
+        return await self._load_from_platform_config(config_data, namespace)
+    
+    async def _load_from_platform_config(
+        self,
+        config_data: dict,
+        namespace: str,
+    ) -> LoadedModel:
+        """
+        Load a model from platform JSON config (no glyphs, just encoder config).
+        
+        This is used when the platform deploys a model that hasn't been
+        packaged as a full .glyphh file yet. Creates an encoder from the
+        config so the runtime can encode data sent later.
+        
+        Args:
+            config_data: Platform export JSON with name, config, etc.
+            namespace: Namespace to assign
+            
+        Returns:
+            LoadedModel instance
+        """
+        # Check local mode model limit
+        if settings.deployment_mode == "local":
+            if len(self._models) >= settings.local_mode_max_models:
+                raise ModelLoadException(
+                    f"Local mode limit: maximum {settings.local_mode_max_models} model(s). "
+                    f"Upgrade to a production license for unlimited models."
+                )
+        
+        # Check if namespace already exists
+        if namespace in self._models:
+            # Unload existing model first for re-deploy
+            await self.unload_model(namespace, delete_data=False)
+        
+        model_name = config_data.get("name", namespace)
+        model_config = config_data.get("config", {})
+        model_version = str(config_data.get("version", "1"))
+        
+        # Get SDK adapter
+        adapter = get_sdk_adapter()
+        if not adapter.is_available:
+            raise ModelLoadException("SDK not available")
+        
+        # Build encoder config from platform config
+        try:
+            encoder_config = EncoderConfigFactory.create_from_dict(model_config)
+            
+            validator = get_config_validator()
+            validator.validate_encoder_config_or_raise(encoder_config)
+            encoder_config = validator.apply_defaults(encoder_config)
+        except ConfigurationError as e:
+            raise ModelLoadException(f"Invalid model configuration: {e}")
+        except Exception as e:
+            # If config doesn't map to EncoderConfig, create with defaults
+            logger.warning(f"Could not create encoder config from platform config, using defaults: {e}")
+            try:
+                encoder_config = EncoderConfigFactory.create_default()
+                validator = get_config_validator()
+                encoder_config = validator.apply_defaults(encoder_config)
+            except Exception as e2:
+                raise ModelLoadException(f"Failed to create default encoder config: {e2}")
+        
+        # Create Encoder instance
+        try:
+            encoder = adapter.create_encoder(encoder_config)
+        except Exception as e:
+            raise ModelLoadException(f"Failed to create encoder: {e}")
+        
+        # Create SimilarityCalculator
+        similarity_calculator = adapter.create_similarity_calculator()
+        if similarity_calculator is None:
+            logger.warning(
+                f"SimilarityCalculator not available for namespace '{namespace}'"
+            )
+        
+        # Create a minimal sdk_model-like object for metadata
+        class PlatformModel:
+            """Minimal model object for platform-originated deployments."""
+            def __init__(self, name, version, config):
+                self.name = name
+                self.version = version
+                self.encoder_config = config
+        
+        sdk_model_proxy = PlatformModel(model_name, model_version, encoder_config)
+        
+        loaded_model = LoadedModel(
+            namespace=namespace,
+            model_path="platform-deploy",
+            sdk_model=sdk_model_proxy,
+            encoder=encoder,
+            similarity_calculator=similarity_calculator,
+            loaded_at=datetime.utcnow(),
+            meta_name=model_name,
+            short_description=config_data.get("description", ""),
+            long_description="",
+        )
+        
+        # Store model config in database
+        async with self._db_session_factory() as session:
+            # Check if config already exists
+            result = await session.execute(
+                select(ModelConfig).where(ModelConfig.namespace == namespace)
+            )
+            existing = result.scalar_one_or_none()
+            
+            if existing:
+                existing.model_version = model_version
+                existing.sdk_version = await self._get_sdk_version()
+                existing.meta_name = model_name
+                existing.short_description = config_data.get("description", "")
+                existing.updated_at = datetime.utcnow()
+            else:
+                config = ModelConfig(
+                    namespace=namespace,
+                    model_path="platform-deploy",
+                    model_version=model_version,
+                    sdk_version=await self._get_sdk_version(),
+                    meta_name=model_name,
+                    short_description=config_data.get("description", ""),
+                    long_description="",
+                )
+                session.add(config)
+            await session.commit()
+        
+        # Add to registry
+        self._models[namespace] = loaded_model
+        
+        logger.info(
+            f"Loaded platform model '{model_name}' v{model_version} "
+            f"into namespace '{namespace}'"
+        )
+        
+        return loaded_model
     
     async def unload_model(
         self,
