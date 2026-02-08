@@ -30,17 +30,6 @@ class ModelConfigUpdate(BaseModel):
     max_tree_depth: Optional[int] = Field(None, ge=1, le=10)
 
 
-class ModelInfo(BaseModel):
-    """Model information response."""
-    namespace: str
-    model_path: str
-    model_version: Optional[str] = None
-    sdk_version: Optional[str] = None
-    glyph_count: int = 0
-    loaded_at: datetime
-    status: str = "active"
-
-
 class DeployResponse(BaseModel):
     """Deployment response."""
     namespace: str

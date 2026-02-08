@@ -154,14 +154,6 @@ class ModelManager:
             ModelLoadException: If model fails to load
             ModelIncompatibleException: If model is incompatible with SDK
         """
-        # Check local mode model limit
-        if settings.deployment_mode == "local":
-            if len(self._models) >= settings.local_mode_max_models:
-                raise ModelLoadException(
-                    f"Local mode limit: maximum {settings.local_mode_max_models} model(s). "
-                    f"Upgrade to a production license for unlimited models."
-                )
-        
         # Get SDK adapter
         adapter = get_sdk_adapter()
         if not adapter.is_available:
@@ -203,6 +195,15 @@ class ModelManager:
         if namespace in self._models:
             logger.info(f"Re-deploying: unloading existing model from namespace '{namespace}'")
             await self.unload_model(namespace, delete_data=False)
+        
+        # Check local mode model limit (after re-deploy unload so we don't
+        # count the model we just removed)
+        if settings.deployment_mode == "local":
+            if len(self._models) >= settings.local_mode_max_models:
+                raise ModelLoadException(
+                    f"Local mode limit: maximum {settings.local_mode_max_models} model(s). "
+                    f"Upgrade to a production license for unlimited models."
+                )
         
         # Extract encoder config from model and validate
         try:
@@ -352,18 +353,18 @@ class ModelManager:
         Returns:
             LoadedModel instance
         """
-        # Check local mode model limit
+        # If namespace already exists, unload the old model first (re-deploy)
+        if namespace in self._models:
+            logger.info(f"Re-deploying: unloading existing model from namespace '{namespace}'")
+            await self.unload_model(namespace, delete_data=False)
+        
+        # Check local mode model limit (after re-deploy unload)
         if settings.deployment_mode == "local":
             if len(self._models) >= settings.local_mode_max_models:
                 raise ModelLoadException(
                     f"Local mode limit: maximum {settings.local_mode_max_models} model(s). "
                     f"Upgrade to a production license for unlimited models."
                 )
-        
-        # Check if namespace already exists
-        if namespace in self._models:
-            # Unload existing model first for re-deploy
-            await self.unload_model(namespace, delete_data=False)
         
         model_name = config_data.get("name", namespace)
         model_config = config_data.get("config", {})
@@ -384,14 +385,7 @@ class ModelManager:
         except ConfigurationError as e:
             raise ModelLoadException(f"Invalid model configuration: {e}")
         except Exception as e:
-            # If config doesn't map to EncoderConfig, create with defaults
-            logger.warning(f"Could not create encoder config from platform config, using defaults: {e}")
-            try:
-                encoder_config = EncoderConfigFactory.create_default()
-                validator = get_config_validator()
-                encoder_config = validator.apply_defaults(encoder_config)
-            except Exception as e2:
-                raise ModelLoadException(f"Failed to create default encoder config: {e2}")
+            raise ModelLoadException(f"Failed to create encoder config from platform config: {e}")
         
         # Create Encoder instance
         try:
