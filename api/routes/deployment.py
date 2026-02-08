@@ -156,17 +156,17 @@ async def get_status(
     )
 
 
-@router.get("/models", response_model=Dict[str, List[ModelInfo]])
+@router.get("/models")
 async def list_models(
     manager: ModelManager = Depends(get_model_manager),
-) -> Dict[str, List[ModelInfo]]:
+) -> Dict[str, Any]:
     """
     List all deployed models.
     
-    Returns an array of ModelInfo objects.
+    Returns an array of model info objects.
     """
     models = await manager.list_models()
-    return {"models": models}
+    return {"models": [m.model_dump() for m in models]}
 
 
 @router.delete("/models/{model_id:path}")
