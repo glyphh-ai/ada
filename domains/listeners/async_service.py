@@ -167,11 +167,15 @@ def _record_to_concept(
     from glyphh.core.types import Concept
     
     # Build concept name from composite key (key_part roles)
+    # Use case-insensitive matching for record keys
     if key_part_roles:
+        # Build case-insensitive lookup of record keys
+        record_keys_lower = {k.lower(): k for k in record.keys()}
         key_values = []
         for role_name in key_part_roles:
-            if role_name in record:
-                value = str(record[role_name])
+            actual_key = record_keys_lower.get(role_name.lower())
+            if actual_key and actual_key in record:
+                value = str(record[actual_key])
                 # Sanitize value for identifier
                 sanitized = value.replace(" ", "_").replace("@", "_").replace("#", "_")
                 key_values.append(sanitized)
@@ -353,9 +357,14 @@ class AsyncListenerService:
                                 processed += 1
                                 continue
                             
-                            # Validate key_part fields exist if configured
+                            # Validate key_part fields exist if configured (case-insensitive)
                             if key_part_roles:
-                                missing_keys = [k for k in key_part_roles if k not in record]
+                                # Build case-insensitive lookup of record keys
+                                record_keys_lower = {k.lower(): k for k in record.keys()}
+                                missing_keys = [
+                                    k for k in key_part_roles 
+                                    if k.lower() not in record_keys_lower
+                                ]
                                 if missing_keys:
                                     skipped += 1
                                     failed_records.append({
