@@ -89,6 +89,10 @@ class GlyphStorage:
                 reason=f"Embedding dimension {len(embedding)} exceeds runtime limit of {max_dim}"
             )
         
+        # Pad embedding to max_dim if smaller (pgvector requires fixed-size vectors)
+        if len(embedding) < max_dim:
+            embedding = embedding + [0.0] * (max_dim - len(embedding))
+        
         if glyph_id is None:
             glyph_id = uuid4()
         
@@ -164,6 +168,9 @@ class GlyphStorage:
                     field="embedding",
                     reason=f"Embedding dimension {len(embedding)} exceeds runtime limit of {max_dim}"
                 )
+            # Pad embedding to max_dim if smaller (pgvector requires fixed-size vectors)
+            if len(embedding) < max_dim:
+                embedding = embedding + [0.0] * (max_dim - len(embedding))
             values["embedding"] = embedding
         
         if metadata is not None:
@@ -228,6 +235,10 @@ class GlyphStorage:
                 field="query_embedding",
                 reason=f"Query embedding dimension {len(query_embedding)} exceeds runtime limit of {max_dim}"
             )
+        
+        # Pad query embedding to max_dim if smaller (pgvector requires fixed-size vectors)
+        if len(query_embedding) < max_dim:
+            query_embedding = query_embedding + [0.0] * (max_dim - len(query_embedding))
         
         query = (
             select(
@@ -532,5 +543,9 @@ class GlyphStorage:
                     field="embedding",
                     reason=f"Embedding dimension {len(embedding)} exceeds runtime limit of {max_dim}"
                 )
+            
+            # Pad embedding to max_dim if smaller (pgvector requires fixed-size vectors)
+            if len(embedding) < max_dim:
+                embedding = embedding + [0.0] * (max_dim - len(embedding))
         
         return concept_text, embedding, metadata
