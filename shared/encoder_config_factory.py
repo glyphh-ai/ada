@@ -152,6 +152,73 @@ class EncoderConfigFactory:
         return config
     
     @staticmethod
+    def create_from_dict(config_dict: Dict[str, Any]) -> Any:
+        """
+        Create EncoderConfig from a dictionary representation.
+        
+        Used when restoring models from database or loading from JSON.
+        
+        Args:
+            config_dict: Dictionary containing encoder config fields
+            
+        Returns:
+            EncoderConfig instance
+            
+        Raises:
+            SDKNotAvailableError: If SDK is not installed
+            ConfigurationError: If config creation fails
+        """
+        adapter = get_sdk_adapter()
+        classes = adapter.import_config_classes()
+        
+        EncoderConfig = classes['EncoderConfig']
+        
+        try:
+            # Use SDK's from_dict method if available
+            if hasattr(EncoderConfig, 'from_dict'):
+                return EncoderConfig.from_dict(config_dict)
+            
+            # Fallback: construct manually
+            LayerConfig = classes['LayerConfig']
+            SegmentConfig = classes['SegmentConfig']
+            Role = classes['Role']
+            
+            layers = []
+            for layer_data in config_dict.get('layers', []):
+                segments = []
+                for seg_data in layer_data.get('segments', []):
+                    roles = [
+                        Role(
+                            name=r.get('name', 'default'),
+                            similarity_weight=r.get('similarity_weight', 1.0)
+                        )
+                        for r in seg_data.get('roles', [])
+                    ]
+                    segments.append(SegmentConfig(
+                        name=seg_data.get('name', 'default'),
+                        roles=roles
+                    ))
+                layers.append(LayerConfig(
+                    name=layer_data.get('name', 'default'),
+                    similarity_weight=layer_data.get('similarity_weight', 1.0),
+                    segments=segments
+                ))
+            
+            config = EncoderConfig(
+                dimension=config_dict.get('dimension', 10000),
+                seed=config_dict.get('seed', 42),
+                layers=layers
+            )
+            
+            # Handle nl_encoder_config if present
+            if 'nl_encoder_config' in config_dict and config_dict['nl_encoder_config']:
+                config.nl_encoder_config = config_dict['nl_encoder_config']
+            
+            return config
+        except Exception as e:
+            raise ConfigurationError(f"Failed to create config from dict: {e}")
+    
+    @staticmethod
     def create_intent_config(
         dimension: int = 10000,
         seed: int = 42,

@@ -118,6 +118,55 @@ class MCPServer:
                     "required": ["org_id", "model_id", "query"]
                 }
             ),
+            "gql_query": MCPToolSchema(
+                name="gql_query",
+                description="Execute a GQL (Glyph Query Language) query directly. Returns results as a Fact Tree.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "org_id": {
+                            "type": "string",
+                            "description": "Organization ID"
+                        },
+                        "model_id": {
+                            "type": "string",
+                            "description": "Model ID"
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "GQL query string (e.g., 'FIND SIMILAR TO \"red car\" LIMIT 10')"
+                        },
+                        "enable_cache": {
+                            "type": "boolean",
+                            "description": "Enable semantic query caching",
+                            "default": True
+                        }
+                    },
+                    "required": ["org_id", "model_id", "query"]
+                }
+            ),
+            "gql_translate": MCPToolSchema(
+                name="gql_translate",
+                description="Translate a natural language query to GQL without executing it. Useful for debugging and understanding query translation.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "org_id": {
+                            "type": "string",
+                            "description": "Organization ID"
+                        },
+                        "model_id": {
+                            "type": "string",
+                            "description": "Model ID"
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Natural language query to translate"
+                        }
+                    },
+                    "required": ["org_id", "model_id", "query"]
+                }
+            ),
         }
     
     def get_tool_schemas(self) -> List[MCPToolSchema]:
@@ -285,3 +334,142 @@ class MCPServer:
             response["error"] = "No intent match found for query"
         
         return response
+
+
+    async def _handle_gql_query(
+        self,
+        arguments: Dict[str, Any],
+        user: User,
+    ) -> Dict[str, Any]:
+        """
+        Handle gql_query tool. Executes a GQL query directly.
+        
+        Parses the GQL query, creates an execution plan, and returns
+        results as a Fact Tree.
+        """
+        org_id = arguments["org_id"]
+        model_id = arguments["model_id"]
+        query = arguments["query"]
+        enable_cache = arguments.get("enable_cache", True)
+        
+        # Verify model is loaded
+        loaded_model = await self._query_service._model_manager.get_model(org_id, model_id)
+        if loaded_model is None:
+            raise ModelNotFoundException(org_id, model_id)
+        
+        try:
+            # Import GQL components
+            from glyphh.gql import (
+                parse,
+                GQLExecutor,
+                ExecutionContext,
+                GQLError,
+            )
+            
+            # Build execution context from loaded model
+            glyphs = {}
+            if hasattr(loaded_model.sdk_model, 'glyphs'):
+                for glyph in loaded_model.sdk_model.glyphs:
+                    glyphs[glyph.identifier] = glyph
+            
+            context = ExecutionContext(
+                model=loaded_model.sdk_model,
+                glyphs=glyphs,
+                encoder=getattr(loaded_model, 'encoder', None),
+                similarity_calculator=getattr(loaded_model, 'similarity_calculator', None),
+            )
+            
+            # Create executor and run query
+            executor = GQLExecutor(
+                context=context,
+                enable_cache=enable_cache,
+            )
+            
+            fact_tree = executor.execute(query)
+            
+            # Convert fact tree to dict for response
+            result = fact_tree.to_dict() if hasattr(fact_tree, 'to_dict') else str(fact_tree)
+            
+            return {
+                "result": result,
+                "query_type": "gql",
+                "match_method": "direct",
+                "confidence": 1.0,
+                "cache_stats": executor.get_cache_stats() if enable_cache else None,
+            }
+            
+        except Exception as e:
+            logger.error(f"GQL query error: {e}", exc_info=True)
+            return {
+                "result": None,
+                "error": str(e),
+                "query_type": "gql",
+                "match_method": "direct",
+                "confidence": 0.0,
+            }
+    
+    async def _handle_gql_translate(
+        self,
+        arguments: Dict[str, Any],
+        user: User,
+    ) -> Dict[str, Any]:
+        """
+        Handle gql_translate tool. Translates NL to GQL without executing.
+        
+        Uses the model's GQL patterns to translate natural language
+        queries to GQL syntax.
+        """
+        org_id = arguments["org_id"]
+        model_id = arguments["model_id"]
+        query = arguments["query"]
+        
+        # Verify model is loaded
+        loaded_model = await self._query_service._model_manager.get_model(org_id, model_id)
+        if loaded_model is None:
+            raise ModelNotFoundException(org_id, model_id)
+        
+        try:
+            # Get GQL patterns from model config
+            from glyphh.gql import NLTranslator, DEFAULT_GQL_PATTERNS
+            from shared.encoder_config_factory import EncoderConfigFactory
+            
+            # Try to get custom patterns from model
+            patterns = DEFAULT_GQL_PATTERNS
+            encoder_config = EncoderConfigFactory.extract_encoder_config(loaded_model.sdk_model)
+            
+            if encoder_config and hasattr(encoder_config, 'gql_patterns') and encoder_config.gql_patterns:
+                custom_patterns = encoder_config.gql_patterns.to_gql_patterns()
+                if custom_patterns:
+                    patterns = custom_patterns
+            
+            # Create translator
+            translator = NLTranslator(
+                patterns=patterns,
+                dimension=encoder_config.dimension if encoder_config else 10000,
+                seed=encoder_config.seed if encoder_config else 42,
+            )
+            
+            # Translate query
+            result = translator.translate(query)
+            
+            return {
+                "success": result.success,
+                "gql": result.gql,
+                "pattern_name": result.pattern_name,
+                "confidence": result.confidence,
+                "extracted_slots": result.extracted_slots,
+                "error": result.error,
+                "query_type": "gql_translate",
+                "match_method": "hdc_intent" if result.success else "none",
+            }
+            
+        except Exception as e:
+            logger.error(f"GQL translate error: {e}", exc_info=True)
+            return {
+                "success": False,
+                "gql": None,
+                "error": str(e),
+                "query_type": "gql_translate",
+                "match_method": "none",
+                "confidence": 0.0,
+            }
