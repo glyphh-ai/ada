@@ -195,6 +195,8 @@ from api.routes import (
     org_scoped_router,
     listeners_router,
     nl_query_router,
+    jobs_router,
+    chat_router,
 )
 
 app.include_router(health_router)
@@ -204,6 +206,8 @@ app.include_router(query_router)
 app.include_router(org_scoped_router)
 app.include_router(listeners_router)
 app.include_router(nl_query_router)
+app.include_router(jobs_router)
+app.include_router(chat_router)
 
 
 if __name__ == "__main__":

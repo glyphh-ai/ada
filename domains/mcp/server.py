@@ -8,10 +8,11 @@ Exposes the nl_query tool through the MCP interface.
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Coroutine, Dict, List, Optional
 from uuid import UUID
 
 from domains.auth.service import AuthService, User
+from domains.mcp.progress import MCPProgressHandler, ProgressTracker
 from domains.query.service import QueryService
 from shared.exceptions import (
     AuthenticationException,
@@ -22,6 +23,10 @@ from shared.exceptions import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Type alias for notification sender
+NotificationSender = Optional[Callable[[dict], Coroutine[Any, Any, None]]]
 
 
 @dataclass
@@ -182,9 +187,25 @@ class MCPServer:
         tool_name: str,
         arguments: Dict[str, Any],
         auth_token: str,
+        progress_token: Optional[str] = None,
+        send_notification: NotificationSender = None,
     ) -> MCPResponse:
-        """Handle MCP tool invocation with authentication."""
+        """
+        Handle MCP tool invocation with authentication and optional progress.
+        
+        Args:
+            tool_name: Name of the tool to invoke
+            arguments: Tool arguments
+            auth_token: Authentication token
+            progress_token: Optional MCP progress token for long-running ops
+            send_notification: Optional async function to send notifications
+        """
         start_time = datetime.utcnow()
+        
+        # Create progress handler if token provided
+        progress_handler = None
+        if progress_token and send_notification:
+            progress_handler = MCPProgressHandler(send_notification)
         
         try:
             # Authenticate
@@ -205,12 +226,18 @@ class MCPServer:
             if org_id:
                 await self._auth_service.check_access(user, org_id, model_id or "", "read")
             
-            # Dispatch to handler
+            # Dispatch to handler with progress support
             handler = getattr(self, f"_handle_{tool_name}", None)
             if handler is None:
                 return self._error_response(f"Handler not implemented: {tool_name}")
             
-            result = await handler(arguments, user)
+            # Pass progress handler to tool handlers that support it
+            result = await handler(
+                arguments, 
+                user, 
+                progress_handler=progress_handler,
+                progress_token=progress_token,
+            )
             
             # Log success
             elapsed = (datetime.utcnow() - start_time).total_seconds() * 1000
@@ -268,11 +295,14 @@ class MCPServer:
         self,
         arguments: Dict[str, Any],
         user: User,
+        progress_handler: Optional[MCPProgressHandler] = None,
+        progress_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Handle nl_query tool. Delegates entirely to NLQueryService.
         
         Requires the model to be loaded in the runtime — no fallbacks.
+        Sends progress notifications if progress_token is provided.
         """
         from domains.nl_query.service import NLQueryService
         from domains.nl_query.intent_matcher import IntentMatcher
@@ -284,10 +314,25 @@ class MCPServer:
         query = arguments["query"]
         debug = arguments.get("debug", False)
         
+        # Send initial progress if token provided
+        if progress_handler and progress_token:
+            await progress_handler.notify(
+                progress_token, 
+                progress=10, 
+                message="Analyzing query..."
+            )
+        
         # Verify model is loaded — fail early with clear error
         loaded_model = await self._query_service._model_manager.get_model(org_id, model_id)
         if loaded_model is None:
             raise ModelNotFoundException(org_id, model_id)
+        
+        if progress_handler and progress_token:
+            await progress_handler.notify(
+                progress_token, 
+                progress=30, 
+                message="Matching intent..."
+            )
         
         # Extract NL config from the loaded model's encoder config
         from shared.encoder_config_factory import EncoderConfigFactory
@@ -314,12 +359,26 @@ class MCPServer:
             confidence_threshold=0.85,
         )
         
+        if progress_handler and progress_token:
+            await progress_handler.notify(
+                progress_token, 
+                progress=50, 
+                message="Executing query..."
+            )
+        
         result = await nl_service.execute_nl_query(
             org_id=org_id,
             model_id=model_id,
             query=query,
             debug=debug,
         )
+        
+        if progress_handler and progress_token:
+            await progress_handler.notify(
+                progress_token, 
+                progress=100, 
+                message="Complete"
+            )
         
         response = {
             "result": result.result,
@@ -340,22 +399,39 @@ class MCPServer:
         self,
         arguments: Dict[str, Any],
         user: User,
+        progress_handler: Optional[MCPProgressHandler] = None,
+        progress_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Handle gql_query tool. Executes a GQL query directly.
         
         Parses the GQL query, creates an execution plan, and returns
-        results as a Fact Tree.
+        results as a Fact Tree. Sends progress notifications if token provided.
         """
         org_id = arguments["org_id"]
         model_id = arguments["model_id"]
         query = arguments["query"]
         enable_cache = arguments.get("enable_cache", True)
         
+        # Send initial progress
+        if progress_handler and progress_token:
+            await progress_handler.notify(
+                progress_token, 
+                progress=10, 
+                message="Parsing query..."
+            )
+        
         # Verify model is loaded
         loaded_model = await self._query_service._model_manager.get_model(org_id, model_id)
         if loaded_model is None:
             raise ModelNotFoundException(org_id, model_id)
+        
+        if progress_handler and progress_token:
+            await progress_handler.notify(
+                progress_token, 
+                progress=30, 
+                message="Building execution context..."
+            )
         
         try:
             # Import GQL components
@@ -379,6 +455,13 @@ class MCPServer:
                 similarity_calculator=getattr(loaded_model, 'similarity_calculator', None),
             )
             
+            if progress_handler and progress_token:
+                await progress_handler.notify(
+                    progress_token, 
+                    progress=50, 
+                    message="Executing query..."
+                )
+            
             # Create executor and run query
             executor = GQLExecutor(
                 context=context,
@@ -386,6 +469,13 @@ class MCPServer:
             )
             
             fact_tree = executor.execute(query)
+            
+            if progress_handler and progress_token:
+                await progress_handler.notify(
+                    progress_token, 
+                    progress=100, 
+                    message="Complete"
+                )
             
             # Convert fact tree to dict for response
             result = fact_tree.to_dict() if hasattr(fact_tree, 'to_dict') else str(fact_tree)
@@ -412,6 +502,8 @@ class MCPServer:
         self,
         arguments: Dict[str, Any],
         user: User,
+        progress_handler: Optional[MCPProgressHandler] = None,
+        progress_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Handle gql_translate tool. Translates NL to GQL without executing.

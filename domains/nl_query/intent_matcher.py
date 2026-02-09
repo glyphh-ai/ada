@@ -5,8 +5,7 @@ Uses HDC similarity from the SDK's IntentEncoder to match natural language
 queries against registered intent patterns. This is the deterministic,
 rules-first approach - "When your LLM can't afford to be wrong, sidecar it with Glyphh."
 
-Updated to use the new SDK API with explicit EncoderConfig structure via
-EncoderConfigFactory.create_intent_config().
+Updated to use PatternMerger for comprehensive default patterns (Requirement 4.3, 4.9).
 """
 
 import logging
@@ -131,9 +130,72 @@ class IntentMatcher:
     
     def _load_model_patterns(self) -> None:
         """
-        Load intent patterns from model NL config.
+        Load intent patterns from model NL config using PatternMerger.
         
-        Clears any existing patterns and loads from model config.
+        Uses PatternMerger to merge custom patterns with defaults.
+        Logs pattern source for debugging (Requirement 4.9).
+        """
+        if not self._encoder:
+            return
+        
+        try:
+            # Import PatternMerger from SDK
+            from glyphh.gql.pattern_merger import PatternMerger
+            from glyphh.gql.patterns import GQLPattern
+            
+            # Build config dict for PatternMerger
+            config = {}
+            if self._model_nl_config:
+                config["nl_encoder_config"] = self._model_nl_config
+            
+            # Merge patterns (custom + defaults)
+            merged_patterns = PatternMerger.from_config(config, log_source=True)
+            
+            # Import IntentPattern from SDK
+            adapter = get_sdk_adapter()
+            IntentPattern = adapter.import_intent_pattern()
+            
+            if IntentPattern is None:
+                logger.warning("IntentPattern not available, cannot load patterns")
+                return
+            
+            # Convert GQLPatterns to IntentPatterns and add to encoder
+            loaded_count = 0
+            for gql_pattern in merged_patterns:
+                try:
+                    # Normalize phrases for intent matching
+                    normalized_phrases = [
+                        re.sub(r'\{[^}]+\}', 'SLOT', phrase)
+                        for phrase in gql_pattern.phrases
+                    ]
+                    
+                    pattern = IntentPattern(
+                        intent_type=gql_pattern.name,
+                        example_phrases=normalized_phrases,
+                        query_template={"operation": gql_pattern.name, "gql_template": gql_pattern.gql_template}
+                    )
+                    self._encoder.add_pattern(pattern)
+                    loaded_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to add pattern '{gql_pattern.name}': {e}")
+            
+            if loaded_count > 0:
+                self._using_model_patterns = bool(self._model_nl_config and self._model_nl_config.get("patterns"))
+                logger.info(f"Loaded {loaded_count} patterns (merged defaults + custom)")
+            else:
+                logger.warning("No patterns loaded, using SDK defaults")
+                
+        except ImportError as e:
+            logger.warning(f"PatternMerger not available: {e}")
+            # Fall back to old behavior
+            self._load_model_patterns_legacy()
+        except Exception as e:
+            logger.error(f"Failed to load patterns via PatternMerger: {e}")
+            self._load_model_patterns_legacy()
+    
+    def _load_model_patterns_legacy(self) -> None:
+        """
+        Legacy pattern loading (fallback if PatternMerger unavailable).
         """
         if not self._encoder or not self._model_nl_config:
             return
@@ -144,15 +206,13 @@ class IntentMatcher:
             return
         
         try:
-            # Import IntentPattern from SDK
             adapter = get_sdk_adapter()
             IntentPattern = adapter.import_intent_pattern()
             
             if IntentPattern is None:
-                logger.warning("IntentPattern not available, cannot load model patterns")
+                logger.warning("IntentPattern not available")
                 return
             
-            # Clear existing patterns and add model patterns
             loaded_count = 0
             for pattern_data in patterns:
                 try:
@@ -163,20 +223,15 @@ class IntentMatcher:
                     )
                     self._encoder.add_pattern(pattern)
                     loaded_count += 1
-                except ValueError as e:
-                    logger.warning(f"Skipping invalid pattern: {e}")
                 except Exception as e:
-                    logger.warning(f"Failed to add pattern '{pattern_data.get('intent_type', 'unknown')}': {e}")
+                    logger.warning(f"Skipping invalid pattern: {e}")
             
             if loaded_count > 0:
                 self._using_model_patterns = True
-                logger.info(f"Loaded {loaded_count} patterns from model NL config")
-            else:
-                logger.warning("No valid patterns loaded from model, using SDK defaults")
+                logger.info(f"Loaded {loaded_count} patterns from model NL config (legacy)")
                 
         except Exception as e:
-            logger.error(f"Failed to load model patterns: {e}")
-            logger.info("Falling back to SDK default patterns")
+            logger.error(f"Failed to load model patterns (legacy): {e}")
     
     async def match_intent(self, query: str) -> Optional[IntentMatch]:
         """
