@@ -83,18 +83,25 @@ class GlyphStorage:
 
         # Validate embedding dimension against runtime max
         max_dim = settings.max_vector_dimension
-        if len(embedding) > max_dim:
+        original_len = len(embedding)
+        logger.info(f"create_glyph: embedding len={original_len}, max_dim={max_dim}")
+        
+        if original_len > max_dim:
             raise ValidationException(
                 field="embedding",
-                reason=f"Embedding dimension {len(embedding)} exceeds runtime limit of {max_dim}"
+                reason=f"Embedding dimension {original_len} exceeds runtime limit of {max_dim}"
             )
         
         # Pad embedding to max_dim if smaller (pgvector requires fixed-size vectors)
-        if len(embedding) < max_dim:
-            embedding = embedding + [0.0] * (max_dim - len(embedding))
+        if original_len < max_dim:
+            padding_needed = max_dim - original_len
+            embedding = list(embedding) + [0.0] * padding_needed
+            logger.info(f"create_glyph: padded embedding from {original_len} to {len(embedding)} (added {padding_needed} zeros)")
         
         if glyph_id is None:
             glyph_id = uuid4()
+        
+        logger.info(f"create_glyph: final embedding len before Glyph creation: {len(embedding)}")
         
         glyph = Glyph(
             id=glyph_id,
@@ -105,8 +112,11 @@ class GlyphStorage:
             glyph_metadata=metadata or {},
         )
         
+        logger.info(f"create_glyph: Glyph created, adding to session")
         self._session.add(glyph)
+        logger.info(f"create_glyph: flushing session")
         await self._session.flush()
+        logger.info(f"create_glyph: flush complete")
         
         logger.debug(f"Created glyph {glyph_id} in org={org_id}, model={model_id}")
         

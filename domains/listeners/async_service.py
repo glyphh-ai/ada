@@ -552,6 +552,8 @@ class AsyncListenerService:
                             })
                             processed += 1
                             logger.warning(f"Failed to encode record {processed}: {e}")
+                            # Rollback the session to clear the failed transaction state
+                            await session.rollback()
                     
                     # Update progress after each batch (Requirement 7.4)
                     await self._job_manager.update_progress(
