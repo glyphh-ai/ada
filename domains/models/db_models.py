@@ -46,7 +46,7 @@ class Glyph(Base):
     org_id = Column(String(255), nullable=False, index=True)
     model_id = Column(String(255), nullable=False, index=True)
     concept_text = Column(Text, nullable=False)
-    embedding = Column(Vector(2000), nullable=False)  # Max 2000 dims (pgvector index limit)
+    embedding = Column(Vector(2048), nullable=False)  # Max 2048 dims (pgvector index limit)
     glyph_metadata = Column("metadata", JSONB, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
