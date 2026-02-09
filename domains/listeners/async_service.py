@@ -192,15 +192,18 @@ def _record_to_concept(
     else:
         concept_name = f"record_{index}"
     
-    # Build metadata including temporal role info
+    # Build metadata including temporal role info (case-insensitive lookup)
     metadata = {
         "source": "listener",
         "index": index,
     }
     if temporal_role:
         metadata["temporal_role"] = temporal_role
-        if temporal_role in record:
-            metadata["temporal_value"] = record[temporal_role]
+        # Case-insensitive lookup for temporal value
+        record_keys_lower = {k.lower(): k for k in record.keys()}
+        actual_temporal_key = record_keys_lower.get(temporal_role.lower())
+        if actual_temporal_key:
+            metadata["temporal_value"] = record[actual_temporal_key]
     
     return Concept(
         name=concept_name,
@@ -367,9 +370,17 @@ class AsyncListenerService:
                                 ]
                                 if missing_keys:
                                     skipped += 1
+                                    # Provide helpful error with available fields
+                                    available_fields = list(record.keys())[:10]  # Show first 10
+                                    error_msg = (
+                                        f"Missing required primary key field(s): {missing_keys}. "
+                                        f"Your data has these fields: {available_fields}"
+                                    )
+                                    if len(record.keys()) > 10:
+                                        error_msg += f" (and {len(record.keys()) - 10} more)"
                                     failed_records.append({
                                         "index": processed,
-                                        "error": f"Missing required key_part field(s): {missing_keys}",
+                                        "error": error_msg,
                                     })
                                     processed += 1
                                     continue
