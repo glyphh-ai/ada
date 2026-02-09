@@ -87,6 +87,13 @@ class Settings(BaseSettings):
         description="Maximum glyphs per model in local mode (development limit)"
     )
     
+    # Vector dimension limit
+    max_vector_dimension: int = Field(
+        default=2000,
+        description="Maximum vector dimension for models. Cloud default is 2000 (pgvector index limit). "
+                    "Local installs can increase this but will lose index-based similarity search."
+    )
+    
     # Model storage
     model_storage_path: str = Field(
         default="/data/models",

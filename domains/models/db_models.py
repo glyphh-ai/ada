@@ -46,7 +46,7 @@ class Glyph(Base):
     org_id = Column(String(255), nullable=False, index=True)
     model_id = Column(String(255), nullable=False, index=True)
     concept_text = Column(Text, nullable=False)
-    embedding = Column(Vector(768), nullable=False)  # 768-dim for all-MiniLM-L6-v2
+    embedding = Column(Vector(2000), nullable=False)  # Max 2000 dims (pgvector index limit)
     glyph_metadata = Column("metadata", JSONB, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -70,12 +70,12 @@ class Glyph(Base):
         Index("idx_glyph_org_model", org_id, model_id),
         # Composite index for scoped queries with time ordering
         Index("idx_glyph_org_model_created", org_id, model_id, created_at.desc()),
-        # Index for vector similarity search (IVFFlat)
+        # Index for vector similarity search (HNSW - faster than IVFFlat)
         Index(
             "idx_glyph_embedding",
             embedding,
-            postgresql_using="ivfflat",
-            postgresql_with={"lists": 100},
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
             postgresql_ops={"embedding": "vector_cosine_ops"}
         ),
     )

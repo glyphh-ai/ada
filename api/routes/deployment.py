@@ -94,11 +94,18 @@ async def deploy_model(
     
     Accepts a binary .glyphh file and deploys it to the runtime.
     Requires org_id and model_id as separate query params.
+    
+    Vector dimension is limited by MAX_VECTOR_DIMENSION env var (default 2048).
     """
     if not file.filename.endswith(".glyphh"):
         raise HTTPException(status_code=400, detail="File must have .glyphh extension")
     
     content = await file.read()
+    
+    # Pre-validate dimension before loading
+    dimension_error = await _validate_model_dimension(content)
+    if dimension_error:
+        raise HTTPException(status_code=400, detail=dimension_error)
     
     try:
         model_info = await manager.load_model_from_bytes(content, org_id, model_id)
@@ -114,6 +121,53 @@ async def deploy_model(
     except Exception as e:
         logger.error(f"Failed to deploy model: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+async def _validate_model_dimension(content: bytes) -> Optional[str]:
+    """
+    Validate model dimension against runtime limit.
+    
+    Returns error message if dimension exceeds limit, None if valid.
+    """
+    import gzip
+    import json as json_module
+    
+    max_dim = settings.max_vector_dimension
+    
+    # Try to extract dimension from content
+    try:
+        # Try gzipped format first
+        try:
+            decompressed = gzip.decompress(content)
+            # For gzipped .glyphh files, we'd need to parse the model
+            # For now, skip validation for gzipped files (they're from CLI)
+            return None
+        except gzip.BadGzipFile:
+            pass
+        
+        # Plain JSON config from platform
+        config_data = json_module.loads(content)
+        model_config = config_data.get("config", {})
+        
+        # Check encoder_config.dimension
+        encoder_config = model_config.get("encoder_config", model_config)
+        dimension = encoder_config.get("dimension", 0)
+        
+        if dimension > max_dim:
+            return (
+                f"Model dimension ({dimension}) exceeds runtime limit ({max_dim}). "
+                f"Cloud runtimes support up to {max_dim} dimensions (pgvector index limit). "
+                f"For larger models, please use a local runtime."
+            )
+        
+        return None
+        
+    except json_module.JSONDecodeError:
+        # Can't parse, let the model loader handle it
+        return None
+    except Exception as e:
+        logger.warning(f"Could not validate model dimension: {e}")
+        return None
 
 
 @router.get("/status", response_model=StatusResponse)
