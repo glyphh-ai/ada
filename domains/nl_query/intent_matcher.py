@@ -247,11 +247,18 @@ class IntentMatcher:
         
         if encoder is None:
             # Fallback to simple keyword matching
+            logger.info("No SDK encoder available, using fallback matcher")
             return self._fallback_match(query)
         
         try:
             # Use SDK's IntentEncoder for HDC similarity matching
             match = encoder.match_intent(query, self.confidence_threshold)
+            
+            if match is None:
+                logger.info(f"SDK encoder returned no match for query: '{query}', using fallback")
+                return self._fallback_match(query)
+            
+            logger.info(f"SDK encoder matched: intent={match.intent_type}, confidence={match.confidence:.3f}")
             
             # Extract parameters from query
             parameters = self._extract_parameters(query, match.intent_type)
@@ -271,7 +278,7 @@ class IntentMatcher:
                 structured_query=structured_query,
             )
         except Exception as e:
-            logger.warning(f"Intent matching failed: {e}")
+            logger.warning(f"Intent matching failed: {e}, using fallback")
             return self._fallback_match(query)
     
     def _fallback_match(self, query: str) -> Optional[IntentMatch]:

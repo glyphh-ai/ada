@@ -70,7 +70,7 @@ class NLQueryService:
         1. Try rules-based matching (IntentMatcher)
         2. If confidence >= threshold: execute directly
         3. If confidence < threshold AND LLM enabled: use LLM fallback
-        4. If confidence < threshold AND no LLM: return "none" match_method
+        4. If confidence < threshold AND no LLM: execute with lower confidence
         """
         start_time = time.time()
         
@@ -79,7 +79,10 @@ class NLQueryService:
         # Step 1: Try rules-based matching
         match_result = await self.intent_matcher.match_intent(query)
         
-        if match_result and match_result.confidence >= self.confidence_threshold:
+        # Accept any match with confidence > 0.3 (SDK HDC similarity is more conservative)
+        min_acceptable_confidence = 0.3
+        
+        if match_result and match_result.confidence >= min_acceptable_confidence:
             logger.info(
                 f"Rules match: intent={match_result.intent}, "
                 f"confidence={match_result.confidence:.3f}"
