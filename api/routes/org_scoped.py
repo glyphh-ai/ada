@@ -13,14 +13,11 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from domains.auth.service import AuthService, User
 from domains.mcp.server import MCPServer
-from domains.models.storage import GlyphStorage
 from domains.query.service import QueryService
 from infrastructure.config import get_settings
-from infrastructure.database import get_db
 from shared.auth import AuthenticatedUser, get_current_user
 
 logger = logging.getLogger(__name__)
@@ -140,83 +137,6 @@ async def list_mcp_tools(
     mcp_server: MCPServer = Depends(get_mcp_server),
 ) -> Dict[str, Any]:
     return {"tools": mcp_server.get_tools_list()}
-
-
-# Listener Endpoint - Batch Glyph Ingestion
-class ListenerRequest(BaseModel):
-    records: List[Dict[str, Any]] = Field(..., description="List of record objects to encode as glyphs")
-
-
-@router.post("/listener")
-async def listener_ingest(
-    org_id: str,
-    model_id: str,
-    request: ListenerRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: AuthenticatedUser = Depends(validate_org_access),
-) -> Dict[str, Any]:
-    """
-    Ingest records as glyphs into a deployed model.
-    
-    Accepts records as JSON objects. Each record is encoded using the model's
-    encoder which extracts relevant fields based on the model configuration.
-    
-    Requires the model to be loaded in the runtime.
-    """
-    import json
-    from main import model_manager
-    from domains.models.storage import GlyphStorage
-    
-    if model_manager is None:
-        raise HTTPException(status_code=503, detail="Model manager not initialized")
-    
-    # Model must be loaded
-    model = await model_manager.get_model(org_id, model_id)
-    if model is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Model not found: org={org_id}, model={model_id}. Deploy the model to the runtime first."
-        )
-    
-    encoder = model.encoder
-    storage = GlyphStorage(db)
-    
-    encoded_count = 0
-    failed_count = 0
-    errors = []
-    
-    for i, record in enumerate(request.records):
-        try:
-            # Encode the record - encoder handles field extraction
-            embedding = encoder.encode(record)
-            embedding_list = embedding.tolist() if hasattr(embedding, 'tolist') else list(embedding)
-            
-            # Store the full record as metadata, use JSON string as concept_text
-            concept_text = json.dumps(record) if isinstance(record, dict) else str(record)
-            
-            await storage.create_glyph(
-                org_id=org_id,
-                model_id=model_id,
-                concept_text=concept_text,
-                embedding=embedding_list,
-                metadata=record if isinstance(record, dict) else {"value": record},
-            )
-            encoded_count += 1
-        except Exception as e:
-            logger.error(f"Failed to encode record {i}: {e}")
-            failed_count += 1
-            errors.append({
-                "index": i,
-                "error": str(e)
-            })
-    
-    logger.info(f"Listener ingest for org={org_id}, model={model_id}: {encoded_count} encoded, {failed_count} failed")
-    
-    return {
-        "encoded_count": encoded_count,
-        "failed_count": failed_count,
-        "errors": errors if errors else None,
-    }
 
 
 # NL Query Service Factory

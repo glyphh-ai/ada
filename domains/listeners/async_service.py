@@ -3,10 +3,15 @@
 Processes records in batches and reports progress via JobManager.
 Returns immediately with job_id, processing happens in background.
 
-Requirements: 7.2, 7.3, 7.4
+Accepts raw JSON records and converts them to Concepts using the model's
+encoder config to find key_part roles (composite primary key) and temporal
+role for concept naming.
+
+Requirements: 7.1, 7.2, 7.3, 7.4, 7.5
 """
 
 import asyncio
+import json
 import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -15,6 +20,190 @@ from domains.jobs.manager import DataLoadStatus, JobManager, get_job_manager
 from domains.models.storage import GlyphStorage
 
 logger = logging.getLogger(__name__)
+
+
+def _find_key_part_roles(encoder_config) -> List[str]:
+    """
+    Find all roles marked as key_part in the encoder config.
+    
+    Searches through layers -> segments -> roles to find roles
+    with key_part=True. Returns them in segment order.
+    
+    Args:
+        encoder_config: EncoderConfig dict or object
+    
+    Returns:
+        List of role names with key_part=True, in segment order
+    
+    Requirements: 7.1, 7.5
+    """
+    if not encoder_config:
+        return []
+    
+    key_part_roles = []
+    
+    # Handle dict config (from DB storage)
+    if isinstance(encoder_config, dict):
+        layers = encoder_config.get("layers", [])
+        for layer in layers:
+            segments = layer.get("segments", [])
+            for segment in segments:
+                roles = segment.get("roles", [])
+                for role in roles:
+                    if role.get("key_part", False):
+                        key_part_roles.append(role.get("name"))
+        return key_part_roles
+    
+    # Handle EncoderConfig object
+    if hasattr(encoder_config, "layers"):
+        for layer in encoder_config.layers:
+            for segment in layer.segments:
+                for role in segment.roles:
+                    if getattr(role, "key_part", False):
+                        key_part_roles.append(role.name)
+    
+    return key_part_roles
+
+
+def _find_temporal_role(encoder_config) -> Optional[str]:
+    """
+    Find the role marked as temporal in the encoder config.
+    
+    Searches through layers -> segments -> roles to find the role
+    with temporal=True.
+    
+    Args:
+        encoder_config: EncoderConfig dict or object
+    
+    Returns:
+        Role name if found, None otherwise
+    
+    Requirements: 7.3
+    """
+    if not encoder_config:
+        return None
+    
+    # Handle dict config (from DB storage)
+    if isinstance(encoder_config, dict):
+        layers = encoder_config.get("layers", [])
+        for layer in layers:
+            segments = layer.get("segments", [])
+            for segment in segments:
+                roles = segment.get("roles", [])
+                for role in roles:
+                    if role.get("temporal", False):
+                        return role.get("name")
+        return None
+    
+    # Handle EncoderConfig object
+    if hasattr(encoder_config, "layers"):
+        for layer in encoder_config.layers:
+            for segment in layer.segments:
+                for role in segment.roles:
+                    if getattr(role, "temporal", False):
+                        return role.name
+    
+    return None
+
+
+def _find_primary_id_role(encoder_config) -> Optional[str]:
+    """
+    Find the role marked as primary_id in the encoder config.
+    
+    DEPRECATED: Use _find_key_part_roles() for composite keys.
+    This function is kept for backward compatibility with configs
+    that still use primary_id instead of key_part.
+    
+    Returns:
+        Role name if found, None otherwise
+    """
+    if not encoder_config:
+        return None
+    
+    # Handle dict config (from DB storage)
+    if isinstance(encoder_config, dict):
+        layers = encoder_config.get("layers", [])
+        for layer in layers:
+            segments = layer.get("segments", [])
+            for segment in segments:
+                roles = segment.get("roles", [])
+                for role in roles:
+                    # Check both primary_id (legacy) and key_part (new)
+                    if role.get("primary_id", False) or role.get("key_part", False):
+                        return role.get("name")
+        return None
+    
+    # Handle EncoderConfig object
+    if hasattr(encoder_config, "layers"):
+        for layer in encoder_config.layers:
+            for segment in layer.segments:
+                for role in segment.roles:
+                    if getattr(role, "primary_id", False) or getattr(role, "key_part", False):
+                        return role.name
+    
+    return None
+
+
+def _record_to_concept(
+    record: Dict[str, Any],
+    index: int,
+    key_part_roles: List[str] = None,
+    temporal_role: Optional[str] = None
+) -> 'Concept':
+    """
+    Convert a raw JSON record to a Concept object.
+    
+    Args:
+        record: Raw JSON record dict
+        index: Record index (used as fallback name)
+        key_part_roles: List of role names that form the composite key
+        temporal_role: Name of the role holding temporal data
+    
+    Returns:
+        Concept object ready for encoding
+    
+    Requirements: 7.2, 7.3, 7.4
+    """
+    from glyphh.core.types import Concept
+    
+    # Build concept name from composite key (key_part roles)
+    if key_part_roles:
+        key_values = []
+        for role_name in key_part_roles:
+            if role_name in record:
+                value = str(record[role_name])
+                # Sanitize value for identifier
+                sanitized = value.replace(" ", "_").replace("@", "_").replace("#", "_")
+                key_values.append(sanitized)
+        
+        if key_values:
+            concept_name = "_".join(key_values)
+        else:
+            # Fallback if no key_part values found
+            concept_name = f"record_{index}"
+    elif "name" in record:
+        concept_name = str(record["name"])
+    elif "id" in record:
+        concept_name = str(record["id"])
+    else:
+        concept_name = f"record_{index}"
+    
+    # Build metadata including temporal role info
+    metadata = {
+        "source": "listener",
+        "index": index,
+    }
+    if temporal_role:
+        metadata["temporal_role"] = temporal_role
+        if temporal_role in record:
+            metadata["temporal_value"] = record[temporal_role]
+    
+    return Concept(
+        name=concept_name,
+        attributes=record,
+        relationships=[],
+        metadata=metadata
+    )
 
 
 class AsyncListenerService:
@@ -108,10 +297,29 @@ class AsyncListenerService:
                 message="Validating records...",
             )
             
-            # Get encoder
+            # Get encoder and model info
             encoder = await self._encoder_getter(org_id, model_id)
             if not encoder:
                 raise ValueError(f"Model not loaded: {org_id}/{model_id}")
+            
+            # Find key_part roles (composite key) and temporal role from encoder config
+            encoder_config = getattr(encoder, 'config', None)
+            key_part_roles = _find_key_part_roles(encoder_config)
+            temporal_role = _find_temporal_role(encoder_config)
+            
+            # Backward compatibility: if no key_part roles, try legacy primary_id
+            if not key_part_roles:
+                primary_id_role = _find_primary_id_role(encoder_config)
+                if primary_id_role:
+                    key_part_roles = [primary_id_role]
+            
+            if key_part_roles:
+                logger.info(f"Using key_part roles {key_part_roles} for composite key")
+            else:
+                logger.info("No key_part roles found, using fallback naming (name/id/index)")
+            
+            if temporal_role:
+                logger.info(f"Using temporal role '{temporal_role}' for time-based identifiers")
             
             # Phase 2: Encoding
             await self._job_manager.update_progress(
@@ -135,37 +343,57 @@ class AsyncListenerService:
                     
                     for record in batch:
                         try:
-                            # Extract concept text
-                            concept = (
-                                record.get("concept") or 
-                                record.get("text") or 
-                                record.get("concept_text")
-                            )
-                            
-                            if not concept:
+                            # Validate record is a dict
+                            if not isinstance(record, dict):
                                 skipped += 1
                                 failed_records.append({
                                     "index": processed,
-                                    "error": "Missing concept/text field",
+                                    "error": f"Record must be a dict, got {type(record).__name__}",
                                 })
                                 processed += 1
                                 continue
                             
-                            # Encode
-                            embedding = encoder.encode_text(concept)
+                            # Validate key_part fields exist if configured
+                            if key_part_roles:
+                                missing_keys = [k for k in key_part_roles if k not in record]
+                                if missing_keys:
+                                    skipped += 1
+                                    failed_records.append({
+                                        "index": processed,
+                                        "error": f"Missing required key_part field(s): {missing_keys}",
+                                    })
+                                    processed += 1
+                                    continue
+                            
+                            # Convert raw JSON to Concept using composite key
+                            concept = _record_to_concept(record, processed, key_part_roles, temporal_role)
+                            
+                            # Encode using the SDK encoder
+                            glyph = encoder.encode(concept)
+                            
+                            # Extract embedding from glyph
+                            if hasattr(glyph, 'cortex') and hasattr(glyph.cortex, 'data'):
+                                embedding = glyph.cortex.data
+                            elif hasattr(glyph, 'global_cortex') and hasattr(glyph.global_cortex, 'data'):
+                                embedding = glyph.global_cortex.data
+                            else:
+                                raise ValueError("Glyph has no cortex/global_cortex with data")
+                            
                             embedding_list = (
                                 embedding.tolist() 
                                 if hasattr(embedding, 'tolist') 
                                 else list(embedding)
                             )
                             
-                            # Store
+                            # Store with full record as metadata
+                            concept_text = json.dumps(record)
+                            
                             await storage.create_glyph(
                                 org_id=org_id,
                                 model_id=model_id,
-                                concept_text=concept,
+                                concept_text=concept_text,
                                 embedding=embedding_list,
-                                metadata=record.get("metadata", {}),
+                                metadata=record,
                             )
                             
                             encoded += 1
