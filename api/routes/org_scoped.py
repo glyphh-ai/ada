@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -142,90 +142,35 @@ async def list_mcp_tools(
     return {"tools": mcp_server.get_tools_list()}
 
 
-# Listener Endpoints
-@router.websocket("/listener")
-async def listener_websocket(
-    websocket: WebSocket,
-    org_id: str,
-    model_id: str,
-):
-    """WebSocket listener for real-time glyph ingestion."""
-    await websocket.accept()
-    
-    try:
-        while True:
-            data = await websocket.receive_json()
-            message_type = data.get("type")
-            
-            if message_type == "create_glyph":
-                await websocket.send_json({
-                    "type": "glyph_created",
-                    "status": "not_implemented",
-                    "message": "Listener service not yet implemented"
-                })
-            elif message_type == "ping":
-                await websocket.send_json({"type": "pong"})
-            else:
-                await websocket.send_json({
-                    "type": "error",
-                    "message": f"Unknown message type: {message_type}"
-                })
-                
-    except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for org={org_id}, model={model_id}")
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        await websocket.close(code=1011, reason=str(e))
+# Listener Endpoint - Batch Glyph Ingestion
+class ListenerRequest(BaseModel):
+    records: List[Dict[str, Any]] = Field(..., description="List of record objects to encode as glyphs")
 
 
 @router.post("/listener")
-async def listener_batch(
+async def listener_ingest(
     org_id: str,
     model_id: str,
-    request: Dict[str, Any],
+    request: ListenerRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(validate_org_access),
 ) -> Dict[str, Any]:
-    """HTTP endpoint for batch glyph ingestion."""
-    concepts = request.get("concepts", [])
-    metadata = request.get("metadata", {})
-    
-    if not concepts:
-        raise HTTPException(status_code=400, detail="No concepts provided")
-    
-    return {
-        "status": "not_implemented",
-        "message": "Batch listener not yet implemented",
-        "org_id": org_id,
-        "model_id": model_id,
-        "concepts_received": len(concepts)
-    }
-
-
-# Batch Glyph Creation
-class BatchGlyphRequest(BaseModel):
-    concepts: List[str] = Field(..., description="List of concept texts to encode")
-    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Shared metadata for all glyphs")
-
-
-@router.post("/glyphs/batch")
-async def create_glyphs_batch_org_scoped(
-    org_id: str,
-    model_id: str,
-    request: BatchGlyphRequest,
-    db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
     """
-    Create multiple glyphs in a batch for an org-scoped model.
+    Ingest records as glyphs into a deployed model.
     
-    Requires the model to be loaded in the runtime — no fallback encoders.
+    Accepts records as JSON objects. Each record is encoded using the model's
+    encoder which extracts relevant fields based on the model configuration.
+    
+    Requires the model to be loaded in the runtime.
     """
+    import json
     from main import model_manager
     from domains.models.storage import GlyphStorage
     
     if model_manager is None:
         raise HTTPException(status_code=503, detail="Model manager not initialized")
     
-    # Model must be loaded — no fallback
+    # Model must be loaded
     model = await model_manager.get_model(org_id, model_id)
     if model is None:
         raise HTTPException(
@@ -236,40 +181,40 @@ async def create_glyphs_batch_org_scoped(
     encoder = model.encoder
     storage = GlyphStorage(db)
     
-    results = []
+    encoded_count = 0
+    failed_count = 0
     errors = []
     
-    for i, concept in enumerate(request.concepts):
+    for i, record in enumerate(request.records):
         try:
-            embedding = encoder.encode_text(concept)
+            # Encode the record - encoder handles field extraction
+            embedding = encoder.encode(record)
             embedding_list = embedding.tolist() if hasattr(embedding, 'tolist') else list(embedding)
             
-            result = await storage.create_glyph(
+            # Store the full record as metadata, use JSON string as concept_text
+            concept_text = json.dumps(record) if isinstance(record, dict) else str(record)
+            
+            await storage.create_glyph(
                 org_id=org_id,
                 model_id=model_id,
-                concept_text=concept,
+                concept_text=concept_text,
                 embedding=embedding_list,
-                metadata=request.metadata,
+                metadata=record if isinstance(record, dict) else {"value": record},
             )
-            results.append({
-                "index": i,
-                "glyph_id": str(result.glyph_id),
-                "status": "created"
-            })
+            encoded_count += 1
         except Exception as e:
-            logger.error(f"Failed to create glyph {i}: {e}")
+            logger.error(f"Failed to encode record {i}: {e}")
+            failed_count += 1
             errors.append({
                 "index": i,
-                "concept": concept[:50] + "..." if len(concept) > 50 else concept,
                 "error": str(e)
             })
     
-    logger.info(f"Batch create for org={org_id}, model={model_id}: {len(results)} created, {len(errors)} failed")
+    logger.info(f"Listener ingest for org={org_id}, model={model_id}: {encoded_count} encoded, {failed_count} failed")
     
     return {
-        "created": len(results),
-        "failed": len(errors),
-        "results": results,
+        "encoded_count": encoded_count,
+        "failed_count": failed_count,
         "errors": errors if errors else None,
     }
 
