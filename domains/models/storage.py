@@ -81,11 +81,12 @@ class GlyphStorage:
                             f"Upgrade to a production license for unlimited glyphs."
                 )
 
-        # Validate embedding dimension
-        if len(embedding) != 768:
+        # Validate embedding dimension against runtime max
+        max_dim = settings.max_vector_dimension
+        if len(embedding) > max_dim:
             raise ValidationException(
                 field="embedding",
-                reason=f"Expected 768 dimensions, got {len(embedding)}"
+                reason=f"Embedding dimension {len(embedding)} exceeds runtime limit of {max_dim}"
             )
         
         if glyph_id is None:
@@ -157,10 +158,11 @@ class GlyphStorage:
             values["concept_text"] = concept_text
         
         if embedding is not None:
-            if len(embedding) != 768:
+            max_dim = settings.max_vector_dimension
+            if len(embedding) > max_dim:
                 raise ValidationException(
                     field="embedding",
-                    reason=f"Expected 768 dimensions, got {len(embedding)}"
+                    reason=f"Embedding dimension {len(embedding)} exceeds runtime limit of {max_dim}"
                 )
             values["embedding"] = embedding
         
@@ -220,10 +222,11 @@ class GlyphStorage:
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[Tuple[GlyphResponse, float]]:
         """Find top-k most similar glyphs using pgvector, scoped to org and model."""
-        if len(query_embedding) != 768:
+        max_dim = settings.max_vector_dimension
+        if len(query_embedding) > max_dim:
             raise ValidationException(
                 field="query_embedding",
-                reason=f"Expected 768 dimensions, got {len(query_embedding)}"
+                reason=f"Query embedding dimension {len(query_embedding)} exceeds runtime limit of {max_dim}"
             )
         
         query = (
@@ -523,10 +526,11 @@ class GlyphStorage:
                     reason=f"Unknown format: {embedding_format}"
                 )
             
-            if len(embedding) != 768:
+            max_dim = settings.max_vector_dimension
+            if len(embedding) > max_dim:
                 raise ValidationException(
                     field="embedding",
-                    reason=f"Expected 768 dimensions, got {len(embedding)}"
+                    reason=f"Embedding dimension {len(embedding)} exceeds runtime limit of {max_dim}"
                 )
         
         return concept_text, embedding, metadata

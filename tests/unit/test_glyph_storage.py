@@ -40,10 +40,10 @@ class TestGlyphStorage:
                 org_id=sample_org_id,
                 model_id=sample_model_id,
                 concept_text="test concept",
-                embedding=[0.1] * 100,  # Wrong dimension
+                embedding=[0.1] * 3000,  # Exceeds max dimension (2000)
             )
         
-        assert "768 dimensions" in str(exc_info.value)
+        assert "exceeds runtime limit" in str(exc_info.value)
     
     @pytest.mark.asyncio
     async def test_get_glyph_success(self, test_db, sample_org_id, sample_model_id, sample_embedding):
