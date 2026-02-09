@@ -286,14 +286,14 @@ class IntentMatcher:
         """
         query_lower = query.lower()
         
-        # Simple keyword patterns
+        # Simple keyword patterns - higher base scores for clear matches
         patterns = [
-            (["find", "search", "similar", "like"], "similarity_search", 0.7),
-            (["verify", "explain", "prove", "evidence"], "fact_tree", 0.7),
-            (["predict", "forecast", "next", "after"], "temporal_predict", 0.7),
-            (["list", "show all", "get all"], "list_all", 0.7),
-            (["count", "how many"], "count", 0.7),
-            (["compare", "difference", "versus", "vs"], "compare", 0.7),
+            (["find", "search", "similar", "like", "show me"], "similarity_search", 0.85),
+            (["verify", "explain", "prove", "evidence", "why", "how"], "fact_tree", 0.85),
+            (["predict", "forecast", "next", "after", "future", "will"], "temporal_predict", 0.85),
+            (["list all", "show all", "get all", "list everything"], "list_all", 0.90),
+            (["count", "how many", "total", "number of"], "count", 0.90),
+            (["compare", "difference", "versus", "vs", "contrast"], "compare", 0.85),
         ]
         
         best_match = None
@@ -302,12 +302,14 @@ class IntentMatcher:
         for keywords, intent, base_score in patterns:
             matches = sum(1 for kw in keywords if kw in query_lower)
             if matches > 0:
-                score = base_score + (matches * 0.05)
+                # Higher score for more keyword matches
+                score = base_score + (matches * 0.02)
+                score = min(score, 0.98)  # Cap at 0.98
                 if score > best_score:
                     best_score = score
                     best_match = intent
         
-        if best_match and best_score >= self.confidence_threshold:
+        if best_match:
             parameters = self._extract_parameters(query, best_match)
             structured_query = self._build_structured_query(
                 self._get_default_template(best_match),
