@@ -180,9 +180,10 @@ def _validate_record_structure(
         # Hierarchical format - validate structure
         missing_layers = expected_layers - record_keys
         if missing_layers:
+            layer_format = ', '.join(f'"{l}": {{...}}' for l in expected_layers)
             return False, (
                 f"Record {index}: Missing layer(s): {list(missing_layers)}. "
-                f"Expected format: {{{', '.join(f'\"{l}\": {{...}}' for l in expected_layers)}}}"
+                f"Expected format: {{{layer_format}}}"
             )
         
         for layer_name, segments in config_structure.items():
