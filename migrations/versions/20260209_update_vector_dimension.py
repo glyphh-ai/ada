@@ -1,11 +1,11 @@
-"""Update vector dimension from 768 to 2048.
+"""Update vector dimension from 768 to 2000.
 
 Revision ID: 20260209_vector_dim
 Revises: 88d76764e4cb
 Create Date: 2026-02-09
 
-This migration updates the glyphs table to support up to 2048 dimensions.
-This is the maximum supported by pgvector indexes (IVFFlat and HNSW).
+This migration updates the glyphs table to support up to 2000 dimensions.
+This is the maximum supported by pgvector HNSW indexes.
 """
 
 from alembic import op
@@ -21,7 +21,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    """Upgrade vector dimension from 768 to 2048."""
+    """Upgrade vector dimension from 768 to 2000."""
     # Drop the existing IVFFlat index first
     op.drop_index('idx_glyph_embedding', table_name='glyphs')
     
@@ -29,8 +29,8 @@ def upgrade() -> None:
     # Note: This will pad existing vectors with zeros
     op.execute("""
         ALTER TABLE glyphs 
-        ALTER COLUMN embedding TYPE vector(2048) 
-        USING embedding::vector(2048)
+        ALTER COLUMN embedding TYPE vector(2000) 
+        USING embedding::vector(2000)
     """)
     
     # Recreate the index using HNSW (generally faster than IVFFlat)
@@ -42,7 +42,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Downgrade vector dimension from 2048 to 768."""
+    """Downgrade vector dimension from 2000 to 768."""
     # Drop the HNSW index
     op.drop_index('idx_glyph_embedding', table_name='glyphs')
     
