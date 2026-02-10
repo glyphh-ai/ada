@@ -232,3 +232,28 @@ class NLQueryDisabledException(GlyphhRuntimeException):
             status_code=501,
             details={"hint": "Set ENABLE_NL_QUERY=true to enable"}
         )
+
+
+# Stored Procedure Exceptions
+class ConflictException(GlyphhRuntimeException):
+    """Raised when a resource conflict occurs (e.g., duplicate name)"""
+    
+    def __init__(self, message: str):
+        super().__init__(
+            message=message,
+            error_code="CONFLICT",
+            status_code=409,
+            details={}
+        )
+
+
+class NotFoundException(GlyphhRuntimeException):
+    """Raised when a resource is not found"""
+    
+    def __init__(self, message: str):
+        super().__init__(
+            message=message,
+            error_code="NOT_FOUND",
+            status_code=404,
+            details={}
+        )
