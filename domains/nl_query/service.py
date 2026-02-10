@@ -497,7 +497,9 @@ class NLQueryService:
         
         match_result = await self.intent_matcher.match_intent(query)
         
-        if match_result and match_result.confidence >= self.confidence_threshold:
+        # Use same threshold as execute_nl_query (0.3) for consistency
+        min_acceptable_confidence = 0.3
+        if match_result and match_result.confidence >= min_acceptable_confidence:
             return match_result, "rules"
         
         if self.llm_fallback is not None:
@@ -588,10 +590,12 @@ class NLQueryService:
             
             elif operation == "count":
                 # Use dedicated count method for accurate total count
+                logger.info(f"Executing count operation for org={org_id}, model={model_id}")
                 count = await self.query_service.count_glyphs(
                     org_id=org_id,
                     model_id=model_id,
                 )
+                logger.info(f"Count result: {count}")
                 return {"count": count}
             
             elif operation == "compare":

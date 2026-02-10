@@ -273,12 +273,14 @@ async def chat_stream(
             })
             
             # Execute the query
+            logger.info(f"Executing NL query: org={org_id}, model={model_id}, query='{request.query}'")
             result = await nl_service.execute_nl_query(
                 org_id=org_id,
                 model_id=model_id,
                 query=request.query,
                 debug=False,
             )
+            logger.info(f"NL query result: type={result.query_type}, method={result.match_method}, result={result.result}")
             
             # Check if result indicates disambiguation needed
             if result.disambiguation_needed:
