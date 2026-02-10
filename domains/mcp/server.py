@@ -293,16 +293,16 @@ class MCPServer:
         
         Transforms the nested FactTree structure into a flat response with:
         - query: The original query
-        - results: The actual query results
+        - result: The actual query results (singular to match MCPResponse)
         - citations: Any citations from the results
         - execution_time_ms: Query execution time
         """
-        result = {
+        response = {
             "query": query,
             "query_type": "gql",
             "match_method": "direct",
             "confidence": 1.0,
-            "results": None,
+            "result": None,
             "citations": [],
             "execution_time_ms": None,
         }
@@ -319,39 +319,39 @@ class MCPServer:
             
             # Extract results (the main query output)
             if "listed" in desc or "found" in desc or "results" in desc.lower():
-                result["results"] = value
+                response["result"] = value
                 # Include filter/limit info if present
                 if data_context.get("limit"):
-                    result["limit"] = data_context["limit"]
+                    response["limit"] = data_context["limit"]
                 if data_context.get("filter"):
-                    result["filter"] = data_context["filter"]
+                    response["filter"] = data_context["filter"]
                 if data_context.get("threshold"):
-                    result["threshold"] = data_context["threshold"]
+                    response["threshold"] = data_context["threshold"]
             
             # Extract comparison results
             elif "compar" in desc:
-                result["results"] = value
+                response["result"] = value
             
             # Extract drift results
             elif "drift" in desc:
-                result["results"] = value
+                response["result"] = value
             
             # Extract execution metadata
             elif "execution" in desc or "metadata" in desc:
                 if data_context.get("execution_time_ms"):
-                    result["execution_time_ms"] = data_context["execution_time_ms"]
+                    response["execution_time_ms"] = data_context["execution_time_ms"]
             
             # Collect citations
             citations = child.get("citations", [])
             if citations:
-                result["citations"].extend(citations)
+                response["citations"].extend(citations)
         
         # Also check root-level citations
         root_citations = tree_json.get("citations", [])
         if root_citations:
-            result["citations"].extend(root_citations)
+            response["citations"].extend(root_citations)
         
-        return result
+        return response
 
     # =========================================================================
     # Tool Handlers
