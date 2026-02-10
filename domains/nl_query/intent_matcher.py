@@ -6,15 +6,19 @@ queries against registered intent patterns. This is the deterministic,
 rules-first approach - "When your LLM can't afford to be wrong, sidecar it with Glyphh."
 
 Updated to use PatternMerger for comprehensive default patterns (Requirement 4.3, 4.9).
+Extended to support stored procedure matching (Requirement 4.1-4.6).
 """
 
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from shared.encoder_config_factory import EncoderConfigFactory, ConfigurationError
 from shared.sdk_adapter import get_sdk_adapter, SDKNotAvailableError
+
+if TYPE_CHECKING:
+    from domains.procedures.service import StoredProcedureService
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +31,8 @@ class IntentMatch:
     parameters: Dict[str, str]
     pattern_matched: Optional[str]
     structured_query: Dict[str, Any]
+    match_method: str = "default"  # "default", "stored_procedure", or "fallback"
+    procedure_name: Optional[str] = None  # Name of matched stored procedure
 
 
 class IntentMatcher:
@@ -37,14 +43,16 @@ class IntentMatcher:
     using the SDK's IntentEncoder for deterministic matching.
     
     Supports loading patterns from:
-    1. Model's NL encoder config (preferred)
-    2. SDK default patterns (fallback)
+    1. Stored procedures (highest priority)
+    2. Model's NL encoder config (preferred)
+    3. SDK default patterns (fallback)
     """
     
     def __init__(
         self, 
         confidence_threshold: float = 0.85,
-        model_nl_config: Optional[Dict[str, Any]] = None
+        model_nl_config: Optional[Dict[str, Any]] = None,
+        procedure_service: Optional['StoredProcedureService'] = None,
     ):
         """
         Initialize the IntentMatcher.
@@ -52,9 +60,11 @@ class IntentMatcher:
         Args:
             confidence_threshold: Minimum confidence for a match
             model_nl_config: Optional NL encoder config from deployed model
+            procedure_service: Optional service for stored procedure matching
         """
         self.confidence_threshold = confidence_threshold
         self._model_nl_config = model_nl_config
+        self._procedure_service = procedure_service
         self._encoder = None
         self._patterns_loaded = False
         self._using_model_patterns = False
@@ -72,6 +82,15 @@ class IntentMatcher:
         self._encoder = None
         self._patterns_loaded = False
         self._using_model_patterns = False
+    
+    def set_procedure_service(self, procedure_service: Optional['StoredProcedureService']) -> None:
+        """
+        Set or update the procedure service for stored procedure matching.
+        
+        Args:
+            procedure_service: Service for stored procedure CRUD operations
+        """
+        self._procedure_service = procedure_service
         
     def _get_encoder(self):
         """
@@ -233,16 +252,34 @@ class IntentMatcher:
         except Exception as e:
             logger.error(f"Failed to load model patterns (legacy): {e}")
     
-    async def match_intent(self, query: str) -> Optional[IntentMatch]:
+    async def match_intent(
+        self, 
+        query: str,
+        org_id: Optional[str] = None,
+        model_id: Optional[str] = None,
+    ) -> Optional[IntentMatch]:
         """
-        Match a query against registered intent patterns.
+        Match a query against stored procedures first, then default patterns.
         
         Args:
             query: Natural language query to match
+            org_id: Organization ID for stored procedure lookup
+            model_id: Model ID for stored procedure lookup
             
         Returns:
             IntentMatch if confidence >= threshold, None otherwise
         """
+        # Check stored procedures first (highest priority)
+        if self._procedure_service and org_id and model_id:
+            procedure_match = await self._match_stored_procedure(query, org_id, model_id)
+            if procedure_match and procedure_match.confidence >= self.confidence_threshold:
+                logger.info(
+                    f"Matched stored procedure '{procedure_match.procedure_name}' "
+                    f"with confidence {procedure_match.confidence:.3f}"
+                )
+                return procedure_match
+        
+        # Fall back to default pattern matching
         encoder = self._get_encoder()
         
         if encoder is None:
@@ -276,10 +313,161 @@ class IntentMatcher:
                 parameters=parameters,
                 pattern_matched=match.matched_phrase,
                 structured_query=structured_query,
+                match_method="default",
             )
         except Exception as e:
             logger.warning(f"Intent matching failed: {e}, using fallback")
             return self._fallback_match(query)
+    
+    async def _match_stored_procedure(
+        self,
+        query: str,
+        org_id: str,
+        model_id: str,
+    ) -> Optional[IntentMatch]:
+        """
+        Match query against stored procedure lexicons using HDC similarity.
+        
+        Args:
+            query: Natural language query
+            org_id: Organization ID
+            model_id: Model ID
+            
+        Returns:
+            IntentMatch if a procedure matches above threshold, None otherwise
+        """
+        try:
+            procedures = await self._procedure_service.list(org_id, model_id)
+            if not procedures:
+                logger.debug(f"No stored procedures found for {org_id}/{model_id}")
+                return None
+            
+            logger.debug(f"Checking {len(procedures)} stored procedures for match")
+            
+            encoder = self._get_encoder()
+            if encoder is None:
+                return self._fallback_procedure_match(query, procedures)
+            
+            best_match = None
+            best_score = 0.0
+            
+            # Encode query
+            query_lower = query.lower()
+            
+            for procedure in procedures:
+                # Compute similarity against each lexicon
+                for lexicon in procedure.lexicons:
+                    try:
+                        # Use encoder's text similarity if available
+                        if hasattr(encoder, 'compute_text_similarity'):
+                            score = encoder.compute_text_similarity(query_lower, lexicon.lower())
+                        else:
+                            # Fallback to simple word overlap
+                            score = self._compute_lexicon_similarity(query_lower, lexicon.lower())
+                        
+                        if score > best_score:
+                            best_score = score
+                            best_match = procedure
+                    except Exception as e:
+                        logger.warning(f"Error computing similarity for lexicon '{lexicon}': {e}")
+                        continue
+            
+            if best_match and best_score >= self.confidence_threshold:
+                return IntentMatch(
+                    intent="stored_procedure",
+                    confidence=best_score,
+                    parameters={"procedure_name": best_match.name},
+                    pattern_matched=None,
+                    structured_query={
+                        "operation": "execute_procedure",
+                        "procedure_name": best_match.name,
+                        "gql_query": best_match.gql_query,
+                    },
+                    match_method="stored_procedure",
+                    procedure_name=best_match.name,
+                )
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error matching stored procedures: {e}")
+            return None
+    
+    def _compute_lexicon_similarity(self, query: str, lexicon: str) -> float:
+        """
+        Compute simple word-based similarity between query and lexicon.
+        
+        Args:
+            query: Query string (lowercase)
+            lexicon: Lexicon string (lowercase)
+            
+        Returns:
+            Similarity score between 0 and 1
+        """
+        query_words = set(query.split())
+        lexicon_words = set(lexicon.split())
+        
+        if not lexicon_words:
+            return 0.0
+        
+        # Check if lexicon is contained in query
+        if lexicon in query:
+            return 0.95
+        
+        # Word overlap score
+        overlap = len(query_words & lexicon_words)
+        if overlap == 0:
+            return 0.0
+        
+        # Jaccard-like similarity with boost for lexicon coverage
+        lexicon_coverage = overlap / len(lexicon_words)
+        query_coverage = overlap / len(query_words) if query_words else 0
+        
+        # Weight lexicon coverage more heavily
+        return 0.7 * lexicon_coverage + 0.3 * query_coverage
+    
+    def _fallback_procedure_match(
+        self,
+        query: str,
+        procedures: List[Any],
+    ) -> Optional[IntentMatch]:
+        """
+        Simple keyword-based procedure matching when encoder unavailable.
+        
+        Args:
+            query: Natural language query
+            procedures: List of stored procedures
+            
+        Returns:
+            IntentMatch if a procedure matches, None otherwise
+        """
+        query_lower = query.lower()
+        best_match = None
+        best_score = 0.0
+        
+        for procedure in procedures:
+            for lexicon in procedure.lexicons:
+                score = self._compute_lexicon_similarity(query_lower, lexicon.lower())
+                if score > best_score:
+                    best_score = score
+                    best_match = procedure
+        
+        if best_match and best_score >= self.confidence_threshold:
+            return IntentMatch(
+                intent="stored_procedure",
+                confidence=best_score,
+                parameters={"procedure_name": best_match.name},
+                pattern_matched=None,
+                structured_query={
+                    "operation": "execute_procedure",
+                    "procedure_name": best_match.name,
+                    "gql_query": best_match.gql_query,
+                },
+                match_method="stored_procedure",
+                procedure_name=best_match.name,
+            )
+        
+        return None
     
     def _fallback_match(self, query: str) -> Optional[IntentMatch]:
         """
@@ -330,6 +518,7 @@ class IntentMatcher:
                 parameters=parameters,
                 pattern_matched=None,
                 structured_query=structured_query,
+                match_method="fallback",
             )
         
         return None

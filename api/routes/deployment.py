@@ -122,8 +122,11 @@ async def deploy_model(
     Use GET /api/models/{org_id}/{model_id}/schema-index/status to check
     the schema index building progress.
     
+    Stored procedures from the model are persisted to the database (upsert).
+    
     Validates: Requirement 13.5 - THE Runtime SHALL support async schema index
     building during deployment
+    Validates: Requirement 8.4, 8.5 - Stored procedures are persisted on deploy
     """
     if not file.filename.endswith(".glyphh"):
         raise HTTPException(status_code=400, detail="File must have .glyphh extension")
@@ -137,6 +140,9 @@ async def deploy_model(
     
     try:
         model_info = await manager.load_model_from_bytes(content, org_id, model_id)
+        
+        # Persist stored procedures from the model (Requirements 8.4, 8.5)
+        await _persist_model_procedures(manager, org_id, model_id)
         
         base_url = f"{settings.host}:{settings.port}"
         
@@ -317,6 +323,73 @@ async def get_schema_index_status(
         pass
     
     return response
+
+
+async def _persist_model_procedures(
+    manager: ModelManager,
+    org_id: str,
+    model_id: str,
+) -> None:
+    """
+    Persist stored procedures from a deployed model to the database.
+    
+    Extracts stored_procedures from the SDK model and upserts them
+    to the database. Existing procedures with the same name are updated.
+    
+    Args:
+        manager: The ModelManager instance
+        org_id: Organization ID
+        model_id: Model ID
+    
+    Validates: Requirements 8.4, 8.5 - Stored procedures are persisted on deploy
+    """
+    try:
+        # Get the deployed model
+        model = await manager.get_model(org_id, model_id)
+        if model is None:
+            logger.warning(f"Model not found for procedure persistence: {org_id}/{model_id}")
+            return
+        
+        # Get SDK model
+        sdk_model = model.sdk_model if hasattr(model, 'sdk_model') else model
+        
+        # Check if model has stored_procedures
+        if not hasattr(sdk_model, 'stored_procedures') or not sdk_model.stored_procedures:
+            logger.debug(f"No stored procedures in model {org_id}/{model_id}")
+            return
+        
+        # Import procedure service
+        from domains.procedures.service import StoredProcedureService
+        from domains.procedures.schemas import StoredProcedureCreate
+        from infrastructure.database import async_session_maker
+        
+        async with async_session_maker() as session:
+            procedure_service = StoredProcedureService(session)
+            
+            persisted_count = 0
+            for procedure in sdk_model.stored_procedures:
+                try:
+                    # Create procedure data from SDK StoredProcedure
+                    create_data = StoredProcedureCreate(
+                        name=procedure.name,
+                        gql_query=procedure.gql_query,
+                        lexicons=procedure.lexicons,
+                        description=procedure.description,
+                    )
+                    
+                    # Upsert (create or update)
+                    await procedure_service.upsert(org_id, model_id, create_data)
+                    persisted_count += 1
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to persist procedure '{procedure.name}': {e}")
+            
+            logger.info(f"Persisted {persisted_count} stored procedures for {org_id}/{model_id}")
+            
+    except ImportError as e:
+        logger.warning(f"Procedure service not available: {e}")
+    except Exception as e:
+        logger.error(f"Failed to persist procedures for {org_id}/{model_id}: {e}")
 
 
 async def _validate_model_dimension(content: bytes) -> Optional[str]:

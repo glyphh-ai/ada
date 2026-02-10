@@ -172,6 +172,24 @@ class MCPServer:
                     "required": ["org_id", "model_id", "query"]
                 }
             ),
+            "list_procedures": MCPToolSchema(
+                name="list_procedures",
+                description="List all stored procedures for a model. Returns name, description, and lexicons for each procedure.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "org_id": {
+                            "type": "string",
+                            "description": "Organization ID"
+                        },
+                        "model_id": {
+                            "type": "string",
+                            "description": "Model ID"
+                        }
+                    },
+                    "required": ["org_id", "model_id"]
+                }
+            ),
         }
     
     def get_tool_schemas(self) -> List[MCPToolSchema]:
@@ -369,10 +387,16 @@ class MCPServer:
         
         Requires the model to be loaded in the runtime — no fallbacks.
         Sends progress notifications if progress_token is provided.
+        
+        Now supports stored procedure matching (Requirements 7.1, 7.2):
+        - Passes procedure_service to IntentMatcher
+        - Includes procedure_name in response when matched
         """
         from domains.nl_query.service import NLQueryService
         from domains.nl_query.intent_matcher import IntentMatcher
+        from domains.procedures.service import StoredProcedureService
         from infrastructure.config import get_settings
+        from infrastructure.database import async_session_maker
         
         settings = get_settings()
         org_id = arguments["org_id"]
@@ -404,40 +428,84 @@ class MCPServer:
         from shared.encoder_config_factory import EncoderConfigFactory
         model_nl_config = EncoderConfigFactory.extract_nl_encoder_config(loaded_model.sdk_model)
         
-        intent_matcher = IntentMatcher(
-            confidence_threshold=0.85,
-            model_nl_config=model_nl_config,
-        )
-        
-        llm_fallback = None
+        # Create procedure service for stored procedure matching (Requirement 7.1)
+        procedure_service = None
         try:
-            from domains.nl_query.llm_fallback import LLMFallback
-            llm_fallback = LLMFallback(model_name=settings.nl_model)
-            if not llm_fallback.is_available():
+            async with async_session_maker() as session:
+                procedure_service = StoredProcedureService(session)
+                
+                intent_matcher = IntentMatcher(
+                    confidence_threshold=0.85,
+                    model_nl_config=model_nl_config,
+                    procedure_service=procedure_service,
+                )
+                
                 llm_fallback = None
-        except ImportError:
-            pass
-        
-        nl_service = NLQueryService(
-            query_service=self._query_service,
-            intent_matcher=intent_matcher,
-            llm_fallback=llm_fallback,
-            confidence_threshold=0.85,
-        )
-        
-        if progress_handler and progress_token:
-            await progress_handler.notify(
-                progress_token, 
-                progress=50, 
-                message="Executing query..."
+                try:
+                    from domains.nl_query.llm_fallback import LLMFallback
+                    llm_fallback = LLMFallback(model_name=settings.nl_model)
+                    if not llm_fallback.is_available():
+                        llm_fallback = None
+                except ImportError:
+                    pass
+                
+                nl_service = NLQueryService(
+                    query_service=self._query_service,
+                    intent_matcher=intent_matcher,
+                    llm_fallback=llm_fallback,
+                    confidence_threshold=0.85,
+                )
+                
+                if progress_handler and progress_token:
+                    await progress_handler.notify(
+                        progress_token, 
+                        progress=50, 
+                        message="Executing query..."
+                    )
+                
+                result = await nl_service.execute_nl_query(
+                    org_id=org_id,
+                    model_id=model_id,
+                    query=query,
+                    debug=debug,
+                )
+        except Exception as e:
+            logger.warning(f"Failed to use procedure service: {e}, falling back to default matching")
+            # Fallback without procedure service
+            intent_matcher = IntentMatcher(
+                confidence_threshold=0.85,
+                model_nl_config=model_nl_config,
             )
-        
-        result = await nl_service.execute_nl_query(
-            org_id=org_id,
-            model_id=model_id,
-            query=query,
-            debug=debug,
-        )
+            
+            llm_fallback = None
+            try:
+                from domains.nl_query.llm_fallback import LLMFallback
+                llm_fallback = LLMFallback(model_name=settings.nl_model)
+                if not llm_fallback.is_available():
+                    llm_fallback = None
+            except ImportError:
+                pass
+            
+            nl_service = NLQueryService(
+                query_service=self._query_service,
+                intent_matcher=intent_matcher,
+                llm_fallback=llm_fallback,
+                confidence_threshold=0.85,
+            )
+            
+            if progress_handler and progress_token:
+                await progress_handler.notify(
+                    progress_token, 
+                    progress=50, 
+                    message="Executing query..."
+                )
+            
+            result = await nl_service.execute_nl_query(
+                org_id=org_id,
+                model_id=model_id,
+                query=query,
+                debug=debug,
+            )
         
         if progress_handler and progress_token:
             await progress_handler.notify(
@@ -446,6 +514,7 @@ class MCPServer:
                 message="Complete"
             )
         
+        # Build response (Requirement 7.2: include procedure_name when matched)
         response = {
             "result": result.result,
             "query_type": result.query_type,
@@ -454,6 +523,10 @@ class MCPServer:
             "query_time_ms": result.query_time_ms,
             "translated_query": result.translated_query if debug else None,
         }
+        
+        # Include procedure_name if matched via stored procedure
+        if result.match_method == "stored_procedure" and hasattr(result, 'procedure_name'):
+            response["procedure_name"] = result.procedure_name
         
         if result.match_method == "none":
             response["error"] = "No intent match found for query"
@@ -656,4 +729,57 @@ class MCPServer:
                 "query_type": "gql_translate",
                 "match_method": "none",
                 "confidence": 0.0,
+            }
+    
+    async def _handle_list_procedures(
+        self,
+        arguments: Dict[str, Any],
+        user: User,
+        progress_handler: Optional[MCPProgressHandler] = None,
+        progress_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Handle list_procedures tool. Lists all stored procedures for a model.
+        
+        Returns name, description, and lexicons for each procedure.
+        
+        Requirements:
+            - 7.3: Define tool schema in _build_tool_schemas()
+            - 7.4: Return name, description, lexicons for each procedure
+        """
+        from domains.procedures.service import StoredProcedureService
+        from infrastructure.database import async_session_maker
+        
+        org_id = arguments["org_id"]
+        model_id = arguments["model_id"]
+        
+        try:
+            async with async_session_maker() as session:
+                procedure_service = StoredProcedureService(session)
+                procedures = await procedure_service.list(org_id, model_id)
+                
+                # Format procedures for response (Requirement 7.4)
+                procedure_list = [
+                    {
+                        "name": p.name,
+                        "description": p.description,
+                        "lexicons": p.lexicons,
+                        "gql_query": p.gql_query,
+                    }
+                    for p in procedures
+                ]
+                
+                return {
+                    "procedures": procedure_list,
+                    "total": len(procedure_list),
+                    "org_id": org_id,
+                    "model_id": model_id,
+                }
+                
+        except Exception as e:
+            logger.error(f"List procedures error: {e}", exc_info=True)
+            return {
+                "procedures": [],
+                "total": 0,
+                "error": str(e),
             }
