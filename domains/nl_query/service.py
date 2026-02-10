@@ -574,25 +574,25 @@ class NLQueryService:
                 return result.model_dump() if hasattr(result, 'model_dump') else result
             
             elif operation == "list":
-                request = SimilaritySearchRequest(
-                    query="",
-                    top_k=query.get("limit", 100),
-                )
-                result = await self.query_service.similarity_search(
+                # Use dedicated list method for listing glyphs
+                limit = query.get("limit", 100)
+                glyphs = await self.query_service.list_glyphs(
                     org_id=org_id,
                     model_id=model_id,
-                    request=request,
+                    limit=limit,
                 )
-                return result.model_dump() if hasattr(result, 'model_dump') else result
+                return {
+                    "results": [g.model_dump() if hasattr(g, 'model_dump') else g for g in glyphs],
+                    "total_count": len(glyphs),
+                }
             
             elif operation == "count":
-                request = SimilaritySearchRequest(query="", top_k=1000)
-                result = await self.query_service.similarity_search(
+                # Use dedicated count method for accurate total count
+                count = await self.query_service.count_glyphs(
                     org_id=org_id,
                     model_id=model_id,
-                    request=request,
                 )
-                return {"count": result.total_count}
+                return {"count": count}
             
             elif operation == "compare":
                 request = SimilaritySearchRequest(

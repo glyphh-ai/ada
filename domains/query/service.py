@@ -93,6 +93,48 @@ class QueryService:
             similarity_calculator=loaded_model.similarity_calculator
         )
     
+    async def count_glyphs(
+        self,
+        org_id: str,
+        model_id: str,
+    ) -> int:
+        """
+        Count total glyphs for a model.
+        
+        Args:
+            org_id: Organization ID
+            model_id: Model ID
+            
+        Returns:
+            Total count of glyphs in the model
+        """
+        async with self._session_factory() as session:
+            storage = GlyphStorage(session)
+            return await storage.count_glyphs(org_id, model_id)
+    
+    async def list_glyphs(
+        self,
+        org_id: str,
+        model_id: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[GlyphResponse]:
+        """
+        List glyphs for a model with pagination.
+        
+        Args:
+            org_id: Organization ID
+            model_id: Model ID
+            limit: Maximum number of glyphs to return
+            offset: Number of glyphs to skip
+            
+        Returns:
+            List of GlyphResponse objects
+        """
+        async with self._session_factory() as session:
+            storage = GlyphStorage(session)
+            return await storage.list_glyphs(org_id, model_id, limit, offset)
+    
     async def similarity_search(
         self,
         org_id: str,
