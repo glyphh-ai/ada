@@ -575,7 +575,7 @@ class NLQueryService:
                 )
                 return result.model_dump() if hasattr(result, 'model_dump') else result
             
-            elif operation == "list":
+            elif operation in ("list", "list_all"):
                 # Use dedicated list method for listing glyphs
                 limit = query.get("limit", 100)
                 glyphs = await self.query_service.list_glyphs(
