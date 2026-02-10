@@ -224,24 +224,46 @@ class DatabaseGlyphStorage:
         """
         Get an attribute value from a glyph.
         
+        Supports dotted path notation for nested attributes (e.g., "vehicle.identity.make").
         Checks direct GlyphResponse attributes first, then metadata dict.
         
         Args:
             glyph_id: The glyph identifier
-            attribute: The attribute name to retrieve
+            attribute: The attribute name or dotted path to retrieve
             
         Returns:
             The attribute value, or None if not found.
         """
         glyph = self.get_glyph(glyph_id)
         
-        # Check direct GlyphResponse attributes
-        if hasattr(glyph, attribute):
+        # Check direct GlyphResponse attributes (non-dotted only)
+        if '.' not in attribute and hasattr(glyph, attribute):
             return getattr(glyph, attribute)
         
-        # Check metadata dict
+        # Check metadata dict with dotted path support
         if hasattr(glyph, 'metadata') and isinstance(glyph.metadata, dict):
-            if attribute in glyph.metadata:
-                return glyph.metadata[attribute]
+            return self._get_nested_value(glyph.metadata, attribute)
         
         return None
+    
+    def _get_nested_value(self, data: Dict[str, Any], path: str) -> Any:
+        """
+        Get a value from a nested dict using dotted path notation.
+        
+        Args:
+            data: The dictionary to search
+            path: Dotted path like "vehicle.identity.make"
+            
+        Returns:
+            The value at the path, or None if not found.
+        """
+        parts = path.split('.')
+        current = data
+        
+        for part in parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                return None
+        
+        return current
