@@ -442,11 +442,31 @@ class MCPServer:
                 GQLError,
             )
             
-            # Build execution context from loaded model
+            # Fetch glyphs from database storage (not from SDK model object)
+            # The SDK model only has configuration, glyphs are stored in the DB
+            db_glyphs = await self._query_service.list_glyphs(
+                org_id=org_id,
+                model_id=model_id,
+                limit=10000,  # Get all glyphs for GQL execution
+            )
+            
+            # Create a simple wrapper class to adapt GlyphResponse to GQL executor format
+            class GlyphWrapper:
+                """Adapts GlyphResponse to the format expected by GQL executor."""
+                def __init__(self, glyph_response):
+                    self.identifier = str(glyph_response.id)
+                    self.concept_text = glyph_response.concept_text
+                    self.metadata = glyph_response.metadata
+                    self.cortex = None  # Not needed for LIST queries
+                    self.layers = []  # Not needed for LIST queries
+            
+            # Convert to dict format expected by ExecutionContext
             glyphs = {}
-            if hasattr(loaded_model.sdk_model, 'glyphs'):
-                for glyph in loaded_model.sdk_model.glyphs:
-                    glyphs[glyph.identifier] = glyph
+            for glyph in db_glyphs:
+                wrapper = GlyphWrapper(glyph)
+                glyphs[wrapper.identifier] = wrapper
+            
+            logger.info(f"GQL context built with {len(glyphs)} glyphs from database")
             
             context = ExecutionContext(
                 model=loaded_model.sdk_model,
