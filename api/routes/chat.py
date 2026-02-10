@@ -33,8 +33,13 @@ class ChatStreamRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """Response from synchronous chat endpoint."""
-    response: str
+    """Response from synchronous chat endpoint.
+    
+    Returns both raw result (for programmatic use) and formatted response (for display).
+    This aligns with MCP response format for consistency.
+    """
+    response: str  # Formatted response for display
+    result: Optional[Any] = None  # Raw result data, same as MCP
     source: str  # "glyphh", "llm", or "auto"
     confidence: float
     query_type: Optional[str] = None
@@ -42,6 +47,7 @@ class ChatResponse(BaseModel):
     session_id: Optional[str] = None
     disambiguation_needed: bool = False
     disambiguation_suggestions: List[str] = Field(default_factory=list)
+    query_time_ms: Optional[float] = None
 
 
 def get_chat_services():
@@ -273,14 +279,12 @@ async def chat_stream(
             })
             
             # Execute the query
-            logger.info(f"Executing NL query: org={org_id}, model={model_id}, query='{request.query}'")
             result = await nl_service.execute_nl_query(
                 org_id=org_id,
                 model_id=model_id,
                 query=request.query,
                 debug=False,
             )
-            logger.info(f"NL query result: type={result.query_type}, method={result.match_method}, result={result.result}")
             
             # Check if result indicates disambiguation needed
             if result.disambiguation_needed:
@@ -303,9 +307,6 @@ async def chat_stream(
                 "progress": 85,
             })
             
-            # Format the response
-            response_text = _format_result(result.result, result.query_type)
-            
             # Determine source based on match method
             if result.match_method in ("auto", "hybrid"):
                 source = "auto"
@@ -314,10 +315,11 @@ async def chat_stream(
             else:
                 source = "glyphh"
             
-            # Phase 4: Complete
+            # Phase 4: Complete - return raw result like MCP does
+            # The Studio formats the result on the client side
             yield _sse_event("complete", {
                 "message": "Query complete",
-                "response": response_text,
+                "result": result.result,  # Raw result, same as MCP response
                 "source": source,
                 "confidence": result.confidence,
                 "query_type": result.query_type,
@@ -407,6 +409,7 @@ async def chat_sync(
     
     return ChatResponse(
         response=response_text,
+        result=result.result,  # Raw result, same as MCP
         source=source,
         confidence=result.confidence,
         query_type=result.query_type,
@@ -414,6 +417,7 @@ async def chat_sync(
         session_id=request.session_id,
         disambiguation_needed=False,
         disambiguation_suggestions=[],
+        query_time_ms=result.query_time_ms,
     )
 
 
@@ -425,7 +429,7 @@ def _sse_event(event_type: str, data: Dict[str, Any]) -> str:
 
 
 def _format_result(result: Any, query_type: str) -> str:
-    """Format query result for display."""
+    """Format query result for display (used by sync endpoint)."""
     if result is None:
         return "No results found."
     
@@ -433,6 +437,10 @@ def _format_result(result: Any, query_type: str) -> str:
         return result
     
     if isinstance(result, dict):
+        # Handle count results FIRST (before checking for "results" key)
+        if "count" in result and "results" not in result:
+            return f"Count: {result['count']}"
+        
         # Handle similarity search results
         if "results" in result and isinstance(result["results"], list):
             results = result["results"]
@@ -466,10 +474,6 @@ def _format_result(result: Any, query_type: str) -> str:
                 lines.append(f"• {concept} ({prob*100:.0f}%)")
             
             return "\n".join(lines)
-        
-        # Handle count results
-        if "count" in result:
-            return f"Count: {result['count']}"
     
     # Fallback to JSON
     return json.dumps(result, indent=2)
