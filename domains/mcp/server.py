@@ -478,7 +478,8 @@ class MCPServer:
                 )
             
             # Convert fact tree to dict for response
-            result = fact_tree.to_dict() if hasattr(fact_tree, 'to_dict') else str(fact_tree)
+            # FactTree uses to_json() method, not to_dict()
+            result = fact_tree.to_json() if hasattr(fact_tree, 'to_json') else str(fact_tree)
             
             return {
                 "result": result,
