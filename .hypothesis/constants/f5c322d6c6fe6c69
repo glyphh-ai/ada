@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/gql/parser.py
+# hypothesis_version: 6.151.5
+
+[0.0, 0.5, 1.0, 100, '!=', '.', '<', '<=', '=', '>', '>=', 'AGGREGATE', 'AND', 'AVG', 'COMPARE', 'CORTEX', 'COUNT', 'DETECT', 'Expected value', 'FIND', 'IDENTIFIER', 'INTROSPECT', 'LAYER', 'LIMIT', 'LIST', 'MAX', 'MIN', 'NOT', 'NUMBER', 'OR', 'PREDICT', 'ROLE', 'SEGMENT', 'STRING', 'SUM', 'TREND', 'Unexpected token', 'cortex', 'drift', 'glyph(...)', 'layer', 'positive integer', 'role', 'segment']

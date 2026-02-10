@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/encoder/base.py
+# hypothesis_version: 6.151.5
+
+['#', '@', 'Concept', 'Encoder', 'Glyph', '_', 'attributes', 'auto', 'config_layers', 'cortex', 'datetime', 'dimension', 'epoch', 'layer_bundling', 'layers', 'merge_segments', 'name', 'relations', 'relationships', 'security', 'segment_encoding', 'segment_merging', 'segment_name', 'segments', 'semantic', 'sequence', 'similarity', 'source', 'space_id', 'v1', 'version']

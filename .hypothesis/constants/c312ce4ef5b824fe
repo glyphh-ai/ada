@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/visualization/vector_heatmap.py
+# hypothesis_version: 6.151.5
+
+[0.3, 0.5, 0.7, 0.9, 100, '#', '+', '-', '.', '=', 'Interpretation:', 'Legend:', 'Value Distribution:', 'Vector 1', 'Vector 2', 'Vector Comparison', 'Vector Distribution', 'Vector Heatmap']

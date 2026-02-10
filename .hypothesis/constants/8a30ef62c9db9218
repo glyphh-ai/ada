@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/core/config.py
+# hypothesis_version: 6.151.5
+
+[0.0, 1.0, 'EncoderConfig', 'GQLPattern', 'GQLPatternsConfig', 'Layer', 'NLEncoderConfig', 'Role', 'Segment', 'TemporalConfig', 'auto', 'auto_increment', 'cortex', 'datetime', 'default', 'description', 'dimension', 'enum_values', 'epoch', 'example_phrases', 'file_path', 'file_read', 'file_write', 'format', 'gql_patterns', 'gql_template', 'intent_type', 'json_format', 'key_part', 'layer', 'layers', 'name', 'nl_encoder_config', 'patterns', 'phrases', 'primary_id', 'priority', 'query_template', 'r', 'required', 'required_fields', 'role', 'roles', 'security_weight', 'seed', 'segment', 'segments', 'sequence', 'signal_type', 'similarity_weight', 'slots', 'string', 'temporal', 'temporal_config', 'type', 'value', 'version', 'w']

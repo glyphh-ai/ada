@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/gql/planner.py
+# hypothesis_version: 6.151.5
+
+[3600, 86400, ' IN ', ' LIMIT ', ' THRESHOLD ', '!=', '.', '<', '<=', '=', '>', '>=', 'AND', 'ExecutionContext', 'From glyph not found', 'Glyph not found', 'NOT', 'OR', 'To glyph not found', 'WHERE', '^(\\d+)([dhms])$', 'attributes', 'cortex', 'd', 'glyph_id', 'h', 'id', 'identifier', 'layer', 'layers', 'm', 'metadata', 'name', 'neural_cortex', 'neural_layer', 'neural_role', 'neural_segment', 'role', 'roles', 's', 'segment', 'segments', 'text', 'unknown']

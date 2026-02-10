@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/gql/lexer.py
+# hypothesis_version: 6.151.5
+
+['!', '!=', '"', '(', ')', ',', '.', '...', '<', '<=', '=', '>', '>=', 'Add closing quote', '\\', '^(\\d+)([dhms])$', '_', '_-', 'dhms', 'glyph', 'n', 'r', 't']

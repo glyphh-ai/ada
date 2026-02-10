@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/core/rust_ops.py
+# hypothesis_version: 6.151.5
+
+['backend', 'bind', 'bundle', 'cosine_similarity', 'generate_symbol', 'hamming_similarity', 'operations', 'python', 'rust', 'rust_available']

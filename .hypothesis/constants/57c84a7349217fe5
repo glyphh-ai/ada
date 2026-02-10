@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/encoder/__init__.py
+# hypothesis_version: 6.151.5
+
+['Encoder', 'IntentEncoder', 'IntentMatch', 'IntentPattern', 'get_default_patterns', 'get_pattern_by_type']

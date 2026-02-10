@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/gql/translator.py
+# hypothesis_version: 6.151.5
+
+[0.0, 0.5, 10000, '"([^"]+)"', '.', 'SLOT', '\\b([a-zA-Z][\\w-]+)\\b', '\\b(\\d+(?:\\.\\d+)?)\\b', '\\b(\\d+[dhms])\\b', '\\{', '\\{(\\w+)\\}', '\\{[^}]+\\}', '\\}', '^\\d+[dhms]$', 'compare', 'confidence', 'error', 'extracted_slots', 'find', 'from', 'get', 'gql', 'like', 'list', 'look for', 'operation', 'pattern_name', 'query', 'search', 'show', 'similar to', 'success', 'to', 'what is', "what's", '{', '}']

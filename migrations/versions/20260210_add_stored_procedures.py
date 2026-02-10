@@ -1,7 +1,7 @@
 """add stored_procedures table
 
 Revision ID: 20260210_stored_procs
-Revises: 20260209_update_vector_dimension
+Revises: 20260209_vector_dim
 Create Date: 2026-02-10 21:00:00.000000
 
 """
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = '20260210_stored_procs'
-down_revision: Union[str, None] = '20260209_update_vector_dimension'
+down_revision: Union[str, None] = '20260209_vector_dim'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

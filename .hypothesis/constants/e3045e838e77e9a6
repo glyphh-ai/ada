@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/model/package.py
+# hypothesis_version: 6.151.5
+
+['.glyphh', 'GQLPattern', 'GlyphhModel', 'IntentEncoder', 'NLTranslator', 'StoredProcedure', '^\\d+\\.\\d+\\.\\d+$', 'cortex', 'created_at', 'custom_encoders', 'data', 'dimension', 'encoder_config', 'global_cortex', 'glyphs', 'identifier', 'intent_patterns', 'layers', 'metadata', 'name', 'patterns', 'role_values', 'roles', 'rt', 'security_levels', 'segments', 'space_id', 'stored_procedures', 'timestamp', 'utf-8', 'version', 'weights', 'wt']

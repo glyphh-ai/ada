@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/gql/plans.py
+# hypothesis_version: 6.151.5
+
+[0.0, 0.5, 1.0, 100, '.', 'AVG', 'COUNT', 'ExecutionContext', 'FactTree', 'MAX', 'MIN', 'Prediction failed', 'SUM', 'aggregation', 'alert', 'alert_threshold', 'comparison', 'concept_text', 'count', 'data_points', 'decompose_by', 'drift', 'error', 'field', 'filter', 'from_glyph', 'function', 'glyph', 'glyph1', 'glyph2', 'glyph_id', 'group', 'group_by', 'id', 'identifier', 'introspection', 'layer', 'level', 'limit', 'metadata', 'missing_embeddings', 'neural_cortex', 'neural_layer', 'neural_segment', 'path', 'prediction', 'predictions', 'results', 'role', 'scope', 'score', 'similarity', 'structure', 'threshold', 'to_glyph', 'trend', 'value', 'window_seconds']

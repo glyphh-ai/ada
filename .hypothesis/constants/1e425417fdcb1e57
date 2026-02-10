@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/gql/cache.py
+# hypothesis_version: 6.151.5
+
+[0.0, 0.95, 1000, 'evictions', 'hit_rate', 'hits', 'invalidations', 'misses']

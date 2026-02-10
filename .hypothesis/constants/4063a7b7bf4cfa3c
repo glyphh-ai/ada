@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/visualization/fact_tree_viz.py
+# hypothesis_version: 6.151.5
+
+[100, '#', '**Citations:**', '**Data Context:**', '+- ', '...', '=', 'Fact Tree Summary', 'Top-level facts:', '|  Citations:', '|  Data Context:']

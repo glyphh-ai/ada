@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/gql/executor.py
+# hypothesis_version: 6.151.5
+
+[0.95, 1000, 'Cache Hit', 'Cache Status', 'Execution Error', 'Execution Metadata', 'Normalized Query', 'Original Query', 'Query Error', 'cache', 'cache_hit', 'cached', 'children', 'data_context', 'description', 'error', 'execution_time_ms', 'hit', 'message', 'metadata', 'normalized_query', 'query', 'result', 'root', 'similarity', 'suggestion', 'timestamp', 'type', 'value']

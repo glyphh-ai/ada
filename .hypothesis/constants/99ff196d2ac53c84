@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/gql/exceptions.py
+# hypothesis_version: 6.151.5
+
+[', ', 'actual', 'actual_value', 'available', 'available_paths', 'column', 'expected', 'glyph_id', 'invalid_char', 'level', 'line', 'operation', 'partial_count', 'partial_results', 'path', 'pattern_name', 'reference', 'slot_name', 'slot_type', 'source_snippet', 'suggestion', 'window']

@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/gql/encoder.py
+# hypothesis_version: 6.151.5
+
+[0.3, 0.5, 0.7, 0.9, 100, 10000, 'aggregate', 'alert', 'compare', 'comparison', 'cond', 'count', 'decompose_by', 'drift_detection', 'field', 'from_glyph', 'function', 'glyph', 'glyph1', 'glyph2', 'glyph_ref', 'gql_query', 'high', 'huge', 'introspect', 'large', 'level', 'level_path', 'limit', 'list', 'logical', 'low', 'medium', 'medium_low', 'operation', 'predict', 'role_path', 'scope', 'similarity_search', 'small', 'target_id', 'target_text', 'target_type', 'text', 'threshold', 'tiny', 'to_glyph', 'trend', 'very_high', 'where', 'window']

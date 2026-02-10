@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/visualization/similarity_graph.py
+# hypothesis_version: 6.151.5
+
+[0.3, 0.5, 1.0, '#', '-', '.', '=', 'Graph Properties:', 'Node Degrees:', 'Nodes:', 'Similarity Matrix', 'ascii', 'networkx', 'neural_cortex', 'weight']

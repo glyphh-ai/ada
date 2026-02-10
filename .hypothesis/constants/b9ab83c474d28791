@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/gql/printer.py
+# hypothesis_version: 6.151.5
+
+[' AT CORTEX', '"', 'COUNT ALL', 'LIST ALL', 'NOT', '\\', '\\"', '\\\\', '\\n', '\\r', '\\t', 'cortex']

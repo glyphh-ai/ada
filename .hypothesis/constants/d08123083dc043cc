@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/gql/tokens.py
+# hypothesis_version: 6.151.5
+
+['AGGREGATE', 'ALERT', 'ALL', 'AND', 'AT', 'AVG', 'BY', 'COMPARE', 'CORTEX', 'COUNT', 'DECOMPOSE', 'DETECT', 'DRIFT', 'FIND', 'FROM', 'GROUP', 'IN', 'INTROSPECT', 'LAYER', 'LIMIT', 'LIST', 'MAX', 'MIN', 'NOT', 'ON', 'OR', 'OVER', 'PREDICT', 'ROLE', 'SEGMENT', 'SIMILAR', 'SUM', 'THRESHOLD', 'TO', 'TREND', 'WHERE', 'WINDOW', 'glyph']

@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/core/__init__.py
+# hypothesis_version: 6.151.5
+
+['Concept', 'Edge', 'EncoderConfig', 'GQLPatternsConfig', 'Glyph', 'Layer', 'LayerConfig', 'NLEncoderConfig', 'Role', 'Segment', 'SegmentConfig', 'Vector', 'compute_space_id']

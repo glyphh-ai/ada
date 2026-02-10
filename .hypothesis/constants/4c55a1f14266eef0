@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/exceptions.py
+# hypothesis_version: 6.151.5
+
+['\n  - ', 'actual', 'concept_name', 'context', 'error_count', 'errors', 'expected', 'field', 'inputs', 'invalid_count', 'invalid_values', 'message', 'model_name', 'operation', 'problematic_input', 'reason', 'stage', 'vector_info']

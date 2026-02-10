@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/gql/ast.py
+# hypothesis_version: 6.151.5
+
+[0.5, 100, 'AggregateNode', 'CompareNode', 'ComparisonCondition', 'CountNode', 'DriftDetectionNode', 'GlyphRef', 'HierarchyLevel', 'IntrospectNode', 'ListNode', 'LogicalCondition', 'PredictNode', 'SimilaritySearchNode', 'TrendNode', 'aggregate', 'alert_condition', 'compare', 'comparison', 'cortex', 'count', 'decompose_by', 'drift_detection', 'field', 'from_glyph', 'function', 'glyph', 'glyph1', 'glyph2', 'group_by', 'identifier', 'introspect', 'level', 'limit', 'list', 'logical', 'operands', 'operator', 'path', 'predict', 'role', 'scope', 'similarity_search', 'target', 'threshold', 'to_glyph', 'trend', 'type', 'value', 'where', 'window']

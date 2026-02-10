@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/fact_tree/builder.py
+# hypothesis_version: 6.151.5
+
+[', ', ', ...]', ':', 'FactNode', '[', ']', 'children', 'citations', 'component', 'data_context', 'data_hash', 'data_sample', 'description', 'glyph_id', 'math_explanation', 'timestamp', 'tolist', 'value', 'version', '{', '}']

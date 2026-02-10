@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/api/routes/procedures.py
+# hypothesis_version: 6.151.5
+
+[201, 400, 404, 409, 500, '/{name}', 'deleted', 'name', 'procedures', 'status']

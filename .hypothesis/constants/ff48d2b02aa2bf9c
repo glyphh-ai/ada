@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/edges/generator.py
+# hypothesis_version: 6.151.5
+
+[0.0, 1.0, 'cortex', 'layer', 'neural_cortex', 'neural_layer', 'neural_role', 'neural_segment', 'role', 'segment', 'temporal_cortex', 'temporal_layer', 'temporal_role', 'temporal_segment']

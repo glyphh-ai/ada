@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-sdk/glyphh/encoder/intent.py
+# hypothesis_version: 6.151.5
+
+[-1.0, 0.0, 0.85, 1.0, 2.0, 'IntentEncoder', '__empty__', 'example_phrases', 'intent_type', 'patterns', 'query_template']

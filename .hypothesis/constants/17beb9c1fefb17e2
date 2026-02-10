@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/infrastructure/config.py
+# hypothesis_version: 6.151.5
+
+[1000, 1024, 2000, 8000, ',', '.env', '/data/models', '0.0.0.0', 'Default beam width', 'Enable telemetry', 'HS256', 'INFO', 'JWT algorithm', 'Log level', 'Server host', 'Server port', 'before', 'cloud', 'cors_origins', 'eager', 'https://*.glyphh.com', 'ignore', 'jwt_secret_key', 'lazy', 'local', 'on-demand', 'self-hosted', 'utf-8']
