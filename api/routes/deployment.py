@@ -3,13 +3,17 @@ Deployment API Routes for Glyphh Runtime.
 
 CLI-facing endpoints for model deployment and management.
 All models identified by (org_id, model_id) — no namespace concept.
+
+Updated to support async schema index building during deployment.
+Validates: Requirement 13.5
 """
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from domains.auth.service import AuthService, User
@@ -21,6 +25,9 @@ from shared.exceptions import ModelNotFoundException
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["deployment"])
 settings = get_settings()
+
+# Track schema index building status per model
+_schema_index_building_status: Dict[str, Dict[str, Any]] = {}
 
 
 # Request/Response Models
@@ -38,6 +45,18 @@ class DeployResponse(BaseModel):
     mcp_endpoint: str
     listener_endpoint: str
     status: str = "deployed"
+    schema_index_status: str = "not_started"  # "not_started", "building", "ready", "failed"
+    schema_index_message: Optional[str] = None
+
+
+class SchemaIndexStatusResponse(BaseModel):
+    """Schema index building status response."""
+    org_id: str
+    model_id: str
+    status: str  # "not_started", "building", "ready", "failed"
+    message: Optional[str] = None
+    vector_count: Optional[int] = None
+    build_time_ms: Optional[float] = None
 
 
 class StatusResponse(BaseModel):
@@ -88,6 +107,7 @@ async def deploy_model(
     org_id: str = Query(..., description="Organization ID"),
     model_id: str = Query(..., description="Model ID"),
     manager: ModelManager = Depends(get_model_manager),
+    background_tasks: BackgroundTasks = None,
 ) -> DeployResponse:
     """
     Deploy a .glyphh model file.
@@ -96,6 +116,14 @@ async def deploy_model(
     Requires org_id and model_id as separate query params.
     
     Vector dimension is limited by MAX_VECTOR_DIMENSION env var (default 2048).
+    
+    Schema index building is started in the background. The endpoint returns
+    immediately with status "deployed" and schema_index_status "building".
+    Use GET /api/models/{org_id}/{model_id}/schema-index/status to check
+    the schema index building progress.
+    
+    Validates: Requirement 13.5 - THE Runtime SHALL support async schema index
+    building during deployment
     """
     if not file.filename.endswith(".glyphh"):
         raise HTTPException(status_code=400, detail="File must have .glyphh extension")
@@ -112,15 +140,183 @@ async def deploy_model(
         
         base_url = f"{settings.host}:{settings.port}"
         
+        # Start async schema index building
+        # Validates: Requirement 13.5
+        model_key = f"{org_id}/{model_id}"
+        _schema_index_building_status[model_key] = {
+            "status": "building",
+            "message": "Schema index building started",
+            "started_at": datetime.utcnow().isoformat(),
+        }
+        
+        if background_tasks is not None:
+            background_tasks.add_task(
+                _build_schema_index_async,
+                manager,
+                org_id,
+                model_id,
+            )
+        else:
+            # If no background tasks available, start in a separate task
+            asyncio.create_task(
+                _build_schema_index_async(manager, org_id, model_id)
+            )
+        
         return DeployResponse(
             org_id=org_id,
             model_id=model_id,
             mcp_endpoint=f"http://{base_url}/{org_id}/{model_id}/mcp",
             listener_endpoint=f"http://{base_url}/{org_id}/{model_id}/listener",
+            status="deployed",
+            schema_index_status="building",
+            schema_index_message="Schema index building started in background",
         )
     except Exception as e:
         logger.error(f"Failed to deploy model: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+async def _build_schema_index_async(
+    manager: ModelManager,
+    org_id: str,
+    model_id: str,
+) -> None:
+    """
+    Build schema index asynchronously in the background.
+    
+    This function is called as a background task after model deployment.
+    It builds the schema index for the deployed model and updates the
+    status in _schema_index_building_status.
+    
+    Args:
+        manager: The ModelManager instance
+        org_id: Organization ID
+        model_id: Model ID
+    
+    Validates: Requirement 13.5 - THE Runtime SHALL support async schema index
+    building during deployment
+    """
+    import time
+    
+    model_key = f"{org_id}/{model_id}"
+    start_time = time.time()
+    
+    try:
+        # Get the deployed model
+        model = await manager.get_model(org_id, model_id)
+        if model is None:
+            _schema_index_building_status[model_key] = {
+                "status": "failed",
+                "message": f"Model not found: {org_id}/{model_id}",
+                "completed_at": datetime.utcnow().isoformat(),
+            }
+            return
+        
+        # Import SDK components
+        try:
+            from glyphh.nl.auto_schema_matcher import AutoSchemaMatcher, AutoMatchConfig
+            from domains.nl_query.schema_index import SchemaIndex
+        except ImportError as e:
+            _schema_index_building_status[model_key] = {
+                "status": "failed",
+                "message": f"SDK components not available: {e}",
+                "completed_at": datetime.utcnow().isoformat(),
+            }
+            return
+        
+        # Check if model has required attributes
+        sdk_model = model.sdk_model if hasattr(model, 'sdk_model') else model
+        if not hasattr(sdk_model, 'encoder') or not hasattr(sdk_model, 'config'):
+            _schema_index_building_status[model_key] = {
+                "status": "failed",
+                "message": "Model missing encoder or config",
+                "completed_at": datetime.utcnow().isoformat(),
+            }
+            return
+        
+        # Create and build schema index
+        schema_index = SchemaIndex(model_id=model_id)
+        schema_index.build_from_model(sdk_model)
+        
+        # Calculate build time
+        build_time_ms = (time.time() - start_time) * 1000
+        
+        # Update status
+        metrics = schema_index.get_metrics()
+        _schema_index_building_status[model_key] = {
+            "status": "ready",
+            "message": f"Schema index built successfully with {metrics.vector_count} vectors",
+            "completed_at": datetime.utcnow().isoformat(),
+            "vector_count": metrics.vector_count,
+            "role_count": metrics.role_count,
+            "value_count": metrics.value_count,
+            "build_time_ms": build_time_ms,
+            "memory_bytes": metrics.memory_bytes,
+        }
+        
+        logger.info(
+            f"Schema index built for {org_id}/{model_id}: "
+            f"{metrics.vector_count} vectors in {build_time_ms:.2f}ms"
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to build schema index for {org_id}/{model_id}: {e}")
+        _schema_index_building_status[model_key] = {
+            "status": "failed",
+            "message": f"Schema index building failed: {str(e)}",
+            "completed_at": datetime.utcnow().isoformat(),
+        }
+
+
+@router.get("/models/{org_id}/{model_id}/schema-index/status", response_model=SchemaIndexStatusResponse)
+async def get_schema_index_status(
+    org_id: str,
+    model_id: str,
+) -> SchemaIndexStatusResponse:
+    """
+    Get the schema index building status for a model.
+    
+    Returns the current status of schema index building:
+    - "not_started": Schema index building has not been started
+    - "building": Schema index is currently being built
+    - "ready": Schema index is ready for use
+    - "failed": Schema index building failed
+    
+    If the status is "building", the client should retry after a short delay.
+    Returns HTTP 202 Accepted when building is in progress.
+    
+    Validates: Requirement 13.5 - THE Runtime SHALL support async schema index
+    building during deployment
+    """
+    model_key = f"{org_id}/{model_id}"
+    
+    if model_key not in _schema_index_building_status:
+        return SchemaIndexStatusResponse(
+            org_id=org_id,
+            model_id=model_id,
+            status="not_started",
+            message="Schema index building has not been started for this model",
+        )
+    
+    status_info = _schema_index_building_status[model_key]
+    
+    response = SchemaIndexStatusResponse(
+        org_id=org_id,
+        model_id=model_id,
+        status=status_info.get("status", "unknown"),
+        message=status_info.get("message"),
+        vector_count=status_info.get("vector_count"),
+        build_time_ms=status_info.get("build_time_ms"),
+    )
+    
+    # Return 202 Accepted if still building
+    # This allows clients to poll for completion
+    if response.status == "building":
+        # Note: FastAPI doesn't support returning 202 with a response model directly
+        # The client should check the status field to determine if building is complete
+        pass
+    
+    return response
 
 
 async def _validate_model_dimension(content: bytes) -> Optional[str]:

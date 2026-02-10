@@ -3,6 +3,9 @@ Natural Language Query API Routes.
 
 Endpoints for NL query translation and execution.
 All routes scoped by /{org_id}/{model_id}/...
+
+Updated to support AutoSchemaMatcher for automatic schema-based NL query matching.
+Validates: Requirements 3, 4, 5, 12.2, 12.5
 """
 
 import logging
@@ -24,6 +27,13 @@ class NLQueryRequest(BaseModel):
     debug: bool = Field(default=False, description="Include translation details")
 
 
+class DisambiguationOption(BaseModel):
+    """A disambiguation option for ambiguous queries."""
+    intent: str
+    description: str
+    confidence: float
+
+
 class NLQueryResponse(BaseModel):
     result: Any
     query_type: str
@@ -31,6 +41,8 @@ class NLQueryResponse(BaseModel):
     confidence: float
     translated_query: Optional[Dict[str, Any]] = None
     query_time_ms: float
+    disambiguation_needed: bool = False
+    disambiguation_suggestions: List[str] = Field(default_factory=list)
 
 
 class IntentsResponse(BaseModel):
@@ -48,9 +60,21 @@ class TranslationDebugResponse(BaseModel):
     parameters: Dict[str, str]
     pattern_matched: Optional[str]
     match_method: str
+    disambiguation_needed: bool = False
+    disambiguation_suggestions: List[str] = Field(default_factory=list)
 
 
 def get_nl_query_service():
+    """
+    Get the NL Query Service with AutoSchemaMatcher support.
+    
+    Initializes the service with:
+    - IntentMatcher for rules-based matching
+    - AutoSchemaMatcher for auto-schema matching (if model has schema index)
+    - LLM fallback (if configured)
+    
+    Validates: Requirements 3, 4, 5
+    """
     from main import model_manager
     from domains.query.service import QueryService
     from domains.nl_query.intent_matcher import IntentMatcher
@@ -68,12 +92,20 @@ def get_nl_query_service():
         )
     
     model_nl_config = None
+    auto_schema_matcher = None
+    schema_index = None
+    
     try:
         model = model_manager.get_current_model() if hasattr(model_manager, 'get_current_model') else None
         if model is not None:
             model_nl_config = EncoderConfigFactory.extract_nl_encoder_config(model)
             if model_nl_config:
                 logger.info(f"Using NL encoder config from model with {len(model_nl_config.get('patterns', []))} patterns")
+            
+            # Try to get or create AutoSchemaMatcher for the model
+            # Validates: Requirements 3, 4, 5
+            auto_schema_matcher, schema_index = _get_auto_schema_matcher(model)
+            
     except Exception as e:
         logger.warning(f"Failed to extract NL config from model: {e}")
     
@@ -97,7 +129,76 @@ def get_nl_query_service():
         intent_matcher=intent_matcher,
         llm_fallback=llm_fallback,
         confidence_threshold=0.85,
+        schema_index=schema_index,
+        auto_schema_matcher=auto_schema_matcher,
     )
+
+
+def _get_auto_schema_matcher(model):
+    """
+    Get or create AutoSchemaMatcher for a model.
+    
+    Creates an AutoSchemaMatcher using the model's encoder and config,
+    and optionally a SchemaIndex for caching.
+    
+    Args:
+        model: The deployed model object
+    
+    Returns:
+        Tuple of (AutoSchemaMatcher or None, SchemaIndex or None)
+    
+    Validates: Requirements 3, 4, 5
+    """
+    try:
+        # Import SDK components
+        from glyphh.nl.auto_schema_matcher import AutoSchemaMatcher, AutoMatchConfig
+        from domains.nl_query.schema_index import SchemaIndex
+        
+        # Check if model has required attributes
+        if not hasattr(model, 'encoder') or not hasattr(model, 'config'):
+            logger.warning("Model missing encoder or config, cannot create AutoSchemaMatcher")
+            return None, None
+        
+        # Get or create schema index
+        model_id = getattr(model, 'model_id', 'unknown')
+        schema_index = SchemaIndex(model_id=model_id)
+        
+        # Build schema index from model
+        try:
+            schema_index.build_from_model(model)
+            logger.info(f"Schema index built for model '{model_id}' with {schema_index.get_metrics().vector_count} vectors")
+        except Exception as e:
+            logger.warning(f"Failed to build schema index: {e}")
+            schema_index = None
+        
+        # Create AutoSchemaMatcher
+        auto_config = AutoMatchConfig(
+            enable_compound_matching=True,
+            enable_synonyms=True,
+            fallback_to_manual=True,
+        )
+        
+        # Get manual patterns from model if available
+        manual_patterns = None
+        if hasattr(model, 'nl_encoder_config'):
+            manual_patterns = model.nl_encoder_config
+        
+        auto_schema_matcher = AutoSchemaMatcher(
+            encoder=model.encoder,
+            config=model.config,
+            auto_config=auto_config,
+            manual_patterns=manual_patterns,
+        )
+        
+        logger.info(f"AutoSchemaMatcher created for model '{model_id}'")
+        return auto_schema_matcher, schema_index
+        
+    except ImportError as e:
+        logger.warning(f"AutoSchemaMatcher not available: {e}")
+        return None, None
+    except Exception as e:
+        logger.warning(f"Failed to create AutoSchemaMatcher: {e}")
+        return None, None
 
 
 @router.post("/query", response_model=NLQueryResponse)
@@ -106,7 +207,15 @@ async def execute_nl_query(
     model_id: str,
     request: NLQueryRequest,
 ) -> NLQueryResponse:
-    """Execute a natural language query."""
+    """
+    Execute a natural language query.
+    
+    Supports auto-schema matching for automatic intent inference and
+    parameter extraction. Returns disambiguation suggestions when
+    the query is ambiguous.
+    
+    Validates: Requirements 3, 4, 5, 12.2, 12.5
+    """
     service = get_nl_query_service()
     
     logger.info(f"NL query: org={org_id}, model={model_id}, query='{request.query}'")
@@ -117,6 +226,20 @@ async def execute_nl_query(
         query=request.query,
         debug=request.debug,
     )
+    
+    # Handle disambiguation response
+    # Validates: Requirements 12.2, 12.5
+    if result.disambiguation_needed:
+        return NLQueryResponse(
+            result=None,
+            query_type=result.query_type,
+            match_method=result.match_method,
+            confidence=result.confidence,
+            translated_query=result.translated_query,
+            query_time_ms=result.query_time_ms,
+            disambiguation_needed=True,
+            disambiguation_suggestions=result.disambiguation_suggestions,
+        )
     
     if result.match_method == "none":
         suggestions = [
@@ -141,6 +264,8 @@ async def execute_nl_query(
         confidence=result.confidence,
         translated_query=result.translated_query,
         query_time_ms=result.query_time_ms,
+        disambiguation_needed=result.disambiguation_needed,
+        disambiguation_suggestions=result.disambiguation_suggestions,
     )
 
 
@@ -158,10 +283,33 @@ async def debug_translation(
     model_id: str,
     request: TranslationDebugRequest,
 ) -> TranslationDebugResponse:
-    """Debug query translation without execution."""
+    """
+    Debug query translation without execution.
+    
+    Returns detailed information about how the query was matched,
+    including disambiguation options if the query is ambiguous.
+    
+    Validates: Requirements 3, 4, 5, 12.2, 12.5
+    """
     service = get_nl_query_service()
     
     match_result, match_method = await service.translate_query(request.query)
+    
+    # Check for disambiguation in the structured query
+    disambiguation_needed = False
+    disambiguation_suggestions = []
+    
+    if match_result and match_result.structured_query:
+        disambiguation_needed = match_result.structured_query.get("disambiguation_needed", False)
+        if disambiguation_needed:
+            # Build suggestions from disambiguation options
+            options = match_result.structured_query.get("disambiguation_options", [])
+            for opt in options:
+                intent_type = opt.get("intent_type", "unknown")
+                confidence = opt.get("confidence", 0.0)
+                disambiguation_suggestions.append(
+                    f"Did you mean '{intent_type}'? (confidence: {confidence:.0%})"
+                )
     
     if match_result:
         return TranslationDebugResponse(
@@ -170,9 +318,13 @@ async def debug_translation(
             parameters=match_result.parameters,
             pattern_matched=match_result.pattern_matched,
             match_method=match_method,
+            disambiguation_needed=disambiguation_needed,
+            disambiguation_suggestions=disambiguation_suggestions,
         )
     else:
         return TranslationDebugResponse(
             intent=None, confidence=0.0, parameters={},
             pattern_matched=None, match_method="none",
+            disambiguation_needed=False,
+            disambiguation_suggestions=[],
         )

@@ -7,6 +7,8 @@ Key Components:
 - IntentMatcher: Rules-based matching using HDC similarity
 - NLQueryService: Orchestrates rules + LLM fallback
 - LLMFallback: Optional LLM-based translation (Phi-3.5-mini-instruct)
+- SchemaIndex: Runtime schema index for fast NL query matching
+- SchemaIndexMetrics: Metrics for schema index performance
 
 Design Principle: "When your LLM can't afford to be wrong, sidecar it with Glyphh"
 """
@@ -18,6 +20,8 @@ __all__ = [
     "NLQueryService",
     "NLQueryResult",
     "LLMFallback",
+    "SchemaIndex",
+    "SchemaIndexMetrics",
 ]
 
 
@@ -38,4 +42,10 @@ def __getattr__(name):
     elif name == "LLMFallback":
         from domains.nl_query.llm_fallback import LLMFallback
         return LLMFallback
+    elif name == "SchemaIndex":
+        from domains.nl_query.schema_index import SchemaIndex
+        return SchemaIndex
+    elif name == "SchemaIndexMetrics":
+        from domains.nl_query.schema_index import SchemaIndexMetrics
+        return SchemaIndexMetrics
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

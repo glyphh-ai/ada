@@ -4,7 +4,8 @@ Chat Streaming API Routes.
 SSE streaming endpoint for chat queries with progress events.
 Publicly accessible for any client (Studio, custom UIs, integrations).
 
-Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 11.6
+Updated to support AutoSchemaMatcher for automatic schema-based NL query matching.
+Validates: Requirements 3, 4, 5, 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 12.2, 12.5
 """
 
 import asyncio
@@ -12,7 +13,7 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -34,15 +35,24 @@ class ChatStreamRequest(BaseModel):
 class ChatResponse(BaseModel):
     """Response from synchronous chat endpoint."""
     response: str
-    source: str  # "glyphh" or "llm"
+    source: str  # "glyphh", "llm", or "auto"
     confidence: float
     query_type: Optional[str] = None
     match_method: Optional[str] = None
     session_id: Optional[str] = None
+    disambiguation_needed: bool = False
+    disambiguation_suggestions: List[str] = Field(default_factory=list)
 
 
 def get_chat_services():
-    """Get services needed for chat."""
+    """
+    Get services needed for chat.
+    
+    Initializes the NL Query Service with AutoSchemaMatcher support
+    for automatic schema-based matching.
+    
+    Validates: Requirements 3, 4, 5
+    """
     from main import model_manager
     from domains.query.service import QueryService
     from domains.nl_query.intent_matcher import IntentMatcher
@@ -55,10 +65,18 @@ def get_chat_services():
     
     # Get NL config from model if available
     model_nl_config = None
+    auto_schema_matcher = None
+    schema_index = None
+    
     try:
         model = model_manager.get_current_model() if hasattr(model_manager, 'get_current_model') else None
         if model is not None:
             model_nl_config = EncoderConfigFactory.extract_nl_encoder_config(model)
+            
+            # Try to get or create AutoSchemaMatcher for the model
+            # Validates: Requirements 3, 4, 5
+            auto_schema_matcher, schema_index = _get_auto_schema_matcher_for_chat(model)
+            
     except Exception as e:
         logger.warning(f"Failed to extract NL config from model: {e}")
     
@@ -82,9 +100,78 @@ def get_chat_services():
         intent_matcher=intent_matcher,
         llm_fallback=llm_fallback,
         confidence_threshold=0.85,
+        schema_index=schema_index,
+        auto_schema_matcher=auto_schema_matcher,
     )
     
     return nl_service, query_service
+
+
+def _get_auto_schema_matcher_for_chat(model):
+    """
+    Get or create AutoSchemaMatcher for chat.
+    
+    Creates an AutoSchemaMatcher using the model's encoder and config,
+    and optionally a SchemaIndex for caching.
+    
+    Args:
+        model: The deployed model object
+    
+    Returns:
+        Tuple of (AutoSchemaMatcher or None, SchemaIndex or None)
+    
+    Validates: Requirements 3, 4, 5
+    """
+    try:
+        # Import SDK components
+        from glyphh.nl.auto_schema_matcher import AutoSchemaMatcher, AutoMatchConfig
+        from domains.nl_query.schema_index import SchemaIndex
+        
+        # Check if model has required attributes
+        if not hasattr(model, 'encoder') or not hasattr(model, 'config'):
+            logger.warning("Model missing encoder or config, cannot create AutoSchemaMatcher")
+            return None, None
+        
+        # Get or create schema index
+        model_id = getattr(model, 'model_id', 'unknown')
+        schema_index = SchemaIndex(model_id=model_id)
+        
+        # Build schema index from model
+        try:
+            schema_index.build_from_model(model)
+            logger.info(f"Schema index built for chat model '{model_id}' with {schema_index.get_metrics().vector_count} vectors")
+        except Exception as e:
+            logger.warning(f"Failed to build schema index for chat: {e}")
+            schema_index = None
+        
+        # Create AutoSchemaMatcher
+        auto_config = AutoMatchConfig(
+            enable_compound_matching=True,
+            enable_synonyms=True,
+            fallback_to_manual=True,
+        )
+        
+        # Get manual patterns from model if available
+        manual_patterns = None
+        if hasattr(model, 'nl_encoder_config'):
+            manual_patterns = model.nl_encoder_config
+        
+        auto_schema_matcher = AutoSchemaMatcher(
+            encoder=model.encoder,
+            config=model.config,
+            auto_config=auto_config,
+            manual_patterns=manual_patterns,
+        )
+        
+        logger.info(f"AutoSchemaMatcher created for chat model '{model_id}'")
+        return auto_schema_matcher, schema_index
+        
+    except ImportError as e:
+        logger.warning(f"AutoSchemaMatcher not available for chat: {e}")
+        return None, None
+    except Exception as e:
+        logger.warning(f"Failed to create AutoSchemaMatcher for chat: {e}")
+        return None, None
 
 
 @router.post("/stream")
@@ -100,11 +187,12 @@ async def chat_stream(
     - thinking: Query is being analyzed/matched
     - searching: Similarity search in progress
     - generating: Response being formatted
+    - disambiguation: Query is ambiguous, suggestions provided
     - complete: Final response with results
     
     For fast queries (<500ms), may skip intermediate events.
     
-    Requirements: 11.1, 11.2, 11.3, 11.5
+    Validates: Requirements 3, 4, 5, 11.1, 11.2, 11.3, 11.5, 12.2, 12.5
     """
     async def stream_response():
         start_time = time.time()
@@ -130,12 +218,14 @@ async def chat_stream(
                     "message": f"Matched intent: {match_result.intent}",
                     "progress": 30,
                     "confidence": match_result.confidence,
+                    "match_method": match_method,
                 })
             else:
                 yield _sse_event("thinking", {
                     "message": f"Matched intent: {match_result.intent if match_result else 'none'}",
                     "progress": 30,
                     "confidence": match_result.confidence if match_result else 0.0,
+                    "match_method": match_method,
                 })
             
             if not match_result or match_method == "none":
@@ -145,6 +235,33 @@ async def chat_stream(
                     "response": "I couldn't understand your query. Try rephrasing or use keywords like 'find', 'similar', 'list'.",
                     "source": "error",
                     "confidence": 0.0,
+                    "progress": 100,
+                })
+                return
+            
+            # Check for disambiguation
+            # Validates: Requirements 12.2, 12.5
+            disambiguation_needed = False
+            disambiguation_suggestions = []
+            
+            if match_result.structured_query:
+                disambiguation_needed = match_result.structured_query.get("disambiguation_needed", False)
+                if disambiguation_needed:
+                    # Build suggestions from disambiguation options
+                    options = match_result.structured_query.get("disambiguation_options", [])
+                    for opt in options:
+                        intent_type = opt.get("intent_type", "unknown")
+                        confidence = opt.get("confidence", 0.0)
+                        disambiguation_suggestions.append(
+                            f"Did you mean '{intent_type}'? (confidence: {confidence:.0%})"
+                        )
+            
+            if disambiguation_needed:
+                # Return disambiguation response
+                yield _sse_event("disambiguation", {
+                    "message": "Your query is ambiguous. Please clarify:",
+                    "suggestions": disambiguation_suggestions,
+                    "confidence": match_result.confidence,
                     "progress": 100,
                 })
                 return
@@ -163,6 +280,16 @@ async def chat_stream(
                 debug=False,
             )
             
+            # Check if result indicates disambiguation needed
+            if result.disambiguation_needed:
+                yield _sse_event("disambiguation", {
+                    "message": "Your query is ambiguous. Please clarify:",
+                    "suggestions": result.disambiguation_suggestions,
+                    "confidence": result.confidence,
+                    "progress": 100,
+                })
+                return
+            
             yield _sse_event("searching", {
                 "message": "Search complete",
                 "progress": 70,
@@ -177,11 +304,19 @@ async def chat_stream(
             # Format the response
             response_text = _format_result(result.result, result.query_type)
             
+            # Determine source based on match method
+            if result.match_method in ("auto", "hybrid"):
+                source = "auto"
+            elif result.match_method == "llm":
+                source = "llm"
+            else:
+                source = "glyphh"
+            
             # Phase 4: Complete
             yield _sse_event("complete", {
                 "message": "Query complete",
                 "response": response_text,
-                "source": "glyphh" if result.match_method != "llm" else "llm",
+                "source": source,
                 "confidence": result.confidence,
                 "query_type": result.query_type,
                 "match_method": result.match_method,
@@ -221,7 +356,10 @@ async def chat_sync(
     """
     Synchronous chat endpoint for clients that don't need streaming.
     
-    Requirement: 11.6
+    Supports auto-schema matching and returns disambiguation suggestions
+    when the query is ambiguous.
+    
+    Validates: Requirements 3, 4, 5, 11.6, 12.2, 12.5
     """
     nl_service, _ = get_chat_services()
     
@@ -231,6 +369,20 @@ async def chat_sync(
         query=request.query,
         debug=False,
     )
+    
+    # Handle disambiguation
+    # Validates: Requirements 12.2, 12.5
+    if result.disambiguation_needed:
+        return ChatResponse(
+            response="Your query is ambiguous. Please clarify your intent.",
+            source="disambiguation",
+            confidence=result.confidence,
+            query_type=result.query_type,
+            match_method=result.match_method,
+            session_id=request.session_id,
+            disambiguation_needed=True,
+            disambiguation_suggestions=result.disambiguation_suggestions,
+        )
     
     if result.match_method == "none":
         raise HTTPException(
@@ -243,13 +395,23 @@ async def chat_sync(
     
     response_text = _format_result(result.result, result.query_type)
     
+    # Determine source based on match method
+    if result.match_method in ("auto", "hybrid"):
+        source = "auto"
+    elif result.match_method == "llm":
+        source = "llm"
+    else:
+        source = "glyphh"
+    
     return ChatResponse(
         response=response_text,
-        source="glyphh" if result.match_method != "llm" else "llm",
+        source=source,
         confidence=result.confidence,
         query_type=result.query_type,
         match_method=result.match_method,
         session_id=request.session_id,
+        disambiguation_needed=False,
+        disambiguation_suggestions=[],
     )
 
 
