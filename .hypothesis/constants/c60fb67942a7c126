@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/shared/auth.py
+# hypothesis_version: 6.151.4
+
+['Bearer', 'Invalid token type', 'Token has expired', 'WWW-Authenticate', 'access', 'admin', 'local', 'local-dev-org', 'local-dev-user', 'org_id', 'role', 'sub', 'type', 'user']

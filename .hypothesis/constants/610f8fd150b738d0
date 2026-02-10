@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/shared/exceptions.py
+# hypothesis_version: 6.151.4
+
+[400, 401, 403, 404, 429, 500, 501, 503, 'AUTHORIZATION_FAILED', 'ENCODING_FAILED', 'GLYPH_NOT_FOUND', 'LICENSE_EXPIRED', 'LICENSE_INVALID', 'MODEL_INCOMPATIBLE', 'MODEL_LOAD_FAILED', 'MODEL_NOT_FOUND', 'NAMESPACE_NOT_FOUND', 'NL_QUERY_DISABLED', 'QUOTA_EXCEEDED', 'RUNTIME_ERROR', 'VALIDATION_FAILED', 'access', 'current', 'expired_at', 'field', 'glyph_id', 'hint', 'limit', 'model_id', 'model_version', 'namespace_id', 'operation', 'org_id', 'reason', 'resource', 'sdk_version', 'user_id']

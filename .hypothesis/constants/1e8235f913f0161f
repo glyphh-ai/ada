@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/domains/listeners/service.py
+# hypothesis_version: 6.151.4
+
+[0.0, 300, 1001, '...', 'BATCH_FAILED', 'CREATE_FAILED', 'MISSING_CONCEPT', 'MISSING_CONCEPTS', 'RATE_LIMITED', 'Server shutdown', 'UNKNOWN_MESSAGE_TYPE', 'VALIDATION_ERROR', 'active_connections', 'batch_create', 'batch_created', 'code', 'concept', 'concepts', 'connected_at', 'connection_id', 'connections', 'create_glyph', 'created', 'error', 'errors', 'failed', 'glyph_created', 'glyph_id', 'glyphs_created', 'heartbeat', 'index', 'message', 'messages_received', 'metadata', 'model_id', 'org_id', 'ping', 'pong', 'results', 'retry_after', 'status', 'success', 'tolist', 'total', 'type']

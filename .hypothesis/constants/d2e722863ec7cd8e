@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/shared/retry.py
+# hypothesis_version: 6.151.4
+
+[2.0, 30.0, 1000.0, 100, 1600, 'T', 'closed', 'failure_count', 'half_open', 'last_failure_time', 'name', 'open', 'state', 'success_count']

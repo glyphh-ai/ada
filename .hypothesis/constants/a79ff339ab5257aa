@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/api/routes/glyphs.py
+# hypothesis_version: 6.151.4
+
+[100, 400, 404, 429, 500, 503, 1000, '/batch', '/{glyph_id}', 'New concept text', 'New metadata', 'Optional metadata', 'Shared metadata', 'concept', 'created', 'deleted', 'error', 'errors', 'failed', 'glyph_id', 'glyphs', 'index', 'results', 'status', 'tolist']

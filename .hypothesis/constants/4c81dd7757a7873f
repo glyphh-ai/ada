@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/shared/sdk_adapter.py
+# hypothesis_version: 6.151.4
+
+['EncoderConfig', 'LayerConfig', 'Role', 'SegmentConfig', '__version__', 'api_mode', 'available', 'degraded', 'legacy', 'new', 'not_installed', 'unknown', 'version', 'warnings']

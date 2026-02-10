@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/domains/models/db_models.py
+# hypothesis_version: 6.151.4
+
+[0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 200, 255, 1024, 2000, 1000000, 'CASCADE', 'Edge', 'Edge.source_glyph_id', 'Edge.target_glyph_id', 'Glyph', 'active', 'all, delete-orphan', 'analogy', 'causes', 'composition', 'contrast', 'edge_type', 'edges', 'ef_construction', 'embedding', 'follows', 'glyph_count', 'glyphs', 'glyphs.id', 'hnsw', 'idx_edge_org_model', 'idx_edge_source', 'idx_edge_target', 'idx_edge_type', 'idx_glyph_embedding', 'idx_glyph_org_model', 'idx_token_org', 'idx_token_org_model', 'idx_token_status', 'incoming_edges', 'm', 'max_glyphs', 'memory_mb', 'metadata', 'model_configs', 'outgoing_edges', 'precedes', 'prevents', 'read', 'similarity', 'source_glyph', 'source_glyph_id', 'storage_gb', 'target_glyph', 'target_glyph_id', 'tokens', 'vector_cosine_ops']

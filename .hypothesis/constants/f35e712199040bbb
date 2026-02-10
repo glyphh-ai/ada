@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/domains/query/service.py
+# hypothesis_version: 6.151.4
+
+[0.0, 0.1, 1.0, 1.2, 1000, 'added', 'citations', 'confidence', 'follows', 'forward', 'nodes', 'outgoing', 'precedes', 'query', 'root', 'security_level', 'target_glyph_id', 'text', 'weight']

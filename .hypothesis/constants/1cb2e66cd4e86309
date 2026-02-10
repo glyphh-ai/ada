@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/domains/resources/model_config_service.py
+# hypothesis_version: 6.151.4
+
+[0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0, 'ModelScopeConfig', 'SimilarityWeights', 'beam_width', 'max_tree_depth', 'model_id', 'neural_cortex', 'neural_layer', 'neural_role', 'neural_segment', 'org_id', 'similarity_weights', 'temporal_cortex', 'temporal_layer', 'temporal_role', 'temporal_segment']

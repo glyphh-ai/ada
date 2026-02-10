@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/domains/models/manager.py
+# hypothesis_version: 6.151.4
+
+[0.0, 1.0, 1000, 1024, 10000, 1000000, '.glyphh', '1', 'Active', 'SDK not available', '__dict__', 'applied', 'change_type', 'clear_cache', 'compatible', 'completed', 'config', 'description', 'dimension', 'encoder_config', 'errors', 'failed', 'glyph_count', 'job_id', 'layers', 'local', 'long_description', 'max_glyphs', 'memory_mb', 'message', 'meta_name', 'model_version', 'name', 'nl_encoder_config', 'nl_only', 'pending', 'platform-deploy', 're_encoding', 'running', 'sdk_version', 'security_weight', 'seed', 'short_description', 'similarity_weight', 'started', 'status', 'storage_gb', 'storage_mb', 'text', 'to_dict', 'unknown', 'version', 'wb']

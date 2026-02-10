@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/domains/mcp/server.py
+# hypothesis_version: 6.151.4
+
+[0.0, 0.85, 1.0, 100, 1000, 10000, 'Analyzing query...', 'Complete', 'Executing query...', 'Matching intent...', 'Model ID', 'Organization ID', 'Parsing query...', 'boolean', 'cache_stats', 'confidence', 'content', 'data', 'debug', 'default', 'description', 'direct', 'enable_cache', 'encoder', 'error', 'extracted_slots', 'glyphs', 'gql', 'gql_patterns', 'gql_query', 'gql_translate', 'hdc_intent', 'inputSchema', 'isError', 'json', 'match_method', 'model_id', 'name', 'nl_query', 'none', 'object', 'org_id', 'pattern_name', 'properties', 'query', 'query_time_ms', 'query_type', 'read', 'required', 'result', 'string', 'success', 'text', 'to_dict', 'translated_query', 'type']

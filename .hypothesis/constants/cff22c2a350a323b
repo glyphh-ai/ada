@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/api/routes/chat.py
+# hypothesis_version: 6.151.4
+
+[0.0, 0.5, 0.85, 100, 422, 503, '/stream', 'Analyzing query...', 'Cache-Control', 'Connection', 'No results found.', 'Query complete', 'Search complete', 'X-Accel-Buffering', 'chat', 'complete', 'concept', 'concept_text', 'confidence', 'count', 'error', 'generating', 'get_current_model', 'glyphh', 'keep-alive', 'llm', 'match_method', 'message', 'no', 'no-cache', 'none', 'predictions', 'probability', 'progress', 'query_time_ms', 'query_type', 'response', 'results', 'score', 'searching', 'similarity_score', 'source', 'text', 'text/event-stream', 'thinking', 'timestamp', 'type', 'verified']

@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/api/routes/deployment.py
+# hypothesis_version: 6.151.4
+
+[100, 400, 404, 1000, '.glyphh', '/api', '/deploy', '/logs', '/models', '/status', '/tokens', '/tokens/{token_id}', '1.0.0', 'Model ID', 'Number of log lines', 'Organization ID', 'cleared', 'config', 'deleted', 'deployed', 'deployment', 'dimension', 'edges_deleted', 'encoder_config', 'glyphs_deleted', 'lines_requested', 'local', 'logs', 'message', 'model_id', 'models', 'org_id', 're-encoding', 'revoked', 'status', 'token_id', 'tokens', 'updated', 'valid', 'version']

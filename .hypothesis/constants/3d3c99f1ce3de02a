@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/domains/resources/__init__.py
+# hypothesis_version: 6.151.4
+
+['ModelConfigService', 'ModelScopeConfig', 'QuotaCheckResult', 'QuotaService', 'ResourceManager', 'ResourceQuota', 'ResourceQuotas', 'ResourceUsage', 'SimilarityWeights']

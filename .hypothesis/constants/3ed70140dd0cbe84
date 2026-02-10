@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/domains/nl_query/schema_index.py
+# hypothesis_version: 6.151.4
+
+[0.0, 1000, 'MatchResult', 'SchemaVector', 'build_time_ms', 'cache_hit_rate', 'cache_hits', 'cache_misses', 'capacity', 'config', 'data', 'encoder', 'hit_rate', 'hits', 'last_rebuild', 'memory_bytes', 'misses', 'nbytes', 'role', 'role_count', 'size', 'utf-8', 'value', 'value_count', 'vector', 'vector_count']

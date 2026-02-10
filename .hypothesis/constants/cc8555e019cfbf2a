@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/domains/models/schemas.py
+# hypothesis_version: 6.151.4
+
+[1.0, 100, 200, 'Active', 'Beam search width', 'Claim to verify', 'Maximum tree depth', 'Optional filters', 'Optional metadata', 'backward', 'direction', 'forward']

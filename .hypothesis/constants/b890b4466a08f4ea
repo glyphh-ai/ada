@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/domains/mcp/progress.py
+# hypothesis_version: 6.151.4
+
+[100, '2.0', 'Complete', 'jsonrpc', 'message', 'method', 'params', 'progress', 'progressToken', 'total']

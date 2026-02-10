@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/domains/models/storage.py
+# hypothesis_version: 6.151.4
+
+[0.0, 100, 'Z', 'array', 'base64_float32', 'both', 'concept_text', 'created_at', 'edge_type', 'embedding', 'embedding_format', 'expires_at', 'glyph_metadata', 'glyphs', 'id', 'incoming', 'local', 'metadata', 'model_id', 'org_id', 'outgoing', 'query_embedding', 'similarity', 'source_glyph_id', 'target_glyph_id', 'updated_at', 'weight']

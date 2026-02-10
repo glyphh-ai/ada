@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/domains/resources/manager.py
+# hypothesis_version: 6.151.4
+
+[0.0, 0.1, 0.5, 10.0, 1024.0, 256, 768, 1024, 1000000, 5000000, '/', 'count', 'cpu_percent', 'disk_free_gb', 'disk_percent', 'disk_total_gb', 'edge_count', 'glyph_count', 'last_updated', 'max_edges', 'max_glyphs', 'memory_available_gb', 'memory_mb', 'memory_percent', 'memory_total_gb', 'models', 'process', 'storage_gb', 'storage_mb', 'system', 'threads', 'total_edges', 'total_glyphs', 'total_storage_mb']

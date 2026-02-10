@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/api/routes/nl_query.py
+# hypothesis_version: 6.151.4
+
+[0.0, 0.85, 422, 501, 503, '/intents', '/query', '/query/debug', '/{org_id}/{model_id}', 'Query to translate', 'confidence', 'get_current_model', 'intents', 'message', 'nl_query', 'none', 'original_query', 'patterns', 'suggestions']

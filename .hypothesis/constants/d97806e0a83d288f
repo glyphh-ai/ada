@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/api/routes/org_scoped.py
+# hypothesis_version: 6.151.4
+
+[0.85, 400, 403, 422, 501, 503, 1000, '/intents', '/mcp', '/mcp/tools', '/query', '/{org_id}/{model_id}', "Missing 'tool' field", 'arguments', 'confidence', 'get_current_model', 'intents', 'local-dev-org', 'message', 'model_id', 'none', 'org-scoped', 'org_id', 'original_query', 'patterns', 'suggestions', 'tool', 'tools']

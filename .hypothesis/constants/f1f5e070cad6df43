@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/domains/jobs/manager.py
+# hypothesis_version: 6.151.4
+
+[100, 300, 'JobManager started', 'JobManager stopped', 'complete', 'created_at', 'encoded', 'encoded_count', 'encoding', 'error', 'error_message', 'failed', 'failed_count', 'id', 'indexing', 'job_id', 'message', 'model_id', 'org_id', 'processed', 'processed_count', 'progress', 'queued', 'skipped', 'skipped_count', 'status', 'timestamp', 'total', 'total_records', 'type', 'updated_at', 'validating']

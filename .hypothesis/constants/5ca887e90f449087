@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/domains/resources/quota_service.py
+# hypothesis_version: 6.151.4
+
+[0.004, 10.0, 1024.0, 100, 200, 250, 500, 768, 1024, 1000000, 'ResourceQuotas', 'Z', 'edge_count', 'glyph_count', 'glyphs', 'glyphs_percent', 'max_glyphs', 'memory', 'memory_mb', 'memory_percent', 'model_id', 'org_id', 'quotas', 'storage', 'storage_bytes', 'storage_gb', 'storage_percent', 'timestamp', 'usage', 'utilization']

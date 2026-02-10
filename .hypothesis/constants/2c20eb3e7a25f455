@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/shared/encoder_config_factory.py
+# hypothesis_version: 6.151.4
+
+[0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 10000, 'EncoderConfig', 'LayerConfig', 'Role', 'SegmentConfig', 'attributes', 'category', 'concept', 'content', 'context', 'default', 'dimension', 'encoder_config', 'entity', 'from_dict', 'intent', 'intent_patterns', 'intent_type', 'keywords', 'layers', 'main', 'modifier', 'name', 'nl_encoder_config', 'object', 'parameters', 'phrase', 'predicate', 'primary', 'query', 'relational', 'relations', 'roles', 'secondary', 'seed', 'segments', 'semantic', 'similarity_weight', 'subject', 'text', 'to_dict', 'type', 'value']

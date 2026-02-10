@@ -1,0 +1,4 @@
+# file: /Users/timmetim/development/glyphh-master/glyphh-runtime/shared/config_validator.py
+# hypothesis_version: 6.151.4
+
+[1.0, '; ', '__dict__', 'api_mode', 'compatible', 'encoder_config', 'errors', 'layers', 'legacy', 'name', 'new', 'roles', 'sdk_available', 'sdk_version', 'segments', 'similarity_weight', 'unknown', 'version', 'warnings']
