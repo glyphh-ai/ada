@@ -625,6 +625,14 @@ class NLQueryService:
                 
         except Exception as e:
             logger.error(f"Query execution failed: {e}")
+            # Check if this is an encoding error - return helpful message
+            error_msg = str(e)
+            if "no attributes match" in error_msg.lower() or "cannot encode" in error_msg.lower():
+                return {
+                    "error": "Query could not be processed",
+                    "message": "The query doesn't match the model's schema. Try rephrasing with specific attribute names or values from your data.",
+                    "suggestion": "Use 'list all' to see available data, or try a more specific search term."
+                }
             raise
     
     def get_intents(self) -> Dict[str, Any]:

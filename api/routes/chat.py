@@ -296,6 +296,21 @@ async def chat_stream(
                 })
                 return
             
+            # Check if result contains an error (e.g., encoding failure)
+            if isinstance(result.result, dict) and "error" in result.result:
+                error_result = result.result
+                yield _sse_event("complete", {
+                    "message": error_result.get("message", "Query could not be processed"),
+                    "result": error_result,
+                    "source": "error",
+                    "confidence": 0.0,
+                    "query_type": result.query_type,
+                    "match_method": result.match_method,
+                    "progress": 100,
+                    "query_time_ms": result.query_time_ms,
+                })
+                return
+            
             yield _sse_event("searching", {
                 "message": "Search complete",
                 "progress": 70,
