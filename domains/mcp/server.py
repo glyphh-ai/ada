@@ -286,6 +286,72 @@ class MCPServer:
             is_error=True,
             error=message,
         )
+    
+    def _flatten_fact_tree(self, fact_tree: Any, query: str) -> Dict[str, Any]:
+        """
+        Flatten a FactTree into a simpler response format.
+        
+        Transforms the nested FactTree structure into a flat response with:
+        - query: The original query
+        - results: The actual query results
+        - citations: Any citations from the results
+        - execution_time_ms: Query execution time
+        """
+        result = {
+            "query": query,
+            "query_type": "gql",
+            "match_method": "direct",
+            "confidence": 1.0,
+            "results": None,
+            "citations": [],
+            "execution_time_ms": None,
+        }
+        
+        # Get the JSON representation
+        tree_json = fact_tree.to_json() if hasattr(fact_tree, 'to_json') else {}
+        
+        # Extract data from children
+        children = tree_json.get("children", [])
+        for child in children:
+            desc = child.get("description", "").lower()
+            value = child.get("value")
+            data_context = child.get("data_context", {})
+            
+            # Extract results (the main query output)
+            if "listed" in desc or "found" in desc or "results" in desc.lower():
+                result["results"] = value
+                # Include filter/limit info if present
+                if data_context.get("limit"):
+                    result["limit"] = data_context["limit"]
+                if data_context.get("filter"):
+                    result["filter"] = data_context["filter"]
+                if data_context.get("threshold"):
+                    result["threshold"] = data_context["threshold"]
+            
+            # Extract comparison results
+            elif "compar" in desc:
+                result["results"] = value
+            
+            # Extract drift results
+            elif "drift" in desc:
+                result["results"] = value
+            
+            # Extract execution metadata
+            elif "execution" in desc or "metadata" in desc:
+                if data_context.get("execution_time_ms"):
+                    result["execution_time_ms"] = data_context["execution_time_ms"]
+            
+            # Collect citations
+            citations = child.get("citations", [])
+            if citations:
+                result["citations"].extend(citations)
+        
+        # Also check root-level citations
+        root_citations = tree_json.get("citations", [])
+        if root_citations:
+            result["citations"].extend(root_citations)
+        
+        return result
 
     # =========================================================================
     # Tool Handlers
@@ -508,17 +574,11 @@ class MCPServer:
                     message="Complete"
                 )
             
-            # Convert fact tree to dict for response
-            # FactTree uses to_json() method, not to_dict()
-            result = fact_tree.to_json() if hasattr(fact_tree, 'to_json') else str(fact_tree)
+            # Flatten FactTree to a simpler response format
+            result = self._flatten_fact_tree(fact_tree, query)
+            result["cache_stats"] = executor.get_cache_stats() if enable_cache else None
             
-            return {
-                "result": result,
-                "query_type": "gql",
-                "match_method": "direct",
-                "confidence": 1.0,
-                "cache_stats": executor.get_cache_stats() if enable_cache else None,
-            }
+            return result
             
         except Exception as e:
             logger.error(f"GQL query error: {e}", exc_info=True)
