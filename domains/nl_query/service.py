@@ -519,6 +519,45 @@ class NLQueryService:
         
         return match_result, "none"
     
+    def _normalize_operation(self, operation: str) -> str:
+        """
+        Normalize operation names from intent matcher to canonical executor names.
+        
+        This prevents mismatches between intent names (e.g., 'list_all') and
+        executor operation names (e.g., 'list').
+        
+        Args:
+            operation: Raw operation name from intent matcher
+            
+        Returns:
+            Canonical operation name for the executor
+        """
+        # Map intent matcher names to canonical executor names
+        operation_aliases = {
+            # List operations
+            "list_all": "list",
+            "list_everything": "list",
+            "show_all": "list",
+            "enumerate": "list",
+            # Search operations
+            "find": "similarity_search",
+            "search": "similarity_search",
+            "similar": "similarity_search",
+            "find_similar": "similarity_search",
+            # Predict operations
+            "predict": "temporal_predict",
+            "forecast": "temporal_predict",
+            # Verify operations
+            "verify": "fact_tree",
+            "explain": "fact_tree",
+            "prove": "fact_tree",
+        }
+        
+        normalized = operation_aliases.get(operation, operation)
+        if normalized != operation:
+            logger.debug(f"Normalized operation '{operation}' -> '{normalized}'")
+        return normalized
+    
     async def _execute_structured_query(
         self,
         org_id: str,
@@ -532,6 +571,9 @@ class NLQueryService:
             FactTreeRequest,
             TemporalPredictRequest,
         )
+        
+        # Normalize operation name to canonical form
+        operation = self._normalize_operation(operation)
         
         try:
             if operation == "similarity_search":
@@ -575,7 +617,7 @@ class NLQueryService:
                 )
                 return result.model_dump() if hasattr(result, 'model_dump') else result
             
-            elif operation in ("list", "list_all"):
+            elif operation == "list":
                 # Use dedicated list method for listing glyphs
                 limit = query.get("limit", 100)
                 glyphs = await self.query_service.list_glyphs(
