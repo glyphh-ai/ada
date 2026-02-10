@@ -309,6 +309,50 @@ class GlyphStorage:
             for g in glyphs
         ]
     
+    async def list_glyphs_with_embeddings(
+        self,
+        org_id: str,
+        model_id: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> Tuple[List[GlyphResponse], Dict[str, List[float]]]:
+        """
+        List glyphs with their embeddings, scoped to org and model.
+        
+        Returns:
+            Tuple of (list of GlyphResponse, dict mapping glyph_id to embedding)
+        """
+        result = await self._session.execute(
+            select(Glyph)
+            .where(
+                Glyph.org_id == org_id,
+                Glyph.model_id == model_id,
+            )
+            .order_by(Glyph.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        glyphs = result.scalars().all()
+        
+        glyph_responses = []
+        embeddings = {}
+        
+        for g in glyphs:
+            glyph_responses.append(GlyphResponse(
+                id=g.id,
+                org_id=g.org_id,
+                model_id=g.model_id,
+                concept_text=g.concept_text,
+                metadata=g.glyph_metadata,
+                created_at=g.created_at,
+                updated_at=g.updated_at,
+            ))
+            # Convert embedding to list of floats
+            if g.embedding is not None:
+                embeddings[str(g.id)] = list(g.embedding)
+        
+        return glyph_responses, embeddings
+    
     async def count_glyphs(self, org_id: str, model_id: str) -> int:
         """Count glyphs scoped to org and model."""
         result = await self._session.execute(

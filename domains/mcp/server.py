@@ -407,6 +407,15 @@ class MCPServer:
         
         Parses the GQL query, creates an execution plan, and returns
         results as a Fact Tree. Sends progress notifications if token provided.
+        
+        Uses DatabaseGlyphStorage to provide glyphs and embeddings to the
+        GQL executor, replacing the previous GlyphWrapper hack.
+        
+        Requirements:
+            - 6.1: Uses DatabaseGlyphStorage instead of GlyphWrapper
+            - 6.2: Creates ExecutionContext with storage parameter
+            - 6.3: GlyphWrapper class removed
+            - 6.4: Passes org_id and model_id to DatabaseGlyphStorage
         """
         org_id = arguments["org_id"]
         model_id = arguments["model_id"]
@@ -441,38 +450,40 @@ class MCPServer:
                 ExecutionContext,
                 GQLError,
             )
+            from domains.gql.storage import DatabaseGlyphStorage
+            from shared.similarity_service import SimilarityService
             
-            # Fetch glyphs from database storage (not from SDK model object)
-            # The SDK model only has configuration, glyphs are stored in the DB
-            db_glyphs = await self._query_service.list_glyphs(
+            # Fetch glyphs with embeddings from database
+            # Requirements 6.1, 6.4: Use DatabaseGlyphStorage with org_id and model_id
+            db_glyphs, embeddings = await self._query_service.list_glyphs_with_embeddings(
                 org_id=org_id,
                 model_id=model_id,
                 limit=10000,  # Get all glyphs for GQL execution
             )
             
-            # Create a simple wrapper class to adapt GlyphResponse to GQL executor format
-            class GlyphWrapper:
-                """Adapts GlyphResponse to the format expected by GQL executor."""
-                def __init__(self, glyph_response):
-                    self.identifier = str(glyph_response.id)
-                    self.concept_text = glyph_response.concept_text
-                    self.metadata = glyph_response.metadata
-                    self.cortex = None  # Not needed for LIST queries
-                    self.layers = []  # Not needed for LIST queries
+            logger.info(f"Fetched {len(db_glyphs)} glyphs with {len(embeddings)} embeddings from database")
             
-            # Convert to dict format expected by ExecutionContext
-            glyphs = {}
-            for glyph in db_glyphs:
-                wrapper = GlyphWrapper(glyph)
-                glyphs[wrapper.identifier] = wrapper
+            # Create SimilarityService for similarity computations
+            similarity_service = SimilarityService(
+                similarity_calculator=getattr(loaded_model, 'similarity_calculator', None)
+            )
             
-            logger.info(f"GQL context built with {len(glyphs)} glyphs from database")
+            # Requirement 6.1, 6.4: Create DatabaseGlyphStorage with org_id, model_id, glyphs, embeddings
+            storage = DatabaseGlyphStorage(
+                org_id=org_id,
+                model_id=model_id,
+                glyphs=db_glyphs,
+                embeddings=embeddings,
+                similarity_service=similarity_service,
+            )
             
+            logger.info(f"GQL context built with {len(db_glyphs)} glyphs from database using DatabaseGlyphStorage")
+            
+            # Requirement 6.2: Create ExecutionContext with storage parameter
             context = ExecutionContext(
                 model=loaded_model.sdk_model,
-                glyphs=glyphs,
+                storage=storage,
                 encoder=getattr(loaded_model, 'encoder', None),
-                similarity_calculator=getattr(loaded_model, 'similarity_calculator', None),
             )
             
             if progress_handler and progress_token:

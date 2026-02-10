@@ -10,7 +10,7 @@ Updated to use SimilarityService for consistent similarity calculations.
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -134,6 +134,29 @@ class QueryService:
         async with self._session_factory() as session:
             storage = GlyphStorage(session)
             return await storage.list_glyphs(org_id, model_id, limit, offset)
+    
+    async def list_glyphs_with_embeddings(
+        self,
+        org_id: str,
+        model_id: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> Tuple[List[GlyphResponse], Dict[str, List[float]]]:
+        """
+        List glyphs with their embeddings for a model.
+        
+        Args:
+            org_id: Organization ID
+            model_id: Model ID
+            limit: Maximum number of glyphs to return
+            offset: Number of glyphs to skip
+            
+        Returns:
+            Tuple of (list of GlyphResponse, dict mapping glyph_id to embedding)
+        """
+        async with self._session_factory() as session:
+            storage = GlyphStorage(session)
+            return await storage.list_glyphs_with_embeddings(org_id, model_id, limit, offset)
     
     async def similarity_search(
         self,
