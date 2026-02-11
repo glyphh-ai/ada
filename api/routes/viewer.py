@@ -302,6 +302,75 @@ async def get_viewer_data(
         
         logger.info(f"Viewer edges: semantic={len(edges.semantic)}, hierarchy={len(edges.hierarchy)}, temporal={len(edges.temporal)}")
         
+        # Build neural edges based on cortex similarity (kNN)
+        # This computes similarity between glyph embeddings
+        if len(viewer_glyphs) >= 2 and embeddings:
+            import numpy as np
+            
+            K = 8  # kNN neighbors
+            MIN_SIM = 0.1  # Minimum similarity threshold
+            
+            # Build embedding matrix
+            glyph_names = [vg.name for vg in viewer_glyphs]
+            embedding_list = []
+            valid_indices = []
+            
+            for i, vg in enumerate(viewer_glyphs):
+                emb = embeddings.get(vg.glyph_id, [])
+                if emb:
+                    embedding_list.append(emb)
+                    valid_indices.append(i)
+            
+            if len(embedding_list) >= 2:
+                # Convert to numpy for efficient computation
+                emb_matrix = np.array(embedding_list)
+                
+                # Compute pairwise Jaccard similarity on binarized embeddings
+                binary_matrix = (emb_matrix > 0).astype(float)
+                
+                neural_edge_map: Dict[str, float] = {}  # "src|tgt" -> similarity
+                
+                for i in range(len(valid_indices)):
+                    a_bits = binary_matrix[i]
+                    scores = []
+                    
+                    for j in range(len(valid_indices)):
+                        if i == j:
+                            continue
+                        b_bits = binary_matrix[j]
+                        
+                        # Jaccard similarity
+                        intersection = np.sum(np.logical_and(a_bits, b_bits))
+                        union = np.sum(np.logical_or(a_bits, b_bits))
+                        sim = intersection / union if union > 0 else 0
+                        
+                        if sim >= MIN_SIM:
+                            scores.append((j, sim))
+                    
+                    # Sort by similarity and take top K
+                    scores.sort(key=lambda x: x[1], reverse=True)
+                    top_k = scores[:K]
+                    
+                    for j, sim in top_k:
+                        src_name = glyph_names[valid_indices[i]]
+                        tgt_name = glyph_names[valid_indices[j]]
+                        key = f"{min(src_name, tgt_name)}|{max(src_name, tgt_name)}"
+                        
+                        # Keep highest similarity for each pair
+                        if key not in neural_edge_map or sim > neural_edge_map[key]:
+                            neural_edge_map[key] = sim
+                
+                # Convert to edges
+                for key, sim in neural_edge_map.items():
+                    src, tgt = key.split('|')
+                    edges.neural.append(ViewerEdge(
+                        source=src,
+                        target=tgt,
+                        weight=sim,
+                    ))
+                
+                logger.info(f"Neural edges computed: {len(edges.neural)}")
+        
         return ViewerDataResponse(
             glyphs=viewer_glyphs,
             edges=edges,
