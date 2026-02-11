@@ -111,7 +111,11 @@ def _find_key_part_roles(encoder_config) -> List[Tuple[str, str, str]]:
 
 def _find_temporal_role(encoder_config) -> Optional[Tuple[str, str, str]]:
     """
-    Find the role marked as temporal in the encoder config.
+    Find the temporal source role from the encoder config.
+    
+    Uses the temporal_source field which can be:
+    - "auto" or empty: No role-based temporal, auto-generate timestamps
+    - "layer.segment.role": Path to the role providing temporal values
     
     Returns:
         (layer_name, segment_name, role_name) tuple if found, None otherwise
@@ -123,23 +127,21 @@ def _find_temporal_role(encoder_config) -> Optional[Tuple[str, str, str]]:
     
     # Handle dict config (from DB storage)
     if isinstance(encoder_config, dict):
-        layers = encoder_config.get("layers", [])
-        for layer in layers:
-            layer_name = layer.get("name", "")
-            for segment in layer.get("segments", []):
-                segment_name = segment.get("name", "")
-                for role in segment.get("roles", []):
-                    if role.get("temporal", False):
-                        return (layer_name, segment_name, role.get("name"))
+        temporal_source = encoder_config.get("temporal_source", "auto")
+        if temporal_source and temporal_source != "auto":
+            # Parse "layer.segment.role" path
+            parts = temporal_source.split(".")
+            if len(parts) == 3:
+                return (parts[0], parts[1], parts[2])
         return None
     
     # Handle EncoderConfig object
-    if hasattr(encoder_config, "layers"):
-        for layer in encoder_config.layers:
-            for segment in layer.segments:
-                for role in segment.roles:
-                    if getattr(role, "temporal", False):
-                        return (layer.name, segment.name, role.name)
+    if hasattr(encoder_config, "temporal_source"):
+        temporal_source = encoder_config.temporal_source
+        if temporal_source and temporal_source != "auto":
+            parts = temporal_source.split(".")
+            if len(parts) == 3:
+                return (parts[0], parts[1], parts[2])
     
     return None
 
