@@ -148,11 +148,24 @@ async def get_viewer_data(
             # Extract semantic metadata from glyph.metadata AND from concept_text (if JSON)
             semantic: Dict[str, Any] = {}
             
+            # Helper to recursively flatten nested dicts
+            def flatten_dict(d: Dict[str, Any], prefix: str = '') -> Dict[str, Any]:
+                items: Dict[str, Any] = {}
+                for k, v in d.items():
+                    new_key = f"{prefix}.{k}" if prefix else k
+                    if isinstance(v, dict):
+                        items.update(flatten_dict(v, new_key))
+                    else:
+                        items[new_key] = v
+                return items
+            
             # First try to parse concept_text as JSON to extract semantic fields
             try:
                 parsed_concept = json.loads(glyph.concept_text)
                 if isinstance(parsed_concept, dict):
-                    for key, value in parsed_concept.items():
+                    # Flatten nested structure
+                    flattened = flatten_dict(parsed_concept)
+                    for key, value in flattened.items():
                         if not key.startswith('_'):
                             semantic[key] = value
             except (json.JSONDecodeError, TypeError):
@@ -213,20 +226,27 @@ async def get_viewer_data(
         
         # Build hierarchy edges based on parent-child relationships in metadata
         # Look for fields like 'parent', 'parent_id', 'category', 'group', 'type'
-        hierarchy_keys = ['parent', 'parent_id', 'category', 'group', 'type', 'class']
+        # Also check nested paths like 'vehicle.identity.make'
+        hierarchy_keys = ['parent', 'parent_id', 'category', 'group', 'type', 'class', 'make', 'brand', 'manufacturer']
         hierarchy_groups: Dict[str, Dict[str, List[str]]] = {}  # key -> {value -> [glyph_names]}
         
         for vg in viewer_glyphs:
-            for key in hierarchy_keys:
-                if key in vg.semantic:
-                    value = vg.semantic[key]
-                    if value is not None and not isinstance(value, (dict, list)):
-                        str_value = str(value)
-                        if key not in hierarchy_groups:
-                            hierarchy_groups[key] = {}
-                        if str_value not in hierarchy_groups[key]:
-                            hierarchy_groups[key][str_value] = []
-                        hierarchy_groups[key][str_value].append(vg.name)
+            for sem_key, value in vg.semantic.items():
+                # Check if any hierarchy key is in the semantic key (handles nested paths)
+                key_parts = sem_key.lower().split('.')
+                matching_key = None
+                for hk in hierarchy_keys:
+                    if hk in key_parts or sem_key.lower().endswith(hk):
+                        matching_key = hk
+                        break
+                
+                if matching_key and value is not None and not isinstance(value, (dict, list)):
+                    str_value = str(value)
+                    if matching_key not in hierarchy_groups:
+                        hierarchy_groups[matching_key] = {}
+                    if str_value not in hierarchy_groups[matching_key]:
+                        hierarchy_groups[matching_key][str_value] = []
+                    hierarchy_groups[matching_key][str_value].append(vg.name)
         
         # Create hierarchy edges - connect glyphs in same hierarchy group
         hierarchy_seen: set = set()
@@ -251,20 +271,22 @@ async def get_viewer_data(
         temporal_glyphs: List[tuple] = []  # [(glyph_name, temporal_value)]
         
         for vg in viewer_glyphs:
-            for key in temporal_keys:
-                if key in vg.semantic:
-                    value = vg.semantic[key]
-                    if value is not None:
-                        try:
-                            # Try to convert to sortable value
-                            if isinstance(value, (int, float)):
-                                temporal_glyphs.append((vg.name, float(value)))
-                            elif isinstance(value, str):
-                                # Try parsing as number
-                                temporal_glyphs.append((vg.name, float(value)))
-                        except (ValueError, TypeError):
-                            pass
-                        break  # Only use first temporal field found
+            for sem_key, value in vg.semantic.items():
+                # Check if any temporal key is in the semantic key
+                key_parts = sem_key.lower().split('.')
+                is_temporal = any(tk in key_parts or sem_key.lower().endswith(tk) for tk in temporal_keys)
+                
+                if is_temporal and value is not None:
+                    try:
+                        # Try to convert to sortable value
+                        if isinstance(value, (int, float)):
+                            temporal_glyphs.append((vg.name, float(value)))
+                        elif isinstance(value, str):
+                            # Try parsing as number
+                            temporal_glyphs.append((vg.name, float(value)))
+                    except (ValueError, TypeError):
+                        pass
+                    break  # Only use first temporal field found
         
         # Sort by temporal value and create sequential edges
         if len(temporal_glyphs) >= 2:
