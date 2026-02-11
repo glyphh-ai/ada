@@ -159,7 +159,37 @@ async def get_viewer_data(
             ))
         
         # Edges are computed client-side based on cortex similarity
+        # But we can also compute semantic edges based on shared metadata values
         edges = ViewerEdges()
+        
+        # Build semantic edges based on shared metadata values
+        # Glyphs that share the same value for a key are semantically related
+        semantic_edges_map: Dict[str, set] = {}  # key -> set of glyph names
+        
+        for vg in viewer_glyphs:
+            for key, value in vg.semantic.items():
+                if value is not None and not isinstance(value, (dict, list)):
+                    edge_key = f"{key}:{value}"
+                    if edge_key not in semantic_edges_map:
+                        semantic_edges_map[edge_key] = set()
+                    semantic_edges_map[edge_key].add(vg.name)
+        
+        # Create edges between glyphs that share semantic values
+        seen_pairs: set = set()
+        for glyph_names in semantic_edges_map.values():
+            if len(glyph_names) < 2:
+                continue
+            names_list = list(glyph_names)
+            for i in range(len(names_list)):
+                for j in range(i + 1, len(names_list)):
+                    pair = tuple(sorted([names_list[i], names_list[j]]))
+                    if pair not in seen_pairs:
+                        seen_pairs.add(pair)
+                        edges.semantic.append(ViewerEdge(
+                            source=names_list[i],
+                            target=names_list[j],
+                            weight=0.5,
+                        ))
         
         total = await storage.count_glyphs(org_id, model_id)
         
