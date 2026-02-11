@@ -1,7 +1,7 @@
 """Add glyph_vectors table for hierarchical embeddings.
 
 Revision ID: 20260211_glyph_vectors
-Revises: 20260210_add_stored_procedures
+Revises: 20260210_stored_procs
 Create Date: 2026-02-11
 
 This migration adds the glyph_vectors table to store hierarchical embeddings
@@ -15,7 +15,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = '20260211_glyph_vectors'
-down_revision = '20260210_add_stored_procedures'
+down_revision = '20260210_stored_procs'
 branch_labels = None
 depends_on = None
 
