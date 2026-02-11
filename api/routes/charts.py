@@ -151,6 +151,49 @@ def _compute_level_similarities(
     return all_similarities
 
 
+def _compute_filtered_similarities(
+    hierarchical: Dict[str, Dict[str, Dict[str, List[float]]]],
+    level: str,
+    path: str
+) -> List[float]:
+    """
+    Compute pairwise similarities for a specific hierarchy path.
+    
+    Args:
+        hierarchical: Nested dict {glyph_id: {level: {path: embedding}}}
+        level: 'layer', 'segment', or 'role'
+        path: The specific path to filter by (e.g., 'layer1.segment1')
+        
+    Returns:
+        List of similarity scores for glyphs at that path
+    """
+    # Collect embeddings for the specific path
+    embeddings_at_path: Dict[str, List[float]] = {}
+    
+    for glyph_id, levels in hierarchical.items():
+        if level not in levels:
+            continue
+        if path in levels[level]:
+            embeddings_at_path[glyph_id] = levels[level][path]
+    
+    # Compute pairwise similarities
+    similarities = []
+    glyph_ids = list(embeddings_at_path.keys())
+    
+    if len(glyph_ids) < 2:
+        return similarities
+    
+    for i in range(len(glyph_ids)):
+        for j in range(i + 1, len(glyph_ids)):
+            sim = compute_cosine_similarity(
+                embeddings_at_path[glyph_ids[i]],
+                embeddings_at_path[glyph_ids[j]]
+            )
+            similarities.append(sim)
+    
+    return similarities
+
+
 # =============================================================================
 # Endpoints
 # =============================================================================
@@ -159,6 +202,8 @@ def _compute_level_similarities(
 async def get_chart_stats(
     org_id: str,
     model_id: str,
+    level: Optional[str] = Query(None, description="Hierarchy level: layer, segment, or role"),
+    path: Optional[str] = Query(None, description="Hierarchy path (e.g., 'layer1.segment1.role1')"),
     storage: GlyphStorage = Depends(get_storage),
     db: AsyncSession = Depends(get_db_session),
 ) -> ChartStatsResponse:
@@ -167,6 +212,9 @@ async def get_chart_stats(
     
     Returns total glyph count, edge count, average similarity at all levels
     (cortex, layer, segment, role), and role coverage.
+    
+    Optionally filter by hierarchy level and path to get stats for a specific
+    layer, segment, or role.
     """
     try:
         # Count glyphs
@@ -195,26 +243,32 @@ async def get_chart_stats(
             )
             
             if len(glyphs) >= 2:
-                # Compute pairwise cortex similarities
-                similarities = []
-                glyph_ids = list(embeddings.keys())
-                
-                for i in range(len(glyph_ids)):
-                    for j in range(i + 1, len(glyph_ids)):
-                        sim = compute_cosine_similarity(
-                            embeddings[glyph_ids[i]],
-                            embeddings[glyph_ids[j]]
-                        )
-                        similarities.append(sim)
-                
-                if similarities:
-                    avg_similarity = sum(similarities) / len(similarities)
-                
-                # Get hierarchical embeddings for layer/segment/role similarities
+                # Get hierarchical embeddings for all levels
                 glyph_uuids = [g.id for g in glyphs]
                 hierarchical = await storage.get_hierarchical_embeddings(
                     org_id, model_id, glyph_uuids
                 )
+                
+                # If filtering by level/path, compute similarity at that level
+                if level and path:
+                    filtered_sims = _compute_filtered_similarities(hierarchical, level, path)
+                    if filtered_sims:
+                        avg_similarity = sum(filtered_sims) / len(filtered_sims)
+                else:
+                    # Compute pairwise cortex similarities
+                    similarities = []
+                    glyph_ids = list(embeddings.keys())
+                    
+                    for i in range(len(glyph_ids)):
+                        for j in range(i + 1, len(glyph_ids)):
+                            sim = compute_cosine_similarity(
+                                embeddings[glyph_ids[i]],
+                                embeddings[glyph_ids[j]]
+                            )
+                            similarities.append(sim)
+                    
+                    if similarities:
+                        avg_similarity = sum(similarities) / len(similarities)
                 
                 # Compute layer-level similarities
                 layer_sims = _compute_level_similarities(hierarchical, 'layer')
@@ -265,14 +319,15 @@ async def get_chart_stats(
 async def get_distribution(
     org_id: str,
     model_id: str,
-    layer_index: Optional[int] = Query(None, description="Filter by layer index"),
-    segment_id: Optional[str] = Query(None, description="Filter by segment ID"),
+    level: Optional[str] = Query(None, description="Hierarchy level: layer, segment, or role"),
+    path: Optional[str] = Query(None, description="Hierarchy path (e.g., 'layer1.segment1.role1')"),
     storage: GlyphStorage = Depends(get_storage),
 ) -> DistributionResponse:
     """
     Get similarity distribution histogram.
     
     Returns histogram bucket counts for similarity scores in 10 buckets (0.0-1.0).
+    Optionally filter by hierarchy level and path.
     """
     try:
         # Get glyphs with embeddings
@@ -286,27 +341,53 @@ async def get_distribution(
         total_pairs = 0
         
         if len(glyphs) >= 2:
-            glyph_ids = list(embeddings.keys())
-            
-            # Compute pairwise similarities
-            for i in range(len(glyph_ids)):
-                for j in range(i + 1, len(glyph_ids)):
-                    sim = compute_cosine_similarity(
-                        embeddings[glyph_ids[i]],
-                        embeddings[glyph_ids[j]]
-                    )
-                    
-                    # Assign to bucket
-                    bucket_idx = min(9, int(sim * 10))
-                    buckets[bucket_idx] += 1
-                    total_pairs += 1
+            # If filtering by level/path, use hierarchical embeddings
+            if level and path:
+                glyph_uuids = [g.id for g in glyphs]
+                hierarchical = await storage.get_hierarchical_embeddings(
+                    org_id, model_id, glyph_uuids
+                )
+                
+                # Collect embeddings for the specific path
+                embeddings_at_path: Dict[str, List[float]] = {}
+                for glyph_id, levels in hierarchical.items():
+                    if level in levels and path in levels[level]:
+                        embeddings_at_path[glyph_id] = levels[level][path]
+                
+                # Compute pairwise similarities
+                glyph_ids = list(embeddings_at_path.keys())
+                for i in range(len(glyph_ids)):
+                    for j in range(i + 1, len(glyph_ids)):
+                        sim = compute_cosine_similarity(
+                            embeddings_at_path[glyph_ids[i]],
+                            embeddings_at_path[glyph_ids[j]]
+                        )
+                        bucket_idx = min(9, int(sim * 10))
+                        buckets[bucket_idx] += 1
+                        total_pairs += 1
+            else:
+                # Use cortex-level embeddings
+                glyph_ids = list(embeddings.keys())
+                
+                # Compute pairwise similarities
+                for i in range(len(glyph_ids)):
+                    for j in range(i + 1, len(glyph_ids)):
+                        sim = compute_cosine_similarity(
+                            embeddings[glyph_ids[i]],
+                            embeddings[glyph_ids[j]]
+                        )
+                        
+                        # Assign to bucket
+                        bucket_idx = min(9, int(sim * 10))
+                        buckets[bucket_idx] += 1
+                        total_pairs += 1
         
         return DistributionResponse(
             buckets=buckets,
             labels=labels,
             total_pairs=total_pairs,
-            layer_index=layer_index,
-            segment_id=segment_id,
+            layer_index=None,
+            segment_id=path if level == 'segment' else None,
         )
         
     except Exception as e:
