@@ -198,6 +198,7 @@ from api.routes import (
     jobs_router,
     chat_router,
     charts_router,
+    viewer_router,
 )
 from api.routes.procedures import router as procedures_router
 
@@ -207,6 +208,7 @@ app.include_router(glyphs_router)
 app.include_router(query_router)
 app.include_router(procedures_router)
 app.include_router(charts_router)
+app.include_router(viewer_router)
 # listeners_router must come before org_scoped_router (more specific prefix)
 app.include_router(listeners_router)
 app.include_router(jobs_router)
