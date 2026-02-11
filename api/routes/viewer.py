@@ -61,6 +61,28 @@ class ViewerDataResponse(BaseModel):
     total: int = Field(..., description="Total glyph count")
 
 
+class TemporalDataPoint(BaseModel):
+    """A single point in temporal history."""
+    glyph_id: str = Field(..., description="Glyph UUID")
+    name: str = Field(..., description="Glyph concept text")
+    label: str = Field(..., description="Readable label")
+    temporal_value: Any = Field(..., description="Temporal value (date, year, etc.)")
+    temporal_key: str = Field(..., description="Key used for temporal ordering")
+    values: Dict[str, Any] = Field(default_factory=dict, description="All semantic values")
+    changes: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict, 
+        description="Changes from previous point: {field: {from, to, delta}}"
+    )
+
+
+class TemporalHistoryResponse(BaseModel):
+    """Temporal history for a glyph following temporal edges."""
+    glyph_id: str = Field(..., description="Starting glyph UUID")
+    history: List[TemporalDataPoint] = Field(..., description="Temporal history points")
+    temporal_key: str = Field(..., description="Key used for temporal ordering")
+    total_points: int = Field(..., description="Total points in history")
+
+
 # =============================================================================
 # Dependency Injection
 # =============================================================================
@@ -379,4 +401,226 @@ async def get_viewer_data(
         
     except Exception as e:
         logger.error(f"Failed to get viewer data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def extract_readable_label(concept_text: str) -> str:
+    """Extract a readable label from concept_text JSON."""
+    if not concept_text:
+        return 'Unknown'
+    
+    try:
+        parsed = json.loads(concept_text)
+        if isinstance(parsed, dict):
+            priority_keys = ['make', 'model', 'year', 'name', 'title', 'id', 'type', 'key', 'code', 'label']
+            
+            def find_values(obj: Dict[str, Any], keys: List[str]) -> List[str]:
+                found = []
+                for key in keys:
+                    if key in obj and obj[key] is not None:
+                        val = obj[key]
+                        if isinstance(val, (str, int, float)):
+                            found.append(str(val))
+                if not found:
+                    for value in obj.values():
+                        if isinstance(value, dict):
+                            nested = find_values(value, keys)
+                            if nested:
+                                return nested
+                return found
+            
+            values = find_values(parsed, priority_keys)
+            if values:
+                return ' '.join(values[:3])
+    except (json.JSONDecodeError, TypeError):
+        pass
+    
+    if len(concept_text) > 40:
+        return concept_text[:37] + '...'
+    return concept_text
+
+
+@router.get("/temporal-history/{glyph_id}", response_model=TemporalHistoryResponse)
+async def get_temporal_history(
+    org_id: str,
+    model_id: str,
+    glyph_id: str,
+    limit: int = Query(50, ge=1, le=200, description="Max history points"),
+    storage: GlyphStorage = Depends(get_storage),
+) -> TemporalHistoryResponse:
+    """
+    Get temporal history for a glyph by following temporal edges.
+    
+    Returns a sequence of glyphs connected by temporal relationships,
+    sorted by temporal value, with change deltas between consecutive points.
+    """
+    try:
+        # Get all glyphs to find temporal relationships
+        glyphs, _ = await storage.list_glyphs_with_embeddings(
+            org_id, model_id, limit=500  # Get more to find temporal chain
+        )
+        
+        if not glyphs:
+            return TemporalHistoryResponse(
+                glyph_id=glyph_id,
+                history=[],
+                temporal_key="",
+                total_points=0,
+            )
+        
+        # Find the target glyph
+        target_glyph = None
+        for g in glyphs:
+            if str(g.id) == glyph_id:
+                target_glyph = g
+                break
+        
+        if not target_glyph:
+            raise HTTPException(status_code=404, detail=f"Glyph {glyph_id} not found")
+        
+        # Extract semantic data from all glyphs
+        temporal_keys = ['year', 'date', 'timestamp', 'created_at', 'time', 'period', 'service_date', 'mileage']
+        
+        def extract_semantic(glyph) -> Dict[str, Any]:
+            semantic = {}
+            try:
+                parsed = json.loads(glyph.concept_text)
+                if isinstance(parsed, dict):
+                    def flatten(d: Dict, prefix: str = '') -> Dict:
+                        items = {}
+                        for k, v in d.items():
+                            new_key = f"{prefix}.{k}" if prefix else k
+                            if isinstance(v, dict):
+                                items.update(flatten(v, new_key))
+                            else:
+                                items[new_key] = v
+                        return items
+                    semantic = flatten(parsed)
+            except (json.JSONDecodeError, TypeError):
+                pass
+            if glyph.metadata:
+                for k, v in glyph.metadata.items():
+                    if not k.startswith('_'):
+                        semantic[k] = v
+            return semantic
+        
+        def find_temporal_value(semantic: Dict[str, Any]) -> tuple:
+            """Find temporal key and value from semantic data."""
+            for sem_key, value in semantic.items():
+                key_parts = sem_key.lower().split('.')
+                for tk in temporal_keys:
+                    if tk in key_parts or sem_key.lower().endswith(tk):
+                        if value is not None:
+                            try:
+                                if isinstance(value, (int, float)):
+                                    return sem_key, float(value)
+                                elif isinstance(value, str):
+                                    return sem_key, float(value)
+                            except (ValueError, TypeError):
+                                # Try as string for dates
+                                return sem_key, value
+            return None, None
+        
+        # Get target glyph's semantic data to find grouping key
+        target_semantic = extract_semantic(target_glyph)
+        target_temporal_key, _ = find_temporal_value(target_semantic)
+        
+        # Find a grouping key (like VIN, id, entity_id) to find related glyphs
+        grouping_keys = ['vin', 'id', 'entity_id', 'key', 'identifier', 'name']
+        grouping_key = None
+        grouping_value = None
+        
+        for sem_key, value in target_semantic.items():
+            key_parts = sem_key.lower().split('.')
+            for gk in grouping_keys:
+                if gk in key_parts or sem_key.lower().endswith(gk):
+                    if value is not None and not isinstance(value, (dict, list)):
+                        grouping_key = sem_key
+                        grouping_value = str(value)
+                        break
+            if grouping_key:
+                break
+        
+        # Collect all glyphs that share the same grouping value
+        related_glyphs = []
+        
+        for g in glyphs:
+            semantic = extract_semantic(g)
+            
+            # Check if this glyph shares the grouping value
+            is_related = False
+            if grouping_key and grouping_value:
+                for sem_key, value in semantic.items():
+                    if sem_key == grouping_key and str(value) == grouping_value:
+                        is_related = True
+                        break
+            else:
+                # No grouping key found, include all glyphs with temporal values
+                is_related = True
+            
+            if is_related:
+                temporal_key, temporal_value = find_temporal_value(semantic)
+                if temporal_key and temporal_value is not None:
+                    related_glyphs.append({
+                        'glyph': g,
+                        'semantic': semantic,
+                        'temporal_key': temporal_key,
+                        'temporal_value': temporal_value,
+                    })
+        
+        # Sort by temporal value
+        try:
+            related_glyphs.sort(key=lambda x: float(x['temporal_value']) if isinstance(x['temporal_value'], (int, float, str)) else 0)
+        except (ValueError, TypeError):
+            # Sort as strings if numeric conversion fails
+            related_glyphs.sort(key=lambda x: str(x['temporal_value']))
+        
+        # Build history with change deltas
+        history: List[TemporalDataPoint] = []
+        prev_values: Dict[str, Any] = {}
+        
+        for item in related_glyphs[:limit]:
+            g = item['glyph']
+            semantic = item['semantic']
+            
+            # Compute changes from previous point
+            changes: Dict[str, Dict[str, Any]] = {}
+            for key, value in semantic.items():
+                if key in prev_values and prev_values[key] != value:
+                    change_info: Dict[str, Any] = {
+                        'from': prev_values[key],
+                        'to': value,
+                    }
+                    # Compute numeric delta if possible
+                    try:
+                        from_val = float(prev_values[key])
+                        to_val = float(value)
+                        change_info['delta'] = to_val - from_val
+                    except (ValueError, TypeError):
+                        pass
+                    changes[key] = change_info
+            
+            history.append(TemporalDataPoint(
+                glyph_id=str(g.id),
+                name=g.concept_text,
+                label=extract_readable_label(g.concept_text),
+                temporal_value=item['temporal_value'],
+                temporal_key=item['temporal_key'],
+                values=semantic,
+                changes=changes,
+            ))
+            
+            prev_values = semantic.copy()
+        
+        return TemporalHistoryResponse(
+            glyph_id=glyph_id,
+            history=history,
+            temporal_key=target_temporal_key or '',
+            total_points=len(history),
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get temporal history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
