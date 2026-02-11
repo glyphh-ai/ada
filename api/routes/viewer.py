@@ -50,6 +50,7 @@ class ViewerEdges(BaseModel):
     semantic: List[ViewerEdge] = Field(default_factory=list)
     neural: List[ViewerEdge] = Field(default_factory=list)
     hierarchy: List[ViewerEdge] = Field(default_factory=list)
+    temporal: List[ViewerEdge] = Field(default_factory=list)
 
 
 class ViewerDataResponse(BaseModel):
@@ -190,6 +191,71 @@ async def get_viewer_data(
                             target=names_list[j],
                             weight=0.5,
                         ))
+        
+        # Build hierarchy edges based on parent-child relationships in metadata
+        # Look for fields like 'parent', 'parent_id', 'category', 'group', 'type'
+        hierarchy_keys = ['parent', 'parent_id', 'category', 'group', 'type', 'class']
+        hierarchy_groups: Dict[str, Dict[str, List[str]]] = {}  # key -> {value -> [glyph_names]}
+        
+        for vg in viewer_glyphs:
+            for key in hierarchy_keys:
+                if key in vg.semantic:
+                    value = vg.semantic[key]
+                    if value is not None and not isinstance(value, (dict, list)):
+                        str_value = str(value)
+                        if key not in hierarchy_groups:
+                            hierarchy_groups[key] = {}
+                        if str_value not in hierarchy_groups[key]:
+                            hierarchy_groups[key][str_value] = []
+                        hierarchy_groups[key][str_value].append(vg.name)
+        
+        # Create hierarchy edges - connect glyphs in same hierarchy group
+        hierarchy_seen: set = set()
+        for key, value_groups in hierarchy_groups.items():
+            for group_name, glyph_names in value_groups.items():
+                if len(glyph_names) < 2:
+                    continue
+                # Connect sequentially within group (like a chain)
+                for i in range(len(glyph_names) - 1):
+                    pair = tuple(sorted([glyph_names[i], glyph_names[i + 1]]))
+                    if pair not in hierarchy_seen:
+                        hierarchy_seen.add(pair)
+                        edges.hierarchy.append(ViewerEdge(
+                            source=glyph_names[i],
+                            target=glyph_names[i + 1],
+                            weight=0.7,
+                        ))
+        
+        # Build temporal edges based on time-related fields
+        # Look for fields like 'year', 'date', 'timestamp', 'created_at', 'time'
+        temporal_keys = ['year', 'date', 'timestamp', 'created_at', 'time', 'period', 'quarter', 'month']
+        temporal_glyphs: List[tuple] = []  # [(glyph_name, temporal_value)]
+        
+        for vg in viewer_glyphs:
+            for key in temporal_keys:
+                if key in vg.semantic:
+                    value = vg.semantic[key]
+                    if value is not None:
+                        try:
+                            # Try to convert to sortable value
+                            if isinstance(value, (int, float)):
+                                temporal_glyphs.append((vg.name, float(value)))
+                            elif isinstance(value, str):
+                                # Try parsing as number
+                                temporal_glyphs.append((vg.name, float(value)))
+                        except (ValueError, TypeError):
+                            pass
+                        break  # Only use first temporal field found
+        
+        # Sort by temporal value and create sequential edges
+        if len(temporal_glyphs) >= 2:
+            temporal_glyphs.sort(key=lambda x: x[1])
+            for i in range(len(temporal_glyphs) - 1):
+                edges.temporal.append(ViewerEdge(
+                    source=temporal_glyphs[i][0],
+                    target=temporal_glyphs[i + 1][0],
+                    weight=0.6,
+                ))
         
         total = await storage.count_glyphs(org_id, model_id)
         
