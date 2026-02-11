@@ -3,7 +3,15 @@
 Processes records in batches and reports progress via JobManager.
 Returns immediately with job_id, processing happens in background.
 
-Accepts JSON records in hierarchical format matching the encoder config:
+Accepts JSON records in two formats:
+
+1. Flat format (auto-mapped to config structure):
+{
+    "role_name": "value",
+    "another_role": "value"
+}
+
+2. Hierarchical format matching the encoder config:
 {
     "layer_name": {
         "segment_name": {
@@ -12,8 +20,8 @@ Accepts JSON records in hierarchical format matching the encoder config:
     }
 }
 
-The import format is STRICT - records must match the encoder config structure.
-Use integration tools (Boomi, MuleSoft, etc.) to transform data before loading.
+Flat records are automatically mapped to the hierarchical structure
+by matching keys to role names in the encoder config.
 
 Requirements: 7.1, 7.2, 7.3, 7.4, 7.5
 """
@@ -146,13 +154,61 @@ def _find_temporal_role(encoder_config) -> Optional[Tuple[str, str, str]]:
     return None
 
 
+def _auto_map_flat_to_hierarchical(
+    record: Dict[str, Any],
+    config_structure: Dict[str, Dict[str, List[str]]]
+) -> Optional[Dict[str, Any]]:
+    """
+    Auto-map a flat record to hierarchical format based on config structure.
+    
+    Matches flat keys to role names in the config. If a role name matches
+    a key in the flat record, it maps the value to the hierarchical path.
+    
+    Args:
+        record: Flat record dict (e.g., {"vin": "123", "make": "Toyota"})
+        config_structure: Expected hierarchy from encoder config
+        
+    Returns:
+        Hierarchical record if mapping succeeds, None if not enough matches
+    """
+    if not config_structure:
+        return None
+    
+    record_keys = set(record.keys())
+    hierarchical = {}
+    matched_roles = 0
+    total_roles = 0
+    
+    for layer_name, segments in config_structure.items():
+        hierarchical[layer_name] = {}
+        for segment_name, roles in segments.items():
+            hierarchical[layer_name][segment_name] = {}
+            for role_name in roles:
+                total_roles += 1
+                # Check if flat record has this role name as a key
+                if role_name in record_keys:
+                    hierarchical[layer_name][segment_name][role_name] = record[role_name]
+                    matched_roles += 1
+                else:
+                    # Role not found in flat data - set to None
+                    hierarchical[layer_name][segment_name][role_name] = None
+    
+    # Only return mapped record if we matched at least one role
+    # This allows partial data to be encoded
+    if matched_roles > 0:
+        return hierarchical
+    
+    return None
+
+
 def _validate_record_structure(
     record: Dict[str, Any],
     config_structure: Dict[str, Dict[str, List[str]]],
     index: int
-) -> Tuple[bool, Optional[str]]:
+) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Validate that a record matches the expected hierarchical structure.
+    Auto-maps flat records to hierarchical format when possible.
     
     Expected format:
     {
@@ -164,14 +220,16 @@ def _validate_record_structure(
     }
     
     Returns:
-        (is_valid, error_message) tuple
+        (is_valid, error_message, mapped_record) tuple
+        - mapped_record is the hierarchical version (same as input if already hierarchical,
+          or auto-mapped if flat)
     """
     if not isinstance(record, dict):
-        return False, f"Record {index}: Must be a JSON object, got {type(record).__name__}"
+        return False, f"Record {index}: Must be a JSON object, got {type(record).__name__}", None
     
     if not config_structure:
-        # No config structure defined, accept flat records
-        return True, None
+        # No config structure defined, accept flat records as-is
+        return True, None, record
     
     # Check if record has hierarchical structure (layer keys)
     expected_layers = set(config_structure.keys())
@@ -186,7 +244,7 @@ def _validate_record_structure(
             return False, (
                 f"Record {index}: Missing layer(s): {list(missing_layers)}. "
                 f"Expected format: {{{layer_format}}}"
-            )
+            ), None
         
         for layer_name, segments in config_structure.items():
             layer_data = record.get(layer_name)
@@ -194,7 +252,7 @@ def _validate_record_structure(
                 return False, (
                     f"Record {index}: Layer '{layer_name}' must be an object, "
                     f"got {type(layer_data).__name__}"
-                )
+                ), None
             
             expected_segments = set(segments.keys())
             layer_keys = set(layer_data.keys())
@@ -204,7 +262,7 @@ def _validate_record_structure(
                 return False, (
                     f"Record {index}: Layer '{layer_name}' missing segment(s): {list(missing_segments)}. "
                     f"Expected: {list(expected_segments)}"
-                )
+                ), None
             
             for segment_name, roles in segments.items():
                 segment_data = layer_data.get(segment_name)
@@ -212,7 +270,7 @@ def _validate_record_structure(
                     return False, (
                         f"Record {index}: Segment '{layer_name}.{segment_name}' must be an object, "
                         f"got {type(segment_data).__name__}"
-                    )
+                    ), None
                 
                 expected_roles = set(roles)
                 segment_keys = set(segment_data.keys())
@@ -222,11 +280,24 @@ def _validate_record_structure(
                     return False, (
                         f"Record {index}: Segment '{layer_name}.{segment_name}' missing role(s): {list(missing_roles)}. "
                         f"Your data has: {list(segment_keys)}"
-                    )
+                    ), None
         
-        return True, None
+        return True, None, record
     else:
-        # Flat format - provide helpful error about expected structure
+        # Flat format - try to auto-map to hierarchical structure
+        mapped_record = _auto_map_flat_to_hierarchical(record, config_structure)
+        
+        if mapped_record:
+            # Successfully auto-mapped flat record
+            return True, None, mapped_record
+        
+        # Could not auto-map - provide helpful error
+        # Collect all role names from config for hint
+        all_role_names = []
+        for segments in config_structure.values():
+            for roles in segments.values():
+                all_role_names.extend(roles)
+        
         example_structure = {}
         for layer_name, segments in config_structure.items():
             example_structure[layer_name] = {}
@@ -238,10 +309,12 @@ def _validate_record_structure(
                     example_structure[layer_name][segment_name]["..."] = "..."
         
         return False, (
-            f"Record {index}: Invalid format. Data must match encoder config structure.\n"
+            f"Record {index}: Could not map flat data to config structure.\n"
             f"Your data has keys: {list(record_keys)[:5]}{'...' if len(record_keys) > 5 else ''}\n"
-            f"Expected hierarchical format:\n{json.dumps(example_structure, indent=2)}"
-        )
+            f"Expected role names: {all_role_names[:8]}{'...' if len(all_role_names) > 8 else ''}\n"
+            f"Either use flat keys matching role names, or hierarchical format:\n"
+            f"{json.dumps(example_structure, indent=2)}"
+        ), None
 
 
 def _flatten_hierarchical_record(record: Dict[str, Any]) -> Dict[str, Any]:
@@ -442,14 +515,9 @@ class AsyncListenerService:
     Processes records in batches and reports progress via JobManager.
     Returns immediately with job_id (Requirement 7.2).
     
-    STRICT FORMAT: Records must match the encoder config hierarchy:
-    {
-        "layer_name": {
-            "segment_name": {
-                "role_name": "value"
-            }
-        }
-    }
+    Accepts flat or hierarchical records:
+    - Flat: {"role_name": "value"} - auto-mapped to config structure
+    - Hierarchical: {"layer": {"segment": {"role": "value"}}}
     
     Requirements: 7.2, 7.3, 7.4
     """
@@ -584,8 +652,8 @@ class AsyncListenerService:
                     
                     for record in batch:
                         try:
-                            # STRICT validation against config structure
-                            is_valid, error_msg = _validate_record_structure(
+                            # Validate and auto-map flat records to hierarchical format
+                            is_valid, error_msg, mapped_record = _validate_record_structure(
                                 record, config_structure, processed
                             )
                             
@@ -601,9 +669,12 @@ class AsyncListenerService:
                                     logger.warning(f"Record validation failed: {error_msg}")
                                 continue
                             
+                            # Use mapped record (hierarchical format)
+                            record_to_encode = mapped_record if mapped_record else record
+                            
                             # Convert hierarchical JSON to Concept
                             concept = _record_to_concept(
-                                record, processed, key_part_roles, temporal_role
+                                record_to_encode, processed, key_part_roles, temporal_role
                             )
                             
                             # Encode using the SDK encoder
@@ -623,7 +694,7 @@ class AsyncListenerService:
                                 else list(embedding)
                             )
                             
-                            # Store with full record as metadata
+                            # Store with original record as metadata (user's format)
                             concept_text = json.dumps(record)
                             
                             glyph_response = await storage.create_glyph(
@@ -631,7 +702,7 @@ class AsyncListenerService:
                                 model_id=model_id,
                                 concept_text=concept_text,
                                 embedding=embedding_list,
-                                metadata=record,
+                                metadata=record,  # Store original flat format for display
                             )
                             
                             # Extract and store hierarchical vectors
