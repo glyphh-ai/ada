@@ -19,7 +19,7 @@ import numpy as np
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from domains.models.db_models import Edge, Glyph, ModelConfig
+from domains.models.db_models import Edge, Glyph, GlyphVector, ModelConfig
 from domains.models.schemas import (
     CreateGlyphResponse,
     GlyphResponse,
@@ -361,6 +361,281 @@ class GlyphStorage:
                 Glyph.model_id == model_id,
             )
         )
+        return result.scalar() or 0
+    
+    # =========================================================================
+    # Hierarchical Vector Operations
+    # =========================================================================
+    
+    async def create_glyph_vector(
+        self,
+        glyph_id: UUID,
+        org_id: str,
+        model_id: str,
+        level: str,
+        path: str,
+        embedding: List[float],
+    ) -> UUID:
+        """
+        Store a hierarchical vector for a glyph.
+        
+        Args:
+            glyph_id: Parent glyph ID
+            org_id: Organization ID
+            model_id: Model ID
+            level: Hierarchy level ('layer', 'segment', 'role')
+            path: Hierarchical path (e.g., 'semantic.attributes.color')
+            embedding: Vector embedding
+            
+        Returns:
+            UUID of the created vector record
+        """
+        max_dim = settings.max_vector_dimension
+        if len(embedding) > max_dim:
+            raise ValidationException(
+                field="embedding",
+                reason=f"Embedding dimension {len(embedding)} exceeds runtime limit of {max_dim}"
+            )
+        
+        # Pad embedding to max_dim if smaller
+        if len(embedding) < max_dim:
+            embedding = list(embedding) + [0.0] * (max_dim - len(embedding))
+        
+        vector_id = uuid4()
+        glyph_vector = GlyphVector(
+            id=vector_id,
+            glyph_id=glyph_id,
+            org_id=org_id,
+            model_id=model_id,
+            level=level,
+            path=path,
+            embedding=embedding,
+        )
+        
+        self._session.add(glyph_vector)
+        await self._session.flush()
+        
+        return vector_id
+    
+    async def create_glyph_vectors_batch(
+        self,
+        glyph_id: UUID,
+        org_id: str,
+        model_id: str,
+        vectors: List[Dict[str, Any]],
+    ) -> int:
+        """
+        Store multiple hierarchical vectors for a glyph in batch.
+        
+        Args:
+            glyph_id: Parent glyph ID
+            org_id: Organization ID
+            model_id: Model ID
+            vectors: List of dicts with 'level', 'path', 'embedding' keys
+            
+        Returns:
+            Number of vectors created
+        """
+        max_dim = settings.max_vector_dimension
+        count = 0
+        
+        for vec_data in vectors:
+            embedding = vec_data["embedding"]
+            
+            # Validate and pad embedding
+            if len(embedding) > max_dim:
+                logger.warning(f"Skipping vector with dimension {len(embedding)} > {max_dim}")
+                continue
+            
+            if len(embedding) < max_dim:
+                embedding = list(embedding) + [0.0] * (max_dim - len(embedding))
+            
+            glyph_vector = GlyphVector(
+                id=uuid4(),
+                glyph_id=glyph_id,
+                org_id=org_id,
+                model_id=model_id,
+                level=vec_data["level"],
+                path=vec_data["path"],
+                embedding=embedding,
+            )
+            self._session.add(glyph_vector)
+            count += 1
+        
+        await self._session.flush()
+        return count
+    
+    async def get_glyph_vector(
+        self,
+        org_id: str,
+        model_id: str,
+        glyph_id: UUID,
+        level: str,
+        path: str,
+    ) -> Optional[List[float]]:
+        """
+        Get a specific hierarchical vector for a glyph.
+        
+        Args:
+            org_id: Organization ID
+            model_id: Model ID
+            glyph_id: Glyph ID
+            level: Hierarchy level ('layer', 'segment', 'role')
+            path: Hierarchical path
+            
+        Returns:
+            Embedding vector or None if not found
+        """
+        result = await self._session.execute(
+            select(GlyphVector.embedding).where(
+                GlyphVector.org_id == org_id,
+                GlyphVector.model_id == model_id,
+                GlyphVector.glyph_id == glyph_id,
+                GlyphVector.level == level,
+                GlyphVector.path == path,
+            )
+        )
+        row = result.scalar_one_or_none()
+        return list(row) if row is not None else None
+    
+    async def get_glyph_vectors_by_level(
+        self,
+        org_id: str,
+        model_id: str,
+        glyph_id: UUID,
+        level: str,
+    ) -> Dict[str, List[float]]:
+        """
+        Get all vectors at a specific level for a glyph.
+        
+        Args:
+            org_id: Organization ID
+            model_id: Model ID
+            glyph_id: Glyph ID
+            level: Hierarchy level ('layer', 'segment', 'role')
+            
+        Returns:
+            Dict mapping path to embedding
+        """
+        result = await self._session.execute(
+            select(GlyphVector.path, GlyphVector.embedding).where(
+                GlyphVector.org_id == org_id,
+                GlyphVector.model_id == model_id,
+                GlyphVector.glyph_id == glyph_id,
+                GlyphVector.level == level,
+            )
+        )
+        return {row.path: list(row.embedding) for row in result.all()}
+    
+    async def similarity_search_by_level(
+        self,
+        org_id: str,
+        model_id: str,
+        query_embedding: List[float],
+        level: str,
+        path: Optional[str] = None,
+        top_k: int = 10,
+    ) -> List[Tuple[UUID, str, float]]:
+        """
+        Find similar glyphs at a specific hierarchy level.
+        
+        Args:
+            org_id: Organization ID
+            model_id: Model ID
+            query_embedding: Query vector
+            level: Hierarchy level ('layer', 'segment', 'role')
+            path: Optional path filter (e.g., 'semantic.attributes')
+            top_k: Number of results
+            
+        Returns:
+            List of (glyph_id, path, similarity_score) tuples
+        """
+        max_dim = settings.max_vector_dimension
+        if len(query_embedding) > max_dim:
+            raise ValidationException(
+                field="query_embedding",
+                reason=f"Query embedding dimension {len(query_embedding)} exceeds runtime limit of {max_dim}"
+            )
+        
+        # Pad query embedding
+        if len(query_embedding) < max_dim:
+            query_embedding = query_embedding + [0.0] * (max_dim - len(query_embedding))
+        
+        query = (
+            select(
+                GlyphVector.glyph_id,
+                GlyphVector.path,
+                (1 - GlyphVector.embedding.cosine_distance(query_embedding)).label("similarity")
+            )
+            .where(
+                GlyphVector.org_id == org_id,
+                GlyphVector.model_id == model_id,
+                GlyphVector.level == level,
+            )
+            .order_by(GlyphVector.embedding.cosine_distance(query_embedding))
+            .limit(top_k)
+        )
+        
+        if path is not None:
+            query = query.where(GlyphVector.path == path)
+        
+        result = await self._session.execute(query)
+        return [(row.glyph_id, row.path, float(row.similarity)) for row in result.all()]
+    
+    async def get_hierarchical_embeddings(
+        self,
+        org_id: str,
+        model_id: str,
+        glyph_ids: List[UUID],
+    ) -> Dict[str, Dict[str, Dict[str, List[float]]]]:
+        """
+        Get all hierarchical embeddings for multiple glyphs.
+        
+        Args:
+            org_id: Organization ID
+            model_id: Model ID
+            glyph_ids: List of glyph IDs
+            
+        Returns:
+            Nested dict: {glyph_id: {level: {path: embedding}}}
+        """
+        if not glyph_ids:
+            return {}
+        
+        result = await self._session.execute(
+            select(GlyphVector).where(
+                GlyphVector.org_id == org_id,
+                GlyphVector.model_id == model_id,
+                GlyphVector.glyph_id.in_(glyph_ids),
+            )
+        )
+        
+        embeddings: Dict[str, Dict[str, Dict[str, List[float]]]] = {}
+        for vec in result.scalars().all():
+            glyph_id_str = str(vec.glyph_id)
+            if glyph_id_str not in embeddings:
+                embeddings[glyph_id_str] = {}
+            if vec.level not in embeddings[glyph_id_str]:
+                embeddings[glyph_id_str][vec.level] = {}
+            embeddings[glyph_id_str][vec.level][vec.path] = list(vec.embedding)
+        
+        return embeddings
+    
+    async def count_glyph_vectors(
+        self,
+        org_id: str,
+        model_id: str,
+        level: Optional[str] = None,
+    ) -> int:
+        """Count hierarchical vectors, optionally filtered by level."""
+        query = select(func.count(GlyphVector.id)).where(
+            GlyphVector.org_id == org_id,
+            GlyphVector.model_id == model_id,
+        )
+        if level is not None:
+            query = query.where(GlyphVector.level == level)
+        
+        result = await self._session.execute(query)
         return result.scalar() or 0
     
     # =========================================================================

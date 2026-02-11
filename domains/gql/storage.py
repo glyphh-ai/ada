@@ -7,11 +7,11 @@ the GQL executor to work with runtime glyphs stored in PostgreSQL.
 This implementation differs from InMemoryGlyphStorage in that:
 - Glyphs are pre-fetched GlyphResponse objects (not SDK Glyph objects)
 - Embeddings are stored separately in a dict (not in glyph.cortex)
-- Layer/segment hierarchical structure is not supported
+- Layer/segment/role hierarchical vectors are stored in glyph_vectors table
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from domains.models.schemas import GlyphResponse
 from shared.similarity_service import SimilarityService
@@ -26,9 +26,8 @@ class DatabaseGlyphStorage:
     This class implements the GlyphStorageProtocol interface, allowing the
     GQL executor to work with glyphs stored in the PostgreSQL database.
     
-    Unlike SDK glyphs which have hierarchical structure (layers, segments),
-    database glyphs are flat records with concept_text, metadata, and
-    embeddings stored separately.
+    Supports hierarchical vector queries via glyph_vectors table for
+    layer, segment, and role level similarity searches.
     
     Example:
         >>> from domains.gql.storage import DatabaseGlyphStorage
@@ -45,7 +44,7 @@ class DatabaseGlyphStorage:
         - 5.1: Implements GlyphStorageProtocol interface
         - 5.3: get_embedding() returns from embeddings dict
         - 5.4: compute_similarity() uses SimilarityService
-        - 5.6: get_embedding_for_scope() returns None for layer/segment
+        - 5.6: get_embedding_for_scope() queries hierarchical vectors
     """
     
     def __init__(
@@ -55,6 +54,8 @@ class DatabaseGlyphStorage:
         glyphs: List[GlyphResponse],
         embeddings: Dict[str, List[float]],
         similarity_service: Optional[SimilarityService] = None,
+        hierarchical_embeddings: Optional[Dict[str, Dict[str, Dict[str, List[float]]]]] = None,
+        vector_fetcher: Optional[Callable] = None,
     ):
         """
         Initialize database glyph storage.
@@ -66,6 +67,9 @@ class DatabaseGlyphStorage:
             embeddings: Dictionary mapping glyph_id (str) to embedding vectors
             similarity_service: Optional SimilarityService for computing similarity.
                                Falls back to numpy cosine similarity if not provided.
+            hierarchical_embeddings: Optional pre-fetched hierarchical embeddings
+                                    {glyph_id: {level: {path: embedding}}}
+            vector_fetcher: Optional async callable to fetch hierarchical vectors on demand
         """
         self._org_id = org_id
         self._model_id = model_id
@@ -73,10 +77,13 @@ class DatabaseGlyphStorage:
         self._glyphs: Dict[str, GlyphResponse] = {str(g.id): g for g in glyphs}
         self._embeddings = embeddings
         self._similarity_service = similarity_service
+        self._hierarchical_embeddings = hierarchical_embeddings or {}
+        self._vector_fetcher = vector_fetcher
         
         logger.debug(
             f"DatabaseGlyphStorage initialized: org={org_id}, model={model_id}, "
-            f"glyphs={len(self._glyphs)}, embeddings={len(embeddings)}"
+            f"glyphs={len(self._glyphs)}, embeddings={len(embeddings)}, "
+            f"hierarchical={len(self._hierarchical_embeddings)}"
         )
     
     @property
@@ -150,33 +157,57 @@ class DatabaseGlyphStorage:
         glyph_id: str,
         layer: Optional[str] = None,
         segment: Optional[str] = None,
+        role: Optional[str] = None,
     ) -> Optional[List[float]]:
         """
-        Get embedding for a specific scope (layer/segment).
+        Get embedding for a specific scope (layer/segment/role).
         
-        Database glyphs don't have hierarchical structure (layers/segments),
-        so this method returns None when layer or segment is specified.
-        When no scope is specified, returns the primary embedding.
+        Queries hierarchical vectors from the glyph_vectors table.
+        When no scope is specified, returns the primary (cortex) embedding.
         
         Args:
             glyph_id: The glyph identifier
-            layer: Optional layer name (not supported for database glyphs)
-            segment: Optional segment name (not supported for database glyphs)
+            layer: Optional layer name (e.g., 'semantic')
+            segment: Optional segment name (e.g., 'attributes')
+            role: Optional role name (e.g., 'color')
             
         Returns:
-            The primary embedding if no scope specified, None otherwise.
+            The embedding for the specified scope, or None if not found.
         
         Requirements:
-            - 5.6: Returns None for layer/segment since runtime glyphs
-                   don't have hierarchical structure
+            - 5.6: Queries hierarchical vectors from glyph_vectors table
         """
-        # Database glyphs don't have hierarchical structure
-        # Return None if layer or segment is specified
-        if layer is not None or segment is not None:
+        glyph_id_str = str(glyph_id)
+        
+        # No scope = primary (cortex) embedding
+        if layer is None and segment is None and role is None:
+            return self.get_embedding(glyph_id)
+        
+        # Build the path based on scope
+        if role is not None and segment is not None and layer is not None:
+            # Role level: layer.segment.role
+            level = 'role'
+            path = f"{layer}.{segment}.{role}"
+        elif segment is not None and layer is not None:
+            # Segment level: layer.segment
+            level = 'segment'
+            path = f"{layer}.{segment}"
+        elif layer is not None:
+            # Layer level: layer
+            level = 'layer'
+            path = layer
+        else:
+            # Invalid scope combination
             return None
         
-        # No scope = primary embedding
-        return self.get_embedding(glyph_id)
+        # Check pre-fetched hierarchical embeddings
+        if glyph_id_str in self._hierarchical_embeddings:
+            glyph_hier = self._hierarchical_embeddings[glyph_id_str]
+            if level in glyph_hier and path in glyph_hier[level]:
+                return glyph_hier[level][path]
+        
+        # Not found in cache
+        return None
     
     def compute_similarity(self, v1: Any, v2: Any) -> float:
         """

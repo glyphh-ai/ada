@@ -36,9 +36,10 @@ class Glyph(Base):
     Glyph model - vector representation of a concept.
     
     Each glyph belongs to an org and model, containing:
-    - Vector embedding for similarity search
+    - Vector embedding (global cortex) for similarity search
     - Concept text (original input)
     - Metadata (arbitrary JSON)
+    - Hierarchical vectors (layers, segments, roles) in glyph_vectors table
     """
     __tablename__ = "glyphs"
     
@@ -46,7 +47,7 @@ class Glyph(Base):
     org_id = Column(String(255), nullable=False, index=True)
     model_id = Column(String(255), nullable=False, index=True)
     concept_text = Column(Text, nullable=False)
-    embedding = Column(Vector(2000), nullable=False)  # Max 2000 dims (pgvector HNSW index limit)
+    embedding = Column(Vector(2000), nullable=False)  # Global cortex - max 2000 dims (pgvector HNSW index limit)
     glyph_metadata = Column("metadata", JSONB, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -62,6 +63,11 @@ class Glyph(Base):
         "Edge",
         foreign_keys="Edge.target_glyph_id",
         back_populates="target_glyph",
+        cascade="all, delete-orphan"
+    )
+    vectors = relationship(
+        "GlyphVector",
+        back_populates="glyph",
         cascade="all, delete-orphan"
     )
     
@@ -82,6 +88,64 @@ class Glyph(Base):
     
     def __repr__(self) -> str:
         return f"<Glyph(id={self.id}, org_id={self.org_id}, model_id={self.model_id})>"
+
+
+class GlyphVector(Base):
+    """
+    Hierarchical vector storage for glyphs.
+    
+    Stores layer, segment, and role level embeddings for fine-grained
+    similarity search. Each vector is associated with a glyph and has:
+    - level: 'layer', 'segment', or 'role'
+    - path: hierarchical path (e.g., 'semantic', 'semantic.attributes', 'semantic.attributes.color')
+    - embedding: the vector for this level
+    
+    This enables queries like:
+    - FIND SIMILAR TO "red car" AT LAYER semantic
+    - FIND SIMILAR TO "sports" AT SEGMENT semantic.attributes
+    - FIND SIMILAR TO "red" AT ROLE semantic.attributes.color
+    """
+    __tablename__ = "glyph_vectors"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    glyph_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("glyphs.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    org_id = Column(String(255), nullable=False, index=True)
+    model_id = Column(String(255), nullable=False, index=True)
+    level = Column(String(20), nullable=False)  # 'layer', 'segment', 'role'
+    path = Column(String(500), nullable=False)  # e.g., 'semantic.attributes.color'
+    embedding = Column(Vector(2000), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Relationship back to glyph
+    glyph = relationship("Glyph", back_populates="vectors")
+    
+    __table_args__ = (
+        # Composite index for org/model scoped queries
+        Index("idx_glyph_vector_org_model", org_id, model_id),
+        # Index for level-based queries
+        Index("idx_glyph_vector_level", org_id, model_id, level),
+        # Index for path-based queries
+        Index("idx_glyph_vector_path", org_id, model_id, level, path),
+        # Index for glyph lookup
+        Index("idx_glyph_vector_glyph", glyph_id),
+        # Vector similarity search index (HNSW)
+        Index(
+            "idx_glyph_vector_embedding",
+            embedding,
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"}
+        ),
+        # Prevent duplicate vectors for same glyph/level/path
+        UniqueConstraint(
+            "glyph_id", "level", "path",
+            name="uq_glyph_vector_path"
+        ),
+    )
 
 
 class Edge(Base):

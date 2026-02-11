@@ -32,6 +32,9 @@ class ChartStatsResponse(BaseModel):
     total_glyphs: int = Field(..., description="Total number of glyphs")
     total_edges: int = Field(..., description="Total number of edges")
     avg_similarity: float = Field(..., description="Average pairwise similarity (0-1)")
+    avg_layer_similarity: float = Field(0.0, description="Average layer-level similarity (0-1)")
+    avg_segment_similarity: float = Field(0.0, description="Average segment-level similarity (0-1)")
+    avg_role_similarity: float = Field(0.0, description="Average role-level similarity (0-1)")
     role_coverage: Dict[str, float] = Field(
         default_factory=dict,
         description="Coverage percentage per role"
@@ -101,6 +104,53 @@ def compute_cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
     return max(0.0, min(1.0, similarity))
 
 
+def _compute_level_similarities(
+    hierarchical: Dict[str, Dict[str, Dict[str, List[float]]]],
+    level: str
+) -> List[float]:
+    """
+    Compute pairwise similarities at a specific hierarchy level.
+    
+    For each unique path at the given level, computes pairwise similarities
+    between all glyphs that have that path, then averages across paths.
+    
+    Args:
+        hierarchical: Nested dict {glyph_id: {level: {path: embedding}}}
+        level: 'layer', 'segment', or 'role'
+        
+    Returns:
+        List of similarity scores
+    """
+    # Group embeddings by path
+    path_embeddings: Dict[str, Dict[str, List[float]]] = {}
+    
+    for glyph_id, levels in hierarchical.items():
+        if level not in levels:
+            continue
+        for path, embedding in levels[level].items():
+            if path not in path_embeddings:
+                path_embeddings[path] = {}
+            path_embeddings[path][glyph_id] = embedding
+    
+    # Compute pairwise similarities for each path
+    all_similarities = []
+    
+    for path, glyph_embeddings in path_embeddings.items():
+        glyph_ids = list(glyph_embeddings.keys())
+        if len(glyph_ids) < 2:
+            continue
+        
+        for i in range(len(glyph_ids)):
+            for j in range(i + 1, len(glyph_ids)):
+                sim = compute_cosine_similarity(
+                    glyph_embeddings[glyph_ids[i]],
+                    glyph_embeddings[glyph_ids[j]]
+                )
+                all_similarities.append(sim)
+    
+    return all_similarities
+
+
 # =============================================================================
 # Endpoints
 # =============================================================================
@@ -115,7 +165,8 @@ async def get_chart_stats(
     """
     Get aggregated statistics for charts.
     
-    Returns total glyph count, edge count, average similarity, and role coverage.
+    Returns total glyph count, edge count, average similarity at all levels
+    (cortex, layer, segment, role), and role coverage.
     """
     try:
         # Count glyphs
@@ -130,18 +181,21 @@ async def get_chart_stats(
         )
         total_edges = edge_result.scalar() or 0
         
-        # Compute average similarity from sample pairs
+        # Initialize similarity metrics
         avg_similarity = 0.0
+        avg_layer_similarity = 0.0
+        avg_segment_similarity = 0.0
+        avg_role_similarity = 0.0
         role_coverage: Dict[str, float] = {}
         
         if total_glyphs >= 2:
-            # Get glyphs with embeddings for similarity computation
+            # Get glyphs with embeddings for cortex-level similarity
             glyphs, embeddings = await storage.list_glyphs_with_embeddings(
                 org_id, model_id, limit=100
             )
             
             if len(glyphs) >= 2:
-                # Compute pairwise similarities for sample
+                # Compute pairwise cortex similarities
                 similarities = []
                 glyph_ids = list(embeddings.keys())
                 
@@ -155,6 +209,27 @@ async def get_chart_stats(
                 
                 if similarities:
                     avg_similarity = sum(similarities) / len(similarities)
+                
+                # Get hierarchical embeddings for layer/segment/role similarities
+                glyph_uuids = [g.id for g in glyphs]
+                hierarchical = await storage.get_hierarchical_embeddings(
+                    org_id, model_id, glyph_uuids
+                )
+                
+                # Compute layer-level similarities
+                layer_sims = _compute_level_similarities(hierarchical, 'layer')
+                if layer_sims:
+                    avg_layer_similarity = sum(layer_sims) / len(layer_sims)
+                
+                # Compute segment-level similarities
+                segment_sims = _compute_level_similarities(hierarchical, 'segment')
+                if segment_sims:
+                    avg_segment_similarity = sum(segment_sims) / len(segment_sims)
+                
+                # Compute role-level similarities
+                role_sims = _compute_level_similarities(hierarchical, 'role')
+                if role_sims:
+                    avg_role_similarity = sum(role_sims) / len(role_sims)
             
             # Compute role coverage from metadata
             role_counts: Dict[str, int] = {}
@@ -174,6 +249,9 @@ async def get_chart_stats(
             total_glyphs=total_glyphs,
             total_edges=total_edges,
             avg_similarity=round(avg_similarity, 4),
+            avg_layer_similarity=round(avg_layer_similarity, 4),
+            avg_segment_similarity=round(avg_segment_similarity, 4),
+            avg_role_similarity=round(avg_role_similarity, 4),
             role_coverage=role_coverage,
             computed_at=datetime.utcnow().isoformat() + "Z",
         )

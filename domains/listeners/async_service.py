@@ -279,6 +279,97 @@ def _get_value_from_path(
         return None
 
 
+def _extract_hierarchical_vectors(glyph) -> List[Dict[str, Any]]:
+    """
+    Extract hierarchical vectors from an encoded glyph.
+    
+    Extracts layer cortices, segment cortices, and role bindings
+    for storage in the glyph_vectors table.
+    
+    Args:
+        glyph: Encoded SDK Glyph object
+        
+    Returns:
+        List of dicts with 'level', 'path', 'embedding' keys
+    """
+    vectors = []
+    
+    # Check if glyph has layers attribute
+    if not hasattr(glyph, 'layers') or not glyph.layers:
+        return vectors
+    
+    for layer_name, layer in glyph.layers.items():
+        # Extract layer cortex
+        if hasattr(layer, 'cortex') and layer.cortex is not None:
+            layer_embedding = _vector_to_list(layer.cortex)
+            if layer_embedding:
+                vectors.append({
+                    'level': 'layer',
+                    'path': layer_name,
+                    'embedding': layer_embedding,
+                })
+        
+        # Extract segment cortices
+        if hasattr(layer, 'segments') and layer.segments:
+            for segment_name, segment in layer.segments.items():
+                segment_path = f"{layer_name}.{segment_name}"
+                
+                # Segment cortex
+                if hasattr(segment, 'cortex') and segment.cortex is not None:
+                    segment_embedding = _vector_to_list(segment.cortex)
+                    if segment_embedding:
+                        vectors.append({
+                            'level': 'segment',
+                            'path': segment_path,
+                            'embedding': segment_embedding,
+                        })
+                
+                # Role bindings
+                if hasattr(segment, 'roles') and segment.roles:
+                    for role_name, role_vector in segment.roles.items():
+                        role_path = f"{layer_name}.{segment_name}.{role_name}"
+                        role_embedding = _vector_to_list(role_vector)
+                        if role_embedding:
+                            vectors.append({
+                                'level': 'role',
+                                'path': role_path,
+                                'embedding': role_embedding,
+                            })
+    
+    return vectors
+
+
+def _vector_to_list(vector) -> Optional[List[float]]:
+    """
+    Convert an SDK Vector to a list of floats.
+    
+    Args:
+        vector: SDK Vector object or array-like
+        
+    Returns:
+        List of floats or None if conversion fails
+    """
+    if vector is None:
+        return None
+    
+    # Handle SDK Vector with data attribute
+    if hasattr(vector, 'data'):
+        data = vector.data
+        if hasattr(data, 'tolist'):
+            return data.tolist()
+        return list(data)
+    
+    # Handle numpy array
+    if hasattr(vector, 'tolist'):
+        return vector.tolist()
+    
+    # Handle list
+    if isinstance(vector, list):
+        return vector
+    
+    return None
+
+
 def _record_to_concept(
     record: Dict[str, Any],
     index: int,
@@ -533,13 +624,23 @@ class AsyncListenerService:
                             # Store with full record as metadata
                             concept_text = json.dumps(record)
                             
-                            await storage.create_glyph(
+                            glyph_response = await storage.create_glyph(
                                 org_id=org_id,
                                 model_id=model_id,
                                 concept_text=concept_text,
                                 embedding=embedding_list,
                                 metadata=record,
                             )
+                            
+                            # Extract and store hierarchical vectors
+                            hierarchical_vectors = _extract_hierarchical_vectors(glyph)
+                            if hierarchical_vectors:
+                                await storage.create_glyph_vectors_batch(
+                                    glyph_id=glyph_response.glyph_id,
+                                    org_id=org_id,
+                                    model_id=model_id,
+                                    vectors=hierarchical_vectors,
+                                )
                             
                             encoded += 1
                             processed += 1
