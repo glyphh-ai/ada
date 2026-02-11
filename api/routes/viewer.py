@@ -176,6 +176,10 @@ async def get_viewer_data(
         # But we can also compute semantic edges based on shared metadata values
         edges = ViewerEdges()
         
+        # Debug: log semantic data for first few glyphs
+        for i, vg in enumerate(viewer_glyphs[:3]):
+            logger.info(f"Glyph {i} '{vg.name[:50]}...' semantic keys: {list(vg.semantic.keys())}")
+        
         # Build semantic edges based on shared metadata values
         # Glyphs that share the same value for a key are semantically related
         semantic_edges_map: Dict[str, set] = {}  # key -> set of glyph names
@@ -187,6 +191,8 @@ async def get_viewer_data(
                     if edge_key not in semantic_edges_map:
                         semantic_edges_map[edge_key] = set()
                     semantic_edges_map[edge_key].add(vg.name)
+        
+        logger.info(f"Semantic edge groups with 2+ glyphs: {sum(1 for v in semantic_edges_map.values() if len(v) >= 2)}")
         
         # Create edges between glyphs that share semantic values
         seen_pairs: set = set()
@@ -271,6 +277,8 @@ async def get_viewer_data(
                 ))
         
         total = await storage.count_glyphs(org_id, model_id)
+        
+        logger.info(f"Viewer edges: semantic={len(edges.semantic)}, hierarchy={len(edges.hierarchy)}, temporal={len(edges.temporal)}")
         
         return ViewerDataResponse(
             glyphs=viewer_glyphs,
