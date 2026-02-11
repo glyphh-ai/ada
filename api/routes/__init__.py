@@ -12,6 +12,7 @@ from api.routes.nl_query import router as nl_query_router
 from api.routes.jobs import router as jobs_router
 from api.routes.chat import router as chat_router
 from api.routes.procedures import router as procedures_router
+from api.routes.charts import router as charts_router
 
 __all__ = [
     "deployment_router",
@@ -24,4 +25,5 @@ __all__ = [
     "jobs_router",
     "chat_router",
     "procedures_router",
+    "charts_router",
 ]
