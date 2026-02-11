@@ -215,3 +215,25 @@ async def list_glyphs(
     total = await storage.count_glyphs(org_id, model_id)
     
     return GlyphListResponse(glyphs=glyphs, total=total, limit=limit, offset=offset)
+
+
+class GlyphStatsResponse(BaseModel):
+    """Response model for glyph statistics."""
+    total_glyphs: int = Field(..., description="Total number of glyphs")
+    org_id: str = Field(..., description="Organization ID")
+    model_id: str = Field(..., description="Model ID")
+
+
+@router.get("/stats", response_model=GlyphStatsResponse)
+async def get_glyph_stats(
+    org_id: str,
+    model_id: str,
+    storage: GlyphStorage = Depends(get_storage),
+) -> GlyphStatsResponse:
+    """Get glyph statistics for a model."""
+    total = await storage.count_glyphs(org_id, model_id)
+    return GlyphStatsResponse(
+        total_glyphs=total,
+        org_id=org_id,
+        model_id=model_id,
+    )
