@@ -5,6 +5,7 @@ Endpoints for 3D visualization data.
 All routes scoped by /{org_id}/{model_id}/viewer/...
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -144,8 +145,20 @@ async def get_viewer_data(
             if not layers and cortex_bits:
                 layers.append(ViewerLayerData(index=0, cortex=cortex_bits))
             
-            # Extract semantic metadata
+            # Extract semantic metadata from glyph.metadata AND from concept_text (if JSON)
             semantic: Dict[str, Any] = {}
+            
+            # First try to parse concept_text as JSON to extract semantic fields
+            try:
+                parsed_concept = json.loads(glyph.concept_text)
+                if isinstance(parsed_concept, dict):
+                    for key, value in parsed_concept.items():
+                        if not key.startswith('_'):
+                            semantic[key] = value
+            except (json.JSONDecodeError, TypeError):
+                pass
+            
+            # Then add/override with explicit metadata
             if glyph.metadata:
                 for key, value in glyph.metadata.items():
                     if not key.startswith('_'):
