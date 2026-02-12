@@ -592,6 +592,19 @@ async def get_temporal_history(
         _, embeddings = await storage.list_glyphs_with_embeddings(org_id, model_id, limit=500)
         hierarchical = await storage.get_hierarchical_embeddings(org_id, model_id, [item['glyph'].id for item in related_glyphs[:limit]])
         
+        # Debug logging
+        logger.info(f"Temporal history for glyph {glyph_id}: found {len(related_glyphs)} related glyphs")
+        logger.info(f"Grouping key: {grouping_key}={grouping_value}, temporal_key: {target_temporal_key}")
+        logger.info(f"Embeddings available for {len(embeddings)} glyphs")
+        logger.info(f"Hierarchical embeddings available for {len(hierarchical)} glyphs")
+        if hierarchical:
+            sample_glyph_id = list(hierarchical.keys())[0] if hierarchical else None
+            if sample_glyph_id:
+                sample_hier = hierarchical[sample_glyph_id]
+                logger.info(f"Sample hierarchical structure for {sample_glyph_id}: levels={list(sample_hier.keys())}")
+                for level, paths in sample_hier.items():
+                    logger.info(f"  {level}: {list(paths.keys())}")
+        
         def compute_jaccard(a: List[float], b: List[float]) -> float:
             """Compute Jaccard similarity on binarized vectors."""
             if not a or not b or len(a) != len(b):
@@ -675,6 +688,10 @@ async def get_temporal_history(
                 changes=changes,
                 similarity=similarity,
             ))
+            
+            # Debug: log similarity keys for first few points
+            if len(history) <= 3:
+                logger.info(f"Point {len(history)} ({glyph_id_str[:8]}...): similarity keys={list(similarity.keys())}, values={similarity}")
             
             # Store for next iteration
             prev_values = semantic.copy()
