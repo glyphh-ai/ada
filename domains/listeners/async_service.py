@@ -32,8 +32,11 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
+from sqlalchemy import select
+
 from domains.jobs.manager import DataLoadStatus, JobManager, get_job_manager
 from domains.models.storage import GlyphStorage
+from domains.models.db_models import Glyph, Edge
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +155,156 @@ def _find_temporal_role(encoder_config) -> Optional[Tuple[str, str, str]]:
                 return (parts[0], parts[1], parts[2])
     
     return None
+
+
+async def _create_temporal_edges(
+    session,
+    org_id: str,
+    model_id: str,
+    key_part_roles: List[Tuple[str, str, str]],
+    temporal_role: Optional[Tuple[str, str, str]],
+) -> int:
+    """
+    Create temporal edges between glyphs based on temporal values.
+    
+    Groups glyphs by their entity key (excluding temporal part) and creates
+    edges between consecutive glyphs in temporal order.
+    
+    Args:
+        session: Database session
+        org_id: Organization ID
+        model_id: Model ID
+        key_part_roles: List of (layer, segment, role) tuples for entity key
+        temporal_role: (layer, segment, role) tuple for temporal ordering
+    
+    Returns:
+        Number of temporal edges created
+    """
+    from datetime import datetime
+    
+    if not temporal_role:
+        logger.debug("No temporal role configured, skipping temporal edge creation")
+        return 0
+    
+    # Query all glyphs for this model
+    result = await session.execute(
+        select(Glyph).where(
+            Glyph.org_id == org_id,
+            Glyph.model_id == model_id,
+        )
+    )
+    glyphs = result.scalars().all()
+    
+    if len(glyphs) < 2:
+        return 0
+    
+    # Extract entity key and temporal value for each glyph
+    temporal_layer, temporal_segment, temporal_role_name = temporal_role
+    
+    glyph_data = []
+    for glyph in glyphs:
+        metadata = glyph.metadata or {}
+        
+        # Get temporal value from metadata
+        temporal_value = metadata.get("temporal_value")
+        if temporal_value is None:
+            continue
+        
+        # Build entity key from key_part roles (excluding temporal)
+        entity_key_parts = []
+        if key_part_roles:
+            original_record = metadata.get("original_record", {})
+            for layer, segment, role in key_part_roles:
+                # Skip if this is the temporal role
+                if (layer, segment, role) == temporal_role:
+                    continue
+                value = _get_value_from_path(original_record, layer, segment, role)
+                if value is not None:
+                    entity_key_parts.append(str(value))
+        
+        # If no key parts, use concept_text as entity key
+        entity_key = "_".join(entity_key_parts) if entity_key_parts else glyph.concept_text
+        
+        # Parse temporal value for sorting
+        try:
+            if isinstance(temporal_value, str):
+                # Try parsing as date
+                try:
+                    parsed_temporal = datetime.fromisoformat(temporal_value.replace('Z', '+00:00'))
+                    sort_value = parsed_temporal.timestamp()
+                except ValueError:
+                    # Try as number
+                    sort_value = float(temporal_value)
+            else:
+                sort_value = float(temporal_value)
+        except (ValueError, TypeError):
+            continue
+        
+        glyph_data.append({
+            "glyph_id": glyph.id,
+            "entity_key": entity_key,
+            "temporal_value": temporal_value,
+            "sort_value": sort_value,
+        })
+    
+    if len(glyph_data) < 2:
+        return 0
+    
+    # Group by entity key
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for item in glyph_data:
+        groups[item["entity_key"]].append(item)
+    
+    # Create edges within each group
+    edges_created = 0
+    for entity_key, items in groups.items():
+        if len(items) < 2:
+            continue
+        
+        # Sort by temporal value
+        items.sort(key=lambda x: x["sort_value"])
+        
+        # Create edges between consecutive glyphs
+        for i in range(len(items) - 1):
+            source_id = items[i]["glyph_id"]
+            target_id = items[i + 1]["glyph_id"]
+            
+            # Check if edge already exists
+            existing = await session.execute(
+                select(Edge).where(
+                    Edge.org_id == org_id,
+                    Edge.model_id == model_id,
+                    Edge.source_glyph_id == source_id,
+                    Edge.target_glyph_id == target_id,
+                    Edge.edge_type == "temporal_cortex",
+                )
+            )
+            if existing.scalar_one_or_none():
+                continue
+            
+            # Create temporal edge
+            edge = Edge(
+                org_id=org_id,
+                model_id=model_id,
+                source_glyph_id=source_id,
+                target_glyph_id=target_id,
+                edge_type="temporal_cortex",
+                weight=0.8,
+                edge_metadata={
+                    "source_temporal": items[i]["temporal_value"],
+                    "target_temporal": items[i + 1]["temporal_value"],
+                    "entity_key": entity_key,
+                },
+            )
+            session.add(edge)
+            edges_created += 1
+    
+    if edges_created > 0:
+        await session.commit()
+        logger.info(f"Created {edges_created} temporal edges for {org_id}/{model_id}")
+    
+    return edges_created
 
 
 def _auto_map_flat_to_hierarchical(
@@ -743,7 +896,7 @@ class AsyncListenerService:
                 # Commit all changes
                 await session.commit()
             
-            # Phase 3: Indexing (placeholder for future vector index updates)
+            # Phase 3: Indexing and temporal edge creation
             await self._job_manager.update_progress(
                 job_id,
                 DataLoadStatus.INDEXING,
@@ -751,11 +904,20 @@ class AsyncListenerService:
                 encoded=encoded,
                 failed=failed,
                 skipped=skipped,
-                message="Indexing vectors...",
+                message="Creating temporal edges...",
             )
             
-            # Brief pause to simulate indexing
-            await asyncio.sleep(0.1)
+            # Create temporal edges between glyphs
+            async with self._session_maker() as session:
+                temporal_edges = await _create_temporal_edges(
+                    session,
+                    org_id,
+                    model_id,
+                    key_part_roles,
+                    temporal_role,
+                )
+                if temporal_edges > 0:
+                    logger.info(f"Created {temporal_edges} temporal edges")
             
             # Phase 4: Complete
             if skipped > 0 and encoded == 0:
