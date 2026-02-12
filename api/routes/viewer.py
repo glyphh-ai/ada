@@ -416,10 +416,12 @@ async def get_viewer_data(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def extract_readable_label(concept_text: str) -> str:
-    """Extract a readable label from concept_text JSON."""
+def extract_readable_label(concept_text: str, temporal_value: Any = None) -> str:
+    """Extract a readable label from concept_text JSON, optionally including temporal value."""
     if not concept_text:
         return 'Unknown'
+    
+    label_parts = []
     
     try:
         parsed = json.loads(concept_text)
@@ -443,13 +445,18 @@ def extract_readable_label(concept_text: str) -> str:
             
             values = find_values(parsed, priority_keys)
             if values:
-                return ' '.join(values[:3])
+                label_parts.append(' '.join(values[:3]))
     except (json.JSONDecodeError, TypeError):
-        pass
+        if len(concept_text) > 40:
+            label_parts.append(concept_text[:37] + '...')
+        else:
+            label_parts.append(concept_text)
     
-    if len(concept_text) > 40:
-        return concept_text[:37] + '...'
-    return concept_text
+    # Add temporal value to make label unique per time point
+    if temporal_value is not None:
+        label_parts.append(f"@ {temporal_value}")
+    
+    return ' '.join(label_parts) if label_parts else 'Unknown'
 
 
 @router.get("/temporal-history/{glyph_id}", response_model=TemporalHistoryResponse)
@@ -681,7 +688,7 @@ async def get_temporal_history(
             history.append(TemporalDataPoint(
                 glyph_id=glyph_id_str,
                 name=g.concept_text,
-                label=extract_readable_label(g.concept_text),
+                label=extract_readable_label(g.concept_text, item['temporal_value']),
                 temporal_value=item['temporal_value'],
                 temporal_key=item['temporal_key'],
                 values=semantic,
