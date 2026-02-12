@@ -180,10 +180,12 @@ class QueryService:
         # Get similarity service for this model
         similarity_service = self._get_similarity_service(loaded_model)
         
-        # Encode query text using SDK encoder
+        # Encode query text using SDK encoder with lexicon matching
         query_embedding = await self._encode_query(
             loaded_model.encoder,
             request.query,
+            org_id=org_id,
+            model_id=model_id,
         )
         
         # Get model config for weights
@@ -361,11 +363,169 @@ class QueryService:
     # Helper Methods
     # =========================================================================
     
-    async def _encode_query(self, encoder: Any, query: str) -> List[float]:
-        """Encode query text using SDK encoder."""
+    def _extract_role_lexicons(self, encoder: Any) -> Dict[str, List[str]]:
+        """
+        Extract role names and their lexicons from encoder config.
+        
+        Returns:
+            Dict mapping role name to list of lexicons (including role name itself)
+        """
+        role_lexicons = {}
+        try:
+            if hasattr(encoder, 'config') and hasattr(encoder.config, 'layers'):
+                for layer in encoder.config.layers:
+                    for segment in layer.segments:
+                        for role in segment.roles:
+                            # Include role name as implicit lexicon
+                            lexicons = [role.name.lower()]
+                            # Add configured lexicons if present
+                            if hasattr(role, 'lexicons') and role.lexicons:
+                                lexicons.extend([l.lower() for l in role.lexicons])
+                            role_lexicons[role.name] = lexicons
+        except Exception as e:
+            logger.debug(f"Could not extract role lexicons from encoder: {e}")
+        return role_lexicons
+    
+    def _match_query_to_roles(
+        self,
+        query: str,
+        role_lexicons: Dict[str, List[str]],
+    ) -> List[str]:
+        """
+        Match query text against role lexicons to identify relevant roles.
+        
+        Args:
+            query: Natural language query
+            role_lexicons: Dict mapping role name to list of lexicons
+        
+        Returns:
+            List of role names that match lexicons in the query
+        """
+        query_lower = query.lower()
+        matched_roles = []
+        
+        for role_name, lexicons in role_lexicons.items():
+            for lexicon in lexicons:
+                if lexicon in query_lower:
+                    matched_roles.append(role_name)
+                    logger.debug(f"Lexicon '{lexicon}' matched role '{role_name}'")
+                    break
+        
+        return matched_roles
+    
+    async def _find_reference_glyph(
+        self,
+        org_id: str,
+        model_id: str,
+        query: str,
+        matched_roles: List[str],
+    ) -> Optional[Tuple[GlyphResponse, List[float]]]:
+        """
+        Find a reference glyph from existing data that matches the query.
+        
+        Searches glyph metadata for values mentioned in the query.
+        
+        Args:
+            org_id: Organization ID
+            model_id: Model ID
+            query: Natural language query
+            matched_roles: Roles identified from lexicon matching
+        
+        Returns:
+            Tuple of (glyph, embedding) if found, None otherwise
+        """
+        try:
+            async with self._session_factory() as session:
+                storage = GlyphStorage(session)
+                
+                # Get glyphs with embeddings
+                results = await storage.get_glyphs_with_embeddings(
+                    org_id=org_id,
+                    model_id=model_id,
+                    filters=None,
+                )
+                
+                if not results:
+                    return None
+                
+                query_lower = query.lower()
+                best_match = None
+                best_score = 0
+                
+                for glyph_response, embedding in results:
+                    score = 0
+                    metadata = glyph_response.metadata or {}
+                    
+                    # Check each metadata field for matches in query
+                    for key, value in metadata.items():
+                        if value is not None:
+                            value_str = str(value).lower()
+                            if value_str in query_lower:
+                                score += 2  # Direct value match
+                            elif any(word in query_lower for word in value_str.split()):
+                                score += 1  # Partial word match
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_match = (glyph_response, embedding)
+                
+                if best_match and best_score >= 2:
+                    logger.info(
+                        f"Found reference glyph with score {best_score}: "
+                        f"{best_match[0].concept_text[:50] if best_match[0].concept_text else 'N/A'}..."
+                    )
+                    return best_match
+                
+                return None
+                
+        except Exception as e:
+            logger.warning(f"Error finding reference glyph: {e}")
+            return None
+    
+    async def _encode_query(
+        self,
+        encoder: Any,
+        query: str,
+        org_id: str = None,
+        model_id: str = None,
+    ) -> List[float]:
+        """
+        Encode query text using SDK encoder with lexicon-based role matching.
+        
+        Flow:
+        1. Extract role lexicons from encoder config
+        2. Match query against lexicons to identify relevant roles
+        3. Find a reference glyph from existing data that matches the query
+        4. Use reference glyph's embedding for similarity search
+        5. Fall back to direct encoding if no reference found
+        """
         try:
             from glyphh import Concept
             
+            # Extract role lexicons from encoder config
+            role_lexicons = self._extract_role_lexicons(encoder)
+            
+            if role_lexicons:
+                # Match query against lexicons
+                matched_roles = self._match_query_to_roles(query, role_lexicons)
+                
+                if matched_roles:
+                    logger.info(f"Query matched roles via lexicons: {matched_roles}")
+                    
+                    # Try to find a reference glyph from existing data
+                    if org_id and model_id:
+                        reference = await self._find_reference_glyph(
+                            org_id, model_id, query, matched_roles
+                        )
+                        if reference:
+                            glyph_response, embedding = reference
+                            logger.info(
+                                f"Using reference glyph for similarity search: "
+                                f"{glyph_response.metadata}"
+                            )
+                            return embedding
+            
+            # Fall back to direct encoding (may fail if schema is strict)
             concept = Concept(
                 name=query,
                 attributes={"text": query},
