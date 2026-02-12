@@ -134,14 +134,17 @@ def _find_temporal_role(encoder_config) -> Optional[Tuple[str, str, str]]:
     Requirements: 7.3
     """
     if not encoder_config:
+        logger.debug("_find_temporal_role: encoder_config is None")
         return None
     
     # Handle dict config (from DB storage)
     if isinstance(encoder_config, dict):
         temporal_source = encoder_config.get("temporal_source", "auto")
+        logger.debug(f"_find_temporal_role: dict config, temporal_source={temporal_source}")
         if temporal_source and temporal_source != "auto":
             # Parse "layer.segment.role" path
             parts = temporal_source.split(".")
+            logger.debug(f"_find_temporal_role: parsed parts={parts}")
             if len(parts) == 3:
                 return (parts[0], parts[1], parts[2])
         return None
@@ -149,11 +152,14 @@ def _find_temporal_role(encoder_config) -> Optional[Tuple[str, str, str]]:
     # Handle EncoderConfig object
     if hasattr(encoder_config, "temporal_source"):
         temporal_source = encoder_config.temporal_source
+        logger.debug(f"_find_temporal_role: object config, temporal_source={temporal_source}")
         if temporal_source and temporal_source != "auto":
             parts = temporal_source.split(".")
+            logger.debug(f"_find_temporal_role: parsed parts={parts}")
             if len(parts) == 3:
                 return (parts[0], parts[1], parts[2])
     
+    logger.debug("_find_temporal_role: no temporal_source attribute found")
     return None
 
 

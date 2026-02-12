@@ -173,10 +173,15 @@ class EncoderConfigFactory:
         
         EncoderConfig = classes['EncoderConfig']
         
+        # Log temporal_source for debugging
+        logger.debug(f"create_from_dict: temporal_source={config_dict.get('temporal_source', 'NOT_PRESENT')}")
+        
         try:
             # Use SDK's from_dict method if available
             if hasattr(EncoderConfig, 'from_dict'):
-                return EncoderConfig.from_dict(config_dict)
+                result = EncoderConfig.from_dict(config_dict)
+                logger.debug(f"create_from_dict: SDK from_dict result temporal_source={getattr(result, 'temporal_source', 'NOT_PRESENT')}")
+                return result
             
             # Fallback: construct manually
             LayerConfig = classes['LayerConfig']
@@ -213,6 +218,14 @@ class EncoderConfigFactory:
             # Handle nl_encoder_config if present
             if 'nl_encoder_config' in config_dict and config_dict['nl_encoder_config']:
                 config.nl_encoder_config = config_dict['nl_encoder_config']
+            
+            # Handle temporal_source if present
+            if 'temporal_source' in config_dict and config_dict['temporal_source']:
+                config.temporal_source = config_dict['temporal_source']
+            
+            # Handle temporal_config if present
+            if 'temporal_config' in config_dict and config_dict['temporal_config']:
+                config.temporal_config = config_dict['temporal_config']
             
             return config
         except Exception as e:
