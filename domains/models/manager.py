@@ -436,10 +436,33 @@ class ModelManager:
         """Unload a model and optionally clean up its data."""
         key = (org_id, model_id)
         
-        if key not in self._models:
-            raise ModelNotFoundException(org_id, model_id)
+        # Check if model is in memory
+        loaded_model = self._models.get(key)
         
-        loaded_model = self._models[key]
+        # If not in memory, try to load from DB to verify it exists
+        if loaded_model is None:
+            loaded_model = await self._load_from_db(org_id, model_id)
+            if loaded_model is not None:
+                # Model exists in DB, add to cache so we can clean it up
+                self._models[key] = loaded_model
+        
+        # If still not found, check if there's data in the database anyway
+        if loaded_model is None:
+            async with self._db_session_factory() as session:
+                result = await session.execute(
+                    select(ModelConfig).where(
+                        ModelConfig.org_id == org_id,
+                        ModelConfig.model_id == model_id,
+                    )
+                )
+                db_config = result.scalar_one_or_none()
+                
+                if db_config is None:
+                    # No config and no model - truly not found
+                    raise ModelNotFoundException(org_id, model_id)
+                
+                # Config exists but couldn't load model - still allow cleanup
+                logger.info(f"Model config exists but couldn't load encoder for org={org_id}, model={model_id}")
         
         if delete_data:
             await self.clear_model_data(org_id, model_id)
@@ -453,10 +476,13 @@ class ModelManager:
                 )
                 await session.commit()
         
-        del self._models[key]
-        
-        if hasattr(loaded_model.encoder, 'clear_cache'):
-            loaded_model.encoder.clear_cache()
+        # Remove from memory if present
+        if key in self._models:
+            loaded_model = self._models[key]
+            del self._models[key]
+            
+            if hasattr(loaded_model, 'encoder') and hasattr(loaded_model.encoder, 'clear_cache'):
+                loaded_model.encoder.clear_cache()
         
         logger.info(f"Unloaded model org={org_id}, model={model_id}")
     
