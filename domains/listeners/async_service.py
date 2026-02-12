@@ -192,6 +192,8 @@ async def _create_temporal_edges(
         logger.debug("No temporal role configured, skipping temporal edge creation")
         return 0
     
+    logger.info(f"Creating temporal edges for {org_id}/{model_id} with temporal_role={temporal_role}, key_part_roles={key_part_roles}")
+    
     # Query all glyphs for this model
     result = await session.execute(
         select(Glyph).where(
@@ -201,7 +203,10 @@ async def _create_temporal_edges(
     )
     glyphs = result.scalars().all()
     
+    logger.info(f"Found {len(glyphs)} glyphs for temporal edge creation")
+    
     if len(glyphs) < 2:
+        logger.info("Less than 2 glyphs, skipping temporal edge creation")
         return 0
     
     # Extract entity key and temporal value for each glyph
@@ -214,6 +219,7 @@ async def _create_temporal_edges(
         # Get temporal value from metadata
         temporal_value = metadata.get("temporal_value")
         if temporal_value is None:
+            logger.debug(f"Glyph {glyph.id} has no temporal_value in metadata")
             continue
         
         # Build entity key from key_part roles (excluding temporal)
@@ -249,6 +255,7 @@ async def _create_temporal_edges(
             else:
                 sort_value = float(temporal_value)
         except (ValueError, TypeError):
+            logger.warning(f"Could not parse temporal_value '{temporal_value}' for glyph {glyph.id}")
             continue
         
         glyph_data.append({
@@ -258,7 +265,10 @@ async def _create_temporal_edges(
             "sort_value": sort_value,
         })
     
+    logger.info(f"Extracted {len(glyph_data)} glyphs with valid temporal values")
+    
     if len(glyph_data) < 2:
+        logger.info("Less than 2 glyphs with temporal values, skipping edge creation")
         return 0
     
     # Group by entity key
@@ -267,11 +277,16 @@ async def _create_temporal_edges(
     for item in glyph_data:
         groups[item["entity_key"]].append(item)
     
+    logger.info(f"Grouped glyphs into {len(groups)} entity groups: {list(groups.keys())[:5]}...")
+    
     # Create edges within each group
     edges_created = 0
     for entity_key, items in groups.items():
         if len(items) < 2:
+            logger.debug(f"Entity '{entity_key}' has only {len(items)} glyph(s), skipping")
             continue
+        
+        logger.info(f"Creating edges for entity '{entity_key}' with {len(items)} glyphs")
         
         # Sort by temporal value
         items.sort(key=lambda x: x["sort_value"])
@@ -928,6 +943,8 @@ class AsyncListenerService:
                 message="Creating temporal edges...",
             )
             
+            logger.info(f"Phase 3: About to create temporal edges with temporal_role={temporal_role}, key_part_roles={key_part_roles}")
+            
             # Create temporal edges between glyphs
             async with self._session_maker() as session:
                 temporal_edges = await _create_temporal_edges(
@@ -937,6 +954,7 @@ class AsyncListenerService:
                     key_part_roles,
                     temporal_role,
                 )
+                logger.info(f"_create_temporal_edges returned {temporal_edges}")
                 if temporal_edges > 0:
                     logger.info(f"Created {temporal_edges} temporal edges")
             
