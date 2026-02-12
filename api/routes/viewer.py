@@ -11,9 +11,11 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domains.models.storage import GlyphStorage
+from domains.models.db_models import Edge
 from infrastructure.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -116,6 +118,7 @@ async def get_viewer_data(
     model_id: str,
     limit: int = Query(100, ge=1, le=500, description="Max glyphs to return"),
     storage: GlyphStorage = Depends(get_storage),
+    db: AsyncSession = Depends(get_db),
 ) -> ViewerDataResponse:
     """
     Get glyph data formatted for 3D viewer visualization.
@@ -287,38 +290,42 @@ async def get_viewer_data(
                             weight=0.7,
                         ))
         
-        # Build temporal edges based on time-related fields
-        # Look for fields like 'year', 'date', 'timestamp', 'created_at', 'time'
-        temporal_keys = ['year', 'date', 'timestamp', 'created_at', 'time', 'period', 'quarter', 'month']
-        temporal_glyphs: List[tuple] = []  # [(glyph_name, temporal_value)]
+        # Build temporal edges from database (temporal_cortex edges)
+        # These are created by the edge generator when glyphs are updated
+        glyph_id_to_name = {vg.glyph_id: vg.name for vg in viewer_glyphs}
+        glyph_ids = [vg.glyph_id for vg in viewer_glyphs]
         
-        for vg in viewer_glyphs:
-            for sem_key, value in vg.semantic.items():
-                # Check if any temporal key is in the semantic key
-                key_parts = sem_key.lower().split('.')
-                is_temporal = any(tk in key_parts or sem_key.lower().endswith(tk) for tk in temporal_keys)
+        # Query temporal edges from database
+        from uuid import UUID as PyUUID
+        glyph_uuids_for_edges = [PyUUID(gid) for gid in glyph_ids]
+        
+        temporal_edge_result = await db.execute(
+            select(Edge).where(
+                Edge.org_id == org_id,
+                Edge.model_id == model_id,
+                Edge.edge_type == "temporal_cortex",
+                Edge.source_glyph_id.in_(glyph_uuids_for_edges),
+                Edge.target_glyph_id.in_(glyph_uuids_for_edges),
+            )
+        )
+        
+        temporal_seen = set()
+        for edge in temporal_edge_result.scalars().all():
+            src_id = str(edge.source_glyph_id)
+            tgt_id = str(edge.target_glyph_id)
+            
+            if src_id in glyph_id_to_name and tgt_id in glyph_id_to_name:
+                src_name = glyph_id_to_name[src_id]
+                tgt_name = glyph_id_to_name[tgt_id]
+                pair = tuple(sorted([src_name, tgt_name]))
                 
-                if is_temporal and value is not None:
-                    try:
-                        # Try to convert to sortable value
-                        if isinstance(value, (int, float)):
-                            temporal_glyphs.append((vg.name, float(value)))
-                        elif isinstance(value, str):
-                            # Try parsing as number
-                            temporal_glyphs.append((vg.name, float(value)))
-                    except (ValueError, TypeError):
-                        pass
-                    break  # Only use first temporal field found
-        
-        # Sort by temporal value and create sequential edges
-        if len(temporal_glyphs) >= 2:
-            temporal_glyphs.sort(key=lambda x: x[1])
-            for i in range(len(temporal_glyphs) - 1):
-                edges.temporal.append(ViewerEdge(
-                    source=temporal_glyphs[i][0],
-                    target=temporal_glyphs[i + 1][0],
-                    weight=0.6,
-                ))
+                if pair not in temporal_seen:
+                    temporal_seen.add(pair)
+                    edges.temporal.append(ViewerEdge(
+                        source=src_name,
+                        target=tgt_name,
+                        weight=edge.weight or 0.6,
+                    ))
         
         total = await storage.count_glyphs(org_id, model_id)
         
