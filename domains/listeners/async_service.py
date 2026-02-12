@@ -213,12 +213,17 @@ async def _create_temporal_edges(
         # Build entity key from key_part roles (excluding temporal)
         entity_key_parts = []
         if key_part_roles:
+            # Try hierarchical format first (original_record), then flat format
             original_record = metadata.get("original_record", {})
             for layer, segment, role in key_part_roles:
                 # Skip if this is the temporal role
                 if (layer, segment, role) == temporal_role:
                     continue
+                # Try hierarchical path first
                 value = _get_value_from_path(original_record, layer, segment, role)
+                # Fall back to flat format (role name directly in metadata)
+                if value is None:
+                    value = metadata.get(role)
                 if value is not None:
                     entity_key_parts.append(str(value))
         
@@ -848,14 +853,18 @@ class AsyncListenerService:
                             )
                             
                             # Store with original record as metadata (user's format)
+                            # Include temporal_value from concept metadata for edge creation
                             concept_text = json.dumps(record)
+                            glyph_metadata = dict(record)  # Copy original flat format
+                            if concept.metadata.get("temporal_value") is not None:
+                                glyph_metadata["temporal_value"] = concept.metadata["temporal_value"]
                             
                             glyph_response = await storage.create_glyph(
                                 org_id=org_id,
                                 model_id=model_id,
                                 concept_text=concept_text,
                                 embedding=embedding_list,
-                                metadata=record,  # Store original flat format for display
+                                metadata=glyph_metadata,
                             )
                             
                             # Extract and store hierarchical vectors
