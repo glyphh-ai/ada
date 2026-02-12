@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     
     # Local mode limits (development)
     local_mode_max_models: int = Field(
-        default=1,
+        default=10,
         description="Maximum models in local mode (development limit)"
     )
     local_mode_max_glyphs: int = Field(
