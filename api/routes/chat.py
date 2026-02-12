@@ -466,12 +466,41 @@ def _format_result(result: Any, query_type: str) -> str:
         if "count" in result and "results" not in result:
             return f"Count: {result['count']}"
         
-        # Handle similarity search results
+        # Handle list/similarity search results
         if "results" in result and isinstance(result["results"], list):
             results = result["results"]
             if not results:
                 return "No matching results found."
             
+            # Check if this is a list (no scores) or similarity search
+            is_list = len(results) > 0 and "similarity_score" not in results[0] and "score" not in results[0]
+            
+            if is_list:
+                # Format as clean list
+                total = result.get("total_count", len(results))
+                lines = [f"Found {total} record{'s' if total != 1 else ''}:\n"]
+                
+                for i, r in enumerate(results[:10], 1):
+                    # Try to get meaningful display text
+                    glyph = r.get("glyph", r)
+                    concept = glyph.get("concept_text", "")
+                    metadata = glyph.get("metadata", {})
+                    
+                    if concept:
+                        lines.append(f"{i}. {concept}")
+                    elif metadata:
+                        # Format key metadata fields
+                        highlights = _format_metadata_highlights(metadata)
+                        lines.append(f"{i}. {highlights}")
+                    else:
+                        lines.append(f"{i}. (Record {i})")
+                
+                if len(results) > 10:
+                    lines.append(f"\n... and {len(results) - 10} more")
+                
+                return "\n".join(lines)
+            
+            # Similarity search format
             lines = []
             for i, r in enumerate(results[:5], 1):
                 concept = r.get("concept_text") or r.get("concept") or ""
@@ -502,3 +531,31 @@ def _format_result(result: Any, query_type: str) -> str:
     
     # Fallback to JSON
     return json.dumps(result, indent=2, default=_json_serializer)
+
+
+def _format_metadata_highlights(metadata: Dict[str, Any]) -> str:
+    """Format metadata into readable highlights."""
+    priority_keys = ["make", "model", "year", "vin", "name", "title", "type", "service_type", "service_date"]
+    highlights = []
+    
+    # Add priority keys first
+    for key in priority_keys:
+        if key in metadata and metadata[key] is not None:
+            value = metadata[key]
+            if isinstance(value, (str, int, float)):
+                highlights.append(str(value))
+        if len(highlights) >= 4:
+            break
+    
+    # If not enough, add other keys
+    if len(highlights) < 3:
+        for key, value in metadata.items():
+            if key in priority_keys:
+                continue
+            if value is None or isinstance(value, (dict, list)):
+                continue
+            highlights.append(f"{key}: {value}")
+            if len(highlights) >= 4:
+                break
+    
+    return " | ".join(highlights) if highlights else "(no details)"
