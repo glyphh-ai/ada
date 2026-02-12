@@ -75,6 +75,10 @@ class TemporalDataPoint(BaseModel):
         default_factory=dict, 
         description="Changes from previous point: {field: {from, to, delta}}"
     )
+    similarity: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Similarity scores by level: {cortex, layer.X, segment.X.Y, role.X.Y.Z}"
+    )
 
 
 class TemporalHistoryResponse(BaseModel):
@@ -83,6 +87,7 @@ class TemporalHistoryResponse(BaseModel):
     history: List[TemporalDataPoint] = Field(..., description="Temporal history points")
     temporal_key: str = Field(..., description="Key used for temporal ordering")
     total_points: int = Field(..., description="Total points in history")
+    grouping_key: str = Field(default="", description="Key used to group related glyphs")
 
 
 # =============================================================================
@@ -582,12 +587,30 @@ async def get_temporal_history(
             # Sort as strings if numeric conversion fails
             related_glyphs.sort(key=lambda x: str(x['temporal_value']))
         
-        # Build history with change deltas
+        # Get embeddings for similarity computation
+        glyph_ids_for_sim = [str(item['glyph'].id) for item in related_glyphs[:limit]]
+        _, embeddings = await storage.list_glyphs_with_embeddings(org_id, model_id, limit=500)
+        hierarchical = await storage.get_hierarchical_embeddings(org_id, model_id, [item['glyph'].id for item in related_glyphs[:limit]])
+        
+        def compute_jaccard(a: List[float], b: List[float]) -> float:
+            """Compute Jaccard similarity on binarized vectors."""
+            if not a or not b or len(a) != len(b):
+                return 0.0
+            a_bits = [v > 0 for v in a]
+            b_bits = [v > 0 for v in b]
+            intersection = sum(1 for i in range(len(a_bits)) if a_bits[i] and b_bits[i])
+            union = sum(1 for i in range(len(a_bits)) if a_bits[i] or b_bits[i])
+            return intersection / union if union > 0 else 0.0
+        
+        # Build history with change deltas and similarity scores
         history: List[TemporalDataPoint] = []
         prev_values: Dict[str, Any] = {}
+        prev_glyph_id: Optional[str] = None
+        prev_embeddings: Dict[str, List[float]] = {}
         
         for item in related_glyphs[:limit]:
             g = item['glyph']
+            glyph_id_str = str(g.id)
             semantic = item['semantic']
             
             # Compute changes from previous point
@@ -607,23 +630,66 @@ async def get_temporal_history(
                         pass
                     changes[key] = change_info
             
+            # Compute similarity scores vs previous point
+            similarity: Dict[str, float] = {}
+            
+            if prev_glyph_id and prev_embeddings:
+                # Cortex similarity
+                curr_cortex = embeddings.get(glyph_id_str, [])
+                prev_cortex = prev_embeddings.get('cortex', [])
+                if curr_cortex and prev_cortex:
+                    similarity['cortex'] = compute_jaccard(curr_cortex, prev_cortex)
+                
+                # Hierarchical similarities
+                curr_hier = hierarchical.get(glyph_id_str, {})
+                prev_hier = prev_embeddings.get('hierarchical', {})
+                
+                # Layer similarities
+                if 'layer' in curr_hier and 'layer' in prev_hier:
+                    for layer_path in curr_hier['layer']:
+                        if layer_path in prev_hier['layer']:
+                            sim = compute_jaccard(curr_hier['layer'][layer_path], prev_hier['layer'][layer_path])
+                            similarity[f'layer.{layer_path}'] = sim
+                
+                # Segment similarities
+                if 'segment' in curr_hier and 'segment' in prev_hier:
+                    for seg_path in curr_hier['segment']:
+                        if seg_path in prev_hier['segment']:
+                            sim = compute_jaccard(curr_hier['segment'][seg_path], prev_hier['segment'][seg_path])
+                            similarity[f'segment.{seg_path}'] = sim
+                
+                # Role similarities
+                if 'role' in curr_hier and 'role' in prev_hier:
+                    for role_path in curr_hier['role']:
+                        if role_path in prev_hier['role']:
+                            sim = compute_jaccard(curr_hier['role'][role_path], prev_hier['role'][role_path])
+                            similarity[f'role.{role_path}'] = sim
+            
             history.append(TemporalDataPoint(
-                glyph_id=str(g.id),
+                glyph_id=glyph_id_str,
                 name=g.concept_text,
                 label=extract_readable_label(g.concept_text),
                 temporal_value=item['temporal_value'],
                 temporal_key=item['temporal_key'],
                 values=semantic,
                 changes=changes,
+                similarity=similarity,
             ))
             
+            # Store for next iteration
             prev_values = semantic.copy()
+            prev_glyph_id = glyph_id_str
+            prev_embeddings = {
+                'cortex': embeddings.get(glyph_id_str, []),
+                'hierarchical': hierarchical.get(glyph_id_str, {}),
+            }
         
         return TemporalHistoryResponse(
             glyph_id=glyph_id,
             history=history,
             temporal_key=target_temporal_key or '',
             total_points=len(history),
+            grouping_key=grouping_key or '',
         )
         
     except HTTPException:
