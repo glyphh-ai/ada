@@ -196,11 +196,26 @@ class QueryService:
             storage = GlyphStorage(session)
             
             # Get all glyphs for similarity computation
-            raw_results = await storage.get_glyphs_with_embeddings(
+            glyphs, embeddings_dict = await storage.list_glyphs_with_embeddings(
                 org_id=org_id,
                 model_id=model_id,
-                filters=request.filters,
+                limit=1000,  # Get enough glyphs for search
             )
+            
+            # Convert to list of (glyph, embedding) tuples, applying filters
+            raw_results = []
+            for glyph in glyphs:
+                glyph_id_str = str(glyph.id)
+                if glyph_id_str in embeddings_dict:
+                    # Apply filters if provided
+                    if request.filters:
+                        metadata = glyph.metadata or {}
+                        matches_filter = all(
+                            metadata.get(k) == v for k, v in request.filters.items()
+                        )
+                        if not matches_filter:
+                            continue
+                    raw_results.append((glyph, embeddings_dict[glyph_id_str]))
             
             # Compute similarities using SimilarityService
             scored_results = []
@@ -439,20 +454,24 @@ class QueryService:
                 storage = GlyphStorage(session)
                 
                 # Get glyphs with embeddings
-                results = await storage.get_glyphs_with_embeddings(
+                glyphs, embeddings_dict = await storage.list_glyphs_with_embeddings(
                     org_id=org_id,
                     model_id=model_id,
-                    filters=None,
+                    limit=1000,  # Get enough glyphs for search
                 )
                 
-                if not results:
+                if not glyphs:
                     return None
                 
                 query_lower = query.lower()
                 best_match = None
                 best_score = 0
                 
-                for glyph_response, embedding in results:
+                for glyph_response in glyphs:
+                    glyph_id_str = str(glyph_response.id)
+                    if glyph_id_str not in embeddings_dict:
+                        continue
+                    embedding = embeddings_dict[glyph_id_str]
                     score = 0
                     metadata = glyph_response.metadata or {}
                     
