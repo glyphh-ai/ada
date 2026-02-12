@@ -774,6 +774,10 @@ class AsyncListenerService:
             
             # Get encoder config structure for validation
             encoder_config = getattr(encoder, 'config', None)
+            logger.info(f"Encoder config type: {type(encoder_config)}, has temporal_source: {hasattr(encoder_config, 'temporal_source') if encoder_config else 'N/A'}")
+            if encoder_config and hasattr(encoder_config, 'temporal_source'):
+                logger.info(f"Encoder config temporal_source: {encoder_config.temporal_source}")
+            
             config_structure = _get_config_structure(encoder_config)
             key_part_roles = _find_key_part_roles(encoder_config)
             temporal_role = _find_temporal_role(encoder_config)
@@ -793,6 +797,8 @@ class AsyncListenerService:
             if temporal_role:
                 l, s, r = temporal_role
                 logger.info(f"Using temporal role '{l}.{s}.{r}' for time-based identifiers")
+            else:
+                logger.info("No temporal role found - temporal edges will not be created")
             
             # Phase 2: Encoding
             await self._job_manager.update_progress(
