@@ -486,14 +486,23 @@ def _format_result(result: Any, query_type: str) -> str:
                     concept = glyph.get("concept_text", "")
                     metadata = glyph.get("metadata", {})
                     
+                    display_text = ""
                     if concept:
-                        lines.append(f"{i}. {concept}")
+                        # Try to parse if it's JSON
+                        if concept.startswith("{"):
+                            try:
+                                parsed = json.loads(concept)
+                                display_text = _format_metadata_highlights(parsed)
+                            except json.JSONDecodeError:
+                                display_text = concept[:80] + ("..." if len(concept) > 80 else "")
+                        else:
+                            display_text = concept[:80] + ("..." if len(concept) > 80 else "")
                     elif metadata:
-                        # Format key metadata fields
-                        highlights = _format_metadata_highlights(metadata)
-                        lines.append(f"{i}. {highlights}")
+                        display_text = _format_metadata_highlights(metadata)
                     else:
-                        lines.append(f"{i}. (Record {i})")
+                        display_text = f"(Record {i})"
+                    
+                    lines.append(f"{i}. {display_text}")
                 
                 if len(results) > 10:
                     lines.append(f"\n... and {len(results) - 10} more")
