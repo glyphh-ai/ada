@@ -214,7 +214,7 @@ async def _create_temporal_edges(
     
     glyph_data = []
     for glyph in glyphs:
-        metadata = glyph.metadata or {}
+        metadata = glyph.glyph_metadata or {}
         
         # Get temporal value from metadata
         temporal_value = metadata.get("temporal_value")
