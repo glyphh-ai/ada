@@ -14,6 +14,7 @@ import logging
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -437,10 +438,19 @@ async def chat_sync(
 
 
 def _sse_event(event_type: str, data: Dict[str, Any]) -> str:
-    """Format an SSE event."""
+    """Format an SSE event with UUID serialization support."""
     data["type"] = event_type
     data["timestamp"] = datetime.utcnow().isoformat()
-    return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+    return f"event: {event_type}\ndata: {json.dumps(data, default=_json_serializer)}\n\n"
+
+
+def _json_serializer(obj: Any) -> Any:
+    """Custom JSON serializer for objects not serializable by default."""
+    if isinstance(obj, UUID):
+        return str(obj)
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 def _format_result(result: Any, query_type: str) -> str:
@@ -491,4 +501,4 @@ def _format_result(result: Any, query_type: str) -> str:
             return "\n".join(lines)
     
     # Fallback to JSON
-    return json.dumps(result, indent=2)
+    return json.dumps(result, indent=2, default=_json_serializer)
