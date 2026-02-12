@@ -862,8 +862,22 @@ class ModelManager:
     async def clear_model_data(self, org_id: str, model_id: str) -> ClearDataResponse:
         """Clear all glyphs and edges for an org/model, preserving config."""
         key = (org_id, model_id)
+        
+        # Check if model exists (in memory or DB)
         if key not in self._models:
-            raise ModelNotFoundException(org_id, model_id)
+            # Try to load from DB
+            loaded = await self._load_from_db(org_id, model_id)
+            if loaded is None:
+                # Check if config exists even without loadable encoder
+                async with self._db_session_factory() as session:
+                    result = await session.execute(
+                        select(ModelConfig).where(
+                            ModelConfig.org_id == org_id,
+                            ModelConfig.model_id == model_id,
+                        )
+                    )
+                    if result.scalar_one_or_none() is None:
+                        raise ModelNotFoundException(org_id, model_id)
         
         async with self._db_session_factory() as session:
             edge_result = await session.execute(
