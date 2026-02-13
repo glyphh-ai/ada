@@ -828,6 +828,60 @@ class ModelManager:
             logger.error(f"Failed to encode concept: {e}")
             raise
     
+    async def _encode_concept_with_hierarchy(
+        self, 
+        encoder: Any, 
+        concept_text: str
+    ) -> Tuple[List[float], List[Dict[str, Any]]]:
+        """
+        Encode a concept and extract hierarchical vectors.
+        
+        Returns:
+            Tuple of (global_cortex, hierarchical_vectors)
+            where hierarchical_vectors is a list of dicts with 'level', 'path', 'embedding'
+        """
+        try:
+            from glyphh import Concept
+            
+            concept = Concept(
+                name=concept_text,
+                attributes={"text": concept_text},
+            )
+            glyph = encoder.encode(concept)
+            
+            global_cortex = glyph.global_cortex.data.astype(float).tolist()
+            hierarchical_vectors: List[Dict[str, Any]] = []
+            
+            # Extract layer-level vectors
+            for layer_name, layer in glyph.layers.items():
+                hierarchical_vectors.append({
+                    "level": "layer",
+                    "path": layer_name,
+                    "embedding": layer.cortex.data.astype(float).tolist(),
+                })
+                
+                # Extract segment-level vectors
+                for segment_name, segment in layer.segments.items():
+                    hierarchical_vectors.append({
+                        "level": "segment",
+                        "path": f"{layer_name}.{segment_name}",
+                        "embedding": segment.cortex.data.astype(float).tolist(),
+                    })
+                    
+                    # Extract role-level vectors
+                    for role_name, role_vector in segment.roles.items():
+                        hierarchical_vectors.append({
+                            "level": "role",
+                            "path": f"{layer_name}.{segment_name}.{role_name}",
+                            "embedding": role_vector.data.astype(float).tolist(),
+                        })
+            
+            return global_cortex, hierarchical_vectors
+            
+        except Exception as e:
+            logger.error(f"Failed to encode concept with hierarchy: {e}")
+            raise
+    
     async def _regenerate_edges(self, org_id: str, model_id: str) -> int:
         """Regenerate all edges for an org/model."""
         async with self._db_session_factory() as session:
