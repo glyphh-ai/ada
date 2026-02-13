@@ -897,12 +897,26 @@ class AsyncListenerService:
                             # Extract and store hierarchical vectors
                             hierarchical_vectors = _extract_hierarchical_vectors(glyph)
                             if hierarchical_vectors:
+                                # Log first glyph's hierarchical structure for debugging
+                                if encoded == 0:
+                                    levels = {}
+                                    for v in hierarchical_vectors:
+                                        level = v['level']
+                                        if level not in levels:
+                                            levels[level] = []
+                                        levels[level].append(v['path'])
+                                    logger.info(f"Hierarchical vectors for first glyph: {levels}")
+                                
                                 await storage.create_glyph_vectors_batch(
                                     glyph_id=glyph_response.glyph_id,
                                     org_id=org_id,
                                     model_id=model_id,
                                     vectors=hierarchical_vectors,
                                 )
+                            else:
+                                # Log if no hierarchical vectors found
+                                if encoded == 0:
+                                    logger.warning(f"No hierarchical vectors extracted from glyph. Has layers: {hasattr(glyph, 'layers')}, layers: {list(glyph.layers.keys()) if hasattr(glyph, 'layers') and glyph.layers else 'None'}")
                             
                             encoded += 1
                             processed += 1
