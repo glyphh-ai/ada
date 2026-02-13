@@ -32,12 +32,26 @@ class ViewerLayerData(BaseModel):
     cortex: List[bool] = Field(..., description="Cortex bit vector")
 
 
+class ViewerSegmentData(BaseModel):
+    """Segment data for viewer (within a layer)."""
+    path: str = Field(..., description="Segment path (e.g., 'layer0.segment0')")
+    cortex: List[bool] = Field(..., description="Segment cortex bit vector")
+
+
+class ViewerRoleData(BaseModel):
+    """Role data for viewer (within a segment)."""
+    path: str = Field(..., description="Role path (e.g., 'layer0.segment0.role0')")
+    cortex: List[bool] = Field(..., description="Role cortex bit vector")
+
+
 class ViewerGlyphData(BaseModel):
     """Glyph data for 3D viewer."""
     name: str = Field(..., description="Glyph concept text (display name)")
     glyph_id: str = Field(..., description="Glyph UUID")
     node_type: str = Field(default="concept", description="Node type")
     layers: List[ViewerLayerData] = Field(default_factory=list, description="Layer cortex data")
+    segments: List[ViewerSegmentData] = Field(default_factory=list, description="Segment cortex data")
+    roles: List[ViewerRoleData] = Field(default_factory=list, description="Role cortex data")
     semantic: Dict[str, Any] = Field(default_factory=dict, description="Semantic metadata")
 
 
@@ -140,11 +154,20 @@ async def get_viewer_data(
         if not glyphs:
             return ViewerDataResponse(glyphs=[], edges=ViewerEdges(), total=0)
         
-        # Get hierarchical embeddings for layer data
+        # Get hierarchical embeddings for layer, segment, and role data
         glyph_uuids = [g.id for g in glyphs]
         hierarchical = await storage.get_hierarchical_embeddings(
             org_id, model_id, glyph_uuids
         )
+        
+        # Debug: log hierarchical structure for first glyph
+        if hierarchical:
+            sample_id = list(hierarchical.keys())[0] if hierarchical else None
+            if sample_id:
+                sample = hierarchical[sample_id]
+                logger.info(f"Hierarchical embeddings sample for {sample_id[:8]}...: levels={list(sample.keys())}")
+                for level, paths in sample.items():
+                    logger.info(f"  {level}: {len(paths)} paths - {list(paths.keys())[:3]}...")
         
         # Build viewer glyph data
         viewer_glyphs: List[ViewerGlyphData] = []
@@ -158,8 +181,13 @@ async def get_viewer_data(
             
             # Build layer data from hierarchical embeddings
             layers: List[ViewerLayerData] = []
+            segments: List[ViewerSegmentData] = []
+            roles: List[ViewerRoleData] = []
+            
             if glyph_id_str in hierarchical:
                 glyph_hier = hierarchical[glyph_id_str]
+                
+                # Build layer data
                 if 'layer' in glyph_hier:
                     for layer_path, layer_embedding in glyph_hier['layer'].items():
                         # Extract layer index from path (e.g., "layer0" -> 0)
@@ -170,6 +198,18 @@ async def get_viewer_data(
                         
                         layer_bits = embedding_to_cortex_bits(layer_embedding)
                         layers.append(ViewerLayerData(index=layer_idx, cortex=layer_bits))
+                
+                # Build segment data
+                if 'segment' in glyph_hier:
+                    for seg_path, seg_embedding in glyph_hier['segment'].items():
+                        seg_bits = embedding_to_cortex_bits(seg_embedding)
+                        segments.append(ViewerSegmentData(path=seg_path, cortex=seg_bits))
+                
+                # Build role data
+                if 'role' in glyph_hier:
+                    for role_path, role_embedding in glyph_hier['role'].items():
+                        role_bits = embedding_to_cortex_bits(role_embedding)
+                        roles.append(ViewerRoleData(path=role_path, cortex=role_bits))
             
             # If no layer data, use cortex as layer 0
             if not layers and cortex_bits:
@@ -212,6 +252,8 @@ async def get_viewer_data(
                 glyph_id=glyph_id_str,
                 node_type="concept",
                 layers=layers,
+                segments=segments,
+                roles=roles,
                 semantic=semantic,
             ))
         
