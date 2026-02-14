@@ -144,6 +144,9 @@ async def deploy_model(
         # Persist stored procedures from the model (Requirements 8.4, 8.5)
         await _persist_model_procedures(manager, org_id, model_id)
         
+        # Record version history (Requirement 31.1, 31.2)
+        await _record_version_history(manager, org_id, model_id)
+        
         base_url = f"{settings.host}:{settings.port}"
         
         # Start async schema index building
@@ -392,6 +395,73 @@ async def _persist_model_procedures(
         logger.error(f"Failed to persist procedures for {org_id}/{model_id}: {e}")
 
 
+async def _record_version_history(
+    manager: ModelManager,
+    org_id: str,
+    model_id: str,
+    deployed_by: Optional[str] = None,
+) -> None:
+    """
+    Record version history for a deployed model.
+    
+    Creates a new version history entry and marks previous versions as non-current.
+    
+    Args:
+        manager: The ModelManager instance
+        org_id: Organization ID
+        model_id: Model ID
+        deployed_by: User ID or email of deployer (optional)
+    
+    Validates: Requirements 31.1, 31.2 - Version history tracking
+    """
+    try:
+        # Get the deployed model
+        model = await manager.get_model(org_id, model_id)
+        if model is None:
+            logger.warning(f"Model not found for version history: {org_id}/{model_id}")
+            return
+        
+        # Get SDK model version
+        sdk_model = model.sdk_model if hasattr(model, 'sdk_model') else model
+        version = getattr(sdk_model, 'version', '1.0.0')
+        
+        # Import database components
+        from infrastructure.database import async_session_maker
+        from domains.models.db_models import ModelVersionHistory
+        from sqlalchemy import update
+        
+        async with async_session_maker() as session:
+            # Mark previous versions as non-current
+            await session.execute(
+                update(ModelVersionHistory)
+                .where(ModelVersionHistory.org_id == org_id)
+                .where(ModelVersionHistory.model_id == model_id)
+                .values(is_current=0)
+            )
+            
+            # Create new version history entry
+            history_entry = ModelVersionHistory(
+                org_id=org_id,
+                model_id=model_id,
+                version=version,
+                deployed_by=deployed_by,
+                is_current=1,
+                model_metadata={
+                    "dimension": getattr(sdk_model.encoder_config, 'dimension', None) if hasattr(sdk_model, 'encoder_config') else None,
+                    "glyph_count": len(sdk_model.glyphs) if hasattr(sdk_model, 'glyphs') else 0,
+                }
+            )
+            session.add(history_entry)
+            await session.commit()
+            
+            logger.info(f"Recorded version history for {org_id}/{model_id}: v{version}")
+            
+    except ImportError as e:
+        logger.warning(f"Database components not available: {e}")
+    except Exception as e:
+        logger.error(f"Failed to record version history for {org_id}/{model_id}: {e}")
+
+
 async def _validate_model_dimension(content: bytes) -> Optional[str]:
     """
     Validate model dimension against runtime limit.
@@ -551,6 +621,74 @@ async def list_tokens() -> Dict[str, List[Dict[str, Any]]]:
 @router.delete("/tokens/{token_id}")
 async def revoke_token(token_id: str) -> Dict[str, str]:
     return {"status": "revoked", "token_id": token_id}
+
+
+class VersionHistoryEntry(BaseModel):
+    """Version history entry."""
+    version: str
+    deployed_at: datetime
+    deployed_by: Optional[str] = None
+    is_current: bool
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class VersionHistoryResponse(BaseModel):
+    """Version history response."""
+    org_id: str
+    model_id: str
+    versions: List[VersionHistoryEntry]
+
+
+@router.get("/models/{org_id}/{model_id}/versions", response_model=VersionHistoryResponse)
+async def get_version_history(
+    org_id: str,
+    model_id: str,
+) -> VersionHistoryResponse:
+    """
+    Get version history for a model.
+    
+    Returns all deployed versions of the model, ordered by deployment time (newest first).
+    History is retained even after model deletion.
+    
+    Validates: Requirements 31.3, 31.6 - Version history API and retention
+    """
+    try:
+        from infrastructure.database import async_session_maker
+        from domains.models.db_models import ModelVersionHistory
+        from sqlalchemy import select
+        
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(ModelVersionHistory)
+                .where(ModelVersionHistory.org_id == org_id)
+                .where(ModelVersionHistory.model_id == model_id)
+                .order_by(ModelVersionHistory.deployed_at.desc())
+            )
+            history_entries = result.scalars().all()
+            
+            versions = [
+                VersionHistoryEntry(
+                    version=entry.version,
+                    deployed_at=entry.deployed_at,
+                    deployed_by=entry.deployed_by,
+                    is_current=entry.is_current == 1,
+                    metadata=entry.model_metadata,
+                )
+                for entry in history_entries
+            ]
+            
+            return VersionHistoryResponse(
+                org_id=org_id,
+                model_id=model_id,
+                versions=versions,
+            )
+            
+    except ImportError as e:
+        logger.warning(f"Database components not available: {e}")
+        return VersionHistoryResponse(org_id=org_id, model_id=model_id, versions=[])
+    except Exception as e:
+        logger.error(f"Failed to get version history for {org_id}/{model_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get version history: {str(e)}")
 
 
 @router.get("/models/{org_id}/{model_id}/metadata", response_model=ModelMetadataResponse)
