@@ -194,7 +194,6 @@ from api.routes import (
     health_router,
     org_scoped_router,
     listeners_router,
-    nl_query_router,
     jobs_router,
     chat_router,
     charts_router,
@@ -213,7 +212,6 @@ app.include_router(viewer_router)
 app.include_router(listeners_router)
 app.include_router(jobs_router)
 app.include_router(org_scoped_router)
-app.include_router(nl_query_router)
 app.include_router(chat_router)
 
 
