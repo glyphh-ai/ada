@@ -514,17 +514,11 @@ class MCPServer:
                 message="Complete"
             )
         
-        # Build response (Requirement 7.2: include procedure_name when matched)
-        response = {
-            "result": result.result,
-            "query_type": result.query_type,
-            "match_method": result.match_method,
-            "confidence": result.confidence,
-            "query_time_ms": result.query_time_ms,
-            "translated_query": result.translated_query if debug else None,
-        }
+        # Build response with FactTree (Validates: Requirements 8.1, 8.2, 11.1)
+        # Use to_dict() which serializes FactTree via to_json() and includes legacy fields
+        response = result.to_dict()
         
-        # Include procedure_name if matched via stored procedure
+        # Include procedure_name if matched via stored procedure (Requirement 7.2)
         if result.match_method == "stored_procedure" and hasattr(result, 'procedure_name'):
             response["procedure_name"] = result.procedure_name
         

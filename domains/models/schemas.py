@@ -97,31 +97,6 @@ class FactTreeRequest(BaseModel):
     branching_factor: int = Field(default=5, ge=1, le=20, description="Maximum children per node")
 
 
-class FactTreeNode(BaseModel):
-    """Node in a fact tree"""
-    id: str
-    claim: str
-    supporting_glyphs: List[UUID]
-    confidence: float = Field(..., ge=0, le=1)
-    children: List[str] = Field(default_factory=list)
-
-
-class Citation(BaseModel):
-    """Citation to a source glyph"""
-    glyph_id: UUID
-    concept_text: str
-    relevance_score: float
-
-
-class FactTreeResponse(BaseModel):
-    """Response from fact tree generation"""
-    root_claim: str
-    nodes: List[FactTreeNode]
-    confidence: float
-    citations: List[Citation]
-    generation_time_ms: float
-
-
 class TemporalPredictRequest(BaseModel):
     """Request for temporal prediction"""
     current_state: List[str] = Field(..., description="Current state concepts", min_length=1)

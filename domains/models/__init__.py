@@ -23,7 +23,6 @@ from domains.models.schemas import (
     SimilaritySearchResponse,
     ScoredGlyph,
     FactTreeRequest,
-    FactTreeResponse,
     TemporalPredictRequest,
     TemporalPredictResponse,
     # Model config schemas
@@ -61,7 +60,6 @@ __all__ = [
     "SimilaritySearchResponse",
     "ScoredGlyph",
     "FactTreeRequest",
-    "FactTreeResponse",
     "TemporalPredictRequest",
     "TemporalPredictResponse",
     "ModelConfigUpdate",

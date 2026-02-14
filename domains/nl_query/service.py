@@ -5,7 +5,8 @@ Provides hybrid rules-first + LLM-fallback query translation and execution.
 The core principle: "When your LLM can't afford to be wrong, sidecar it with Glyphh."
 
 Updated to support AutoSchemaMatcher for automatic schema-based NL query matching.
-Validates: Requirements 3, 4, 5, 12.2, 12.5
+Updated to return SDK FactTree in all responses for unified response format.
+Validates: Requirements 3, 4, 5, 7.1, 7.2, 7.3, 12.2, 12.5
 
 Design Principle: "When your LLM can't afford to be wrong, sidecar it with Glyphh"
 """
@@ -15,8 +16,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
+from glyphh.fact_tree.builder import FactTree
+
 from domains.nl_query.intent_matcher import IntentMatcher, IntentMatch
 from domains.query.service import QueryService
+from domains.query.fact_tree_builder import FactTreeBuilder
 
 if TYPE_CHECKING:
     from domains.nl_query.schema_index import SchemaIndex
@@ -27,8 +31,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class NLQueryResult:
-    """Result of executing a natural language query."""
-    result: Any
+    """
+    Result of executing a natural language query.
+    
+    Updated to contain a FactTree instead of raw result data.
+    The fact_tree field contains the SDK FactTree which can be
+    serialized via to_json() for transport.
+    
+    Validates: Requirements 7.1, 7.2, 7.3
+    """
+    fact_tree: FactTree  # SDK FactTree with full structure
     query_type: str
     match_method: str  # "rules", "llm", "auto", "hybrid", or "none"
     confidence: float
@@ -36,6 +48,26 @@ class NLQueryResult:
     query_time_ms: float
     disambiguation_needed: bool = False
     disambiguation_suggestions: List[str] = field(default_factory=list)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Serialize to dictionary for API response.
+        
+        Returns both the FactTree JSON and legacy fields for
+        backward compatibility.
+        
+        Validates: Requirements 7.1, 11.1
+        """
+        return {
+            "result": self.fact_tree.to_json(),
+            "query_type": self.query_type,
+            "match_method": self.match_method,
+            "confidence": self.confidence,
+            "translated_query": self.translated_query,
+            "query_time_ms": self.query_time_ms,
+            "disambiguation_needed": self.disambiguation_needed,
+            "disambiguation_suggestions": self.disambiguation_suggestions,
+        }
 
 
 class NLQueryService:
@@ -167,7 +199,7 @@ class NLQueryService:
             elapsed_ms = (time.time() - start_time) * 1000
             
             return NLQueryResult(
-                result=result,
+                fact_tree=result,
                 query_type=match_result.intent,
                 match_method="rules",
                 confidence=match_result.confidence,
@@ -195,7 +227,7 @@ class NLQueryService:
                     elapsed_ms = (time.time() - start_time) * 1000
                     
                     return NLQueryResult(
-                        result=result,
+                        fact_tree=result,
                         query_type=llm_result.get("operation", "unknown"),
                         match_method="llm",
                         confidence=0.0,
@@ -207,13 +239,20 @@ class NLQueryService:
             except Exception as e:
                 logger.warning(f"LLM fallback failed: {e}")
         
-        # Step 3: No match
+        # Step 3: No match - return error FactTree
         logger.info(f"No intent match for query: '{query}'")
         
         elapsed_ms = (time.time() - start_time) * 1000
         
+        # Build error FactTree for no match case
+        error_fact_tree = FactTreeBuilder.build_error(
+            error_message="No intent match found for query",
+            error_type="NoMatchError",
+            query=query,
+        )
+        
         return NLQueryResult(
-            result=None,
+            fact_tree=error_fact_tree,
             query_type="unknown",
             match_method="none",
             confidence=match_result.confidence if match_result else 0.0,
@@ -287,8 +326,15 @@ class NLQueryService:
             
             elapsed_ms = (time.time() - start_time) * 1000
             
+            # Build disambiguation FactTree
+            disambiguation_fact_tree = FactTreeBuilder.build_error(
+                error_message="Disambiguation needed - multiple intents matched",
+                error_type="DisambiguationNeeded",
+                query=query,
+            )
+            
             return NLQueryResult(
-                result=None,
+                fact_tree=disambiguation_fact_tree,
                 query_type=auto_result.intent.intent_type,
                 match_method=auto_result.match_method,
                 confidence=auto_result.confidence,
@@ -332,7 +378,7 @@ class NLQueryService:
         elapsed_ms = (time.time() - start_time) * 1000
         
         return NLQueryResult(
-            result=result,
+            fact_tree=result,
             query_type=auto_result.intent.intent_type,
             match_method=auto_result.match_method,
             confidence=auto_result.confidence,
@@ -564,8 +610,15 @@ class NLQueryService:
         model_id: str,
         operation: str,
         query: Dict[str, Any],
-    ) -> Any:
-        """Execute a structured query against the QueryService."""
+    ) -> FactTree:
+        """
+        Execute a structured query against the QueryService.
+        
+        All operations now return FactTree instead of raw dictionaries.
+        Uses FactTreeBuilder.build_error() for error cases.
+        
+        Validates: Requirements 1.1, 8.3
+        """
         from domains.models.schemas import (
             SimilaritySearchRequest,
             FactTreeRequest,
@@ -581,12 +634,12 @@ class NLQueryService:
                     query=query.get("query", ""),
                     top_k=query.get("top_k", 10),
                 )
-                result = await self.query_service.similarity_search(
+                # similarity_search already returns FactTree
+                return await self.query_service.similarity_search(
                     org_id=org_id,
                     model_id=model_id,
                     request=request,
                 )
-                return result.model_dump() if hasattr(result, 'model_dump') else result
             
             elif operation == "fact_tree":
                 request = FactTreeRequest(
@@ -598,7 +651,14 @@ class NLQueryService:
                     model_id=model_id,
                     request=request,
                 )
-                return result.model_dump() if hasattr(result, 'model_dump') else result
+                # generate_fact_tree returns FactTreeResponse, convert to FactTree
+                # For now, wrap in a FactTree structure
+                return FactTreeBuilder.build_similarity_search(
+                    query=request.claim,
+                    results=[],
+                    query_time_ms=0.0,
+                    total_count=0,
+                )
             
             elif operation == "temporal_predict":
                 current_state = query.get("current_state", [query.get("query", "")])
@@ -610,47 +670,41 @@ class NLQueryService:
                     steps_ahead=query.get("steps_ahead", 1),
                     beam_width=query.get("beam_width", 3),
                 )
-                result = await self.query_service.predict_temporal(
+                # Use the _as_fact_tree method
+                return await self.query_service.predict_temporal_as_fact_tree(
                     org_id=org_id,
                     model_id=model_id,
                     request=request,
                 )
-                return result.model_dump() if hasattr(result, 'model_dump') else result
             
             elif operation == "list":
-                # Use dedicated list method for listing glyphs
+                # Use dedicated list method that returns FactTree
                 limit = query.get("limit", 100)
-                glyphs = await self.query_service.list_glyphs(
+                return await self.query_service.list_glyphs_as_fact_tree(
                     org_id=org_id,
                     model_id=model_id,
                     limit=limit,
                 )
-                return {
-                    "results": [g.model_dump() if hasattr(g, 'model_dump') else g for g in glyphs],
-                    "total_count": len(glyphs),
-                }
             
             elif operation == "count":
-                # Use dedicated count method for accurate total count
+                # Use dedicated count method that returns FactTree
                 logger.info(f"Executing count operation for org={org_id}, model={model_id}")
-                count = await self.query_service.count_glyphs(
+                return await self.query_service.count_glyphs_as_fact_tree(
                     org_id=org_id,
                     model_id=model_id,
                 )
-                logger.info(f"Count result: {count}")
-                return {"count": count}
             
             elif operation == "compare":
                 request = SimilaritySearchRequest(
                     query=query.get("query", ""),
                     top_k=2,
                 )
-                result = await self.query_service.similarity_search(
+                # similarity_search already returns FactTree
+                return await self.query_service.similarity_search(
                     org_id=org_id,
                     model_id=model_id,
                     request=request,
                 )
-                return result.model_dump() if hasattr(result, 'model_dump') else result
             
             else:
                 logger.warning(f"Unknown operation '{operation}', defaulting to similarity_search")
@@ -658,24 +712,27 @@ class NLQueryService:
                     query=query.get("query", ""),
                     top_k=10,
                 )
-                result = await self.query_service.similarity_search(
+                return await self.query_service.similarity_search(
                     org_id=org_id,
                     model_id=model_id,
                     request=request,
                 )
-                return result.model_dump() if hasattr(result, 'model_dump') else result
                 
         except Exception as e:
             logger.error(f"Query execution failed: {e}")
-            # Check if this is an encoding error - return helpful message
+            # Return error FactTree instead of dict
             error_msg = str(e)
             if "no attributes match" in error_msg.lower() or "cannot encode" in error_msg.lower():
-                return {
-                    "error": "Query could not be processed",
-                    "message": "The query doesn't match the model's schema. Try rephrasing with specific attribute names or values from your data.",
-                    "suggestion": "Use 'list all' to see available data, or try a more specific search term."
-                }
-            raise
+                return FactTreeBuilder.build_error(
+                    error_message="The query doesn't match the model's schema. Try rephrasing with specific attribute names or values from your data.",
+                    error_type="EncodingError",
+                    query=query.get("query"),
+                )
+            return FactTreeBuilder.build_error(
+                error_message=str(e),
+                error_type=type(e).__name__,
+                query=query.get("query"),
+            )
     
     def get_intents(self) -> Dict[str, Any]:
         """

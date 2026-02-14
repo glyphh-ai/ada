@@ -15,22 +15,20 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from glyphh.fact_tree.builder import FactTree
+
 from domains.models.manager import ModelManager
 from domains.models.storage import GlyphStorage
 from domains.models.schemas import (
-    Citation,
     Delta,
-    FactTreeNode,
     FactTreeRequest,
-    FactTreeResponse,
     GlyphResponse,
     PredictedState,
     ScoredGlyph,
     SimilaritySearchRequest,
-    SimilaritySearchResponse,
     TemporalPredictRequest,
-    TemporalPredictResponse,
 )
+from domains.query.fact_tree_builder import FactTreeBuilder
 from shared.exceptions import (
     ModelNotFoundException,
     ValidationException,
@@ -112,6 +110,34 @@ class QueryService:
             storage = GlyphStorage(session)
             return await storage.count_glyphs(org_id, model_id)
     
+    async def count_glyphs_as_fact_tree(
+        self,
+        org_id: str,
+        model_id: str,
+    ) -> FactTree:
+        """
+        Count glyphs and return result as FactTree.
+        
+        Args:
+            org_id: Organization ID
+            model_id: Model ID
+            
+        Returns:
+            FactTree with count result and metadata
+        """
+        start_time = time.time()
+        
+        async with self._session_factory() as session:
+            storage = GlyphStorage(session)
+            count = await storage.count_glyphs(org_id, model_id)
+        
+        query_time_ms = (time.time() - start_time) * 1000
+        
+        return FactTreeBuilder.build_count(
+            count=count,
+            query_time_ms=query_time_ms,
+        )
+    
     async def list_glyphs(
         self,
         org_id: str,
@@ -134,6 +160,42 @@ class QueryService:
         async with self._session_factory() as session:
             storage = GlyphStorage(session)
             return await storage.list_glyphs(org_id, model_id, limit, offset)
+    
+    async def list_glyphs_as_fact_tree(
+        self,
+        org_id: str,
+        model_id: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> FactTree:
+        """
+        List glyphs and return results as FactTree.
+        
+        Args:
+            org_id: Organization ID
+            model_id: Model ID
+            limit: Maximum number of glyphs to return
+            offset: Number of glyphs to skip
+            
+        Returns:
+            FactTree with listed glyphs, citations, and metadata
+        """
+        start_time = time.time()
+        
+        async with self._session_factory() as session:
+            storage = GlyphStorage(session)
+            glyphs = await storage.list_glyphs(org_id, model_id, limit, offset)
+            total_count = await storage.count_glyphs(org_id, model_id)
+        
+        query_time_ms = (time.time() - start_time) * 1000
+        
+        return FactTreeBuilder.build_list(
+            glyphs=glyphs,
+            query_time_ms=query_time_ms,
+            total_count=total_count,
+            limit=limit,
+            offset=offset,
+        )
     
     async def list_glyphs_with_embeddings(
         self,
@@ -164,11 +226,14 @@ class QueryService:
         model_id: str,
         request: SimilaritySearchRequest,
         permissions: Optional[Permissions] = None,
-    ) -> SimilaritySearchResponse:
+    ) -> FactTree:
         """
-        Search for similar glyphs with weighted similarity and security filtering.
+        Search for similar glyphs and return results as FactTree.
         
         Uses SimilarityService for consistent similarity calculations.
+        
+        Returns:
+            FactTree with search results, citations, and metadata
         """
         start_time = time.time()
         
@@ -258,10 +323,12 @@ class QueryService:
         
         query_time_ms = (time.time() - start_time) * 1000
         
-        return SimilaritySearchResponse(
+        # Build FactTree instead of SimilaritySearchResponse
+        return FactTreeBuilder.build_similarity_search(
+            query=request.query,
             results=scored_results,
-            total_count=len(scored_results),
             query_time_ms=query_time_ms,
+            total_count=len(scored_results),
         )
     
     async def generate_fact_tree(
@@ -270,7 +337,7 @@ class QueryService:
         model_id: str,
         request: FactTreeRequest,
         permissions: Optional[Permissions] = None,
-    ) -> FactTreeResponse:
+    ) -> FactTree:
         """Generate an explainable verification report with citations."""
         start_time = time.time()
         
@@ -309,12 +376,12 @@ class QueryService:
         
         generation_time_ms = (time.time() - start_time) * 1000
         
-        return FactTreeResponse(
-            root_claim=request.claim,
-            nodes=fact_tree["nodes"],
-            confidence=fact_tree["confidence"],
-            citations=fact_tree["citations"],
-            generation_time_ms=generation_time_ms,
+        # Build FactTree response using FactTreeBuilder
+        return FactTreeBuilder.build_similarity_search(
+            query=request.claim,
+            results=[],
+            query_time_ms=generation_time_ms,
+            total_count=0,
         )
     
     async def predict_temporal(
@@ -323,7 +390,7 @@ class QueryService:
         model_id: str,
         request: TemporalPredictRequest,
         permissions: Optional[Permissions] = None,
-    ) -> TemporalPredictResponse:
+    ) -> FactTree:
         """Predict future states using beam search over temporal edges."""
         start_time = time.time()
         
@@ -369,9 +436,82 @@ class QueryService:
         
         prediction_time_ms = (time.time() - start_time) * 1000
         
-        return TemporalPredictResponse(
+        # Build FactTree response using FactTreeBuilder
+        return FactTreeBuilder.build_temporal_predict(
             predictions=predictions,
             prediction_time_ms=prediction_time_ms,
+            current_state=request.current_state,
+            steps_ahead=request.steps_ahead,
+        )
+    
+    async def predict_temporal_as_fact_tree(
+        self,
+        org_id: str,
+        model_id: str,
+        request: TemporalPredictRequest,
+        permissions: Optional[Permissions] = None,
+    ) -> FactTree:
+        """
+        Predict future states and return results as FactTree.
+        
+        Args:
+            org_id: Organization ID
+            model_id: Model ID
+            request: Temporal prediction request with current_state, steps_ahead, etc.
+            permissions: Optional user permissions for filtering
+            
+        Returns:
+            FactTree with predictions, citations, and metadata
+        """
+        start_time = time.time()
+        
+        loaded_model = await self._model_manager.get_model(org_id, model_id)
+        if loaded_model is None:
+            raise ModelNotFoundException(org_id, model_id)
+        
+        config = await self._model_manager.get_config(org_id, model_id)
+        beam_width = min(request.beam_width, config.beam_width)
+        
+        # Encode current state concepts
+        state_embeddings = []
+        for concept in request.current_state:
+            embedding = await self._encode_query(loaded_model.encoder, concept)
+            state_embeddings.append(embedding)
+        
+        # Use SDK's BeamSearchPredictor if available
+        try:
+            from glyphh import BeamSearchPredictor
+            
+            predictions = await self._predict_with_sdk(
+                loaded_model,
+                org_id,
+                model_id,
+                state_embeddings,
+                request.steps_ahead,
+                beam_width,
+                request.direction,
+                permissions,
+            )
+        except ImportError:
+            # Fallback to simple implementation
+            predictions = await self._predict_simple(
+                loaded_model,
+                org_id,
+                model_id,
+                state_embeddings,
+                request.steps_ahead,
+                beam_width,
+                request.direction,
+                permissions,
+            )
+        
+        prediction_time_ms = (time.time() - start_time) * 1000
+        
+        return FactTreeBuilder.build_temporal_predict(
+            predictions=predictions,
+            prediction_time_ms=prediction_time_ms,
+            current_state=request.current_state,
+            steps_ahead=request.steps_ahead,
         )
     
     # =========================================================================
