@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from glyphh.fact_tree.builder import FactTree
 
-from domains.nl_query.service import NLQueryResult
+from domains.nl_query.service import NLQueryResult, ResponseState, AskPayload
 from domains.query.fact_tree_builder import FactTreeBuilder
 
 
@@ -60,8 +60,9 @@ def fact_tree_strategy(draw) -> FactTree:
 
 @composite
 def nl_query_result_strategy(draw) -> NLQueryResult:
-    """Generate a valid NLQueryResult for testing."""
+    """Generate a valid NLQueryResult with DONE state for testing."""
     return NLQueryResult(
+        state=ResponseState.DONE,
         fact_tree=draw(fact_tree_strategy()),
         query_type=draw(st.sampled_from([
             "similarity_search", "count", "list", "temporal_predict", "fact_tree", "unknown"
@@ -77,8 +78,6 @@ def nl_query_result_strategy(draw) -> NLQueryResult:
             )
         )),
         query_time_ms=draw(st.floats(min_value=0.0, max_value=10000.0, allow_nan=False)),
-        disambiguation_needed=draw(st.booleans()),
-        disambiguation_suggestions=draw(st.lists(st.text(min_size=1, max_size=50), max_size=3)),
     )
 
 
@@ -155,41 +154,42 @@ class TestNLQueryResultPreservesMetadataFields:
     @settings(max_examples=100)
     def test_to_dict_contains_all_required_fields(self, nl_result: NLQueryResult):
         """
-        Property test: to_dict() contains all required metadata fields.
+        Property test: to_dict() contains all required fields for state pattern.
         
         **Validates: Requirements 7.2**
         """
         result_dict = nl_result.to_dict()
         
         required_fields = {
-            "result",
+            "state",
             "query_type",
             "match_method",
             "confidence",
             "query_time_ms",
-            "translated_query",
-            "disambiguation_needed",
-            "disambiguation_suggestions",
+            "trace_id",
         }
         
         for field in required_fields:
             assert field in result_dict, f"Missing required field: {field}"
+        
+        # DONE state must include fact_tree
+        if nl_result.state == ResponseState.DONE:
+            assert "fact_tree" in result_dict
     
     @given(nl_query_result_strategy())
     @settings(max_examples=100)
-    def test_to_dict_result_is_fact_tree_json(self, nl_result: NLQueryResult):
+    def test_to_dict_fact_tree_is_valid_json(self, nl_result: NLQueryResult):
         """
-        Property test: to_dict() result field contains FactTree JSON.
+        Property test: to_dict() fact_tree field contains valid FactTree JSON.
         
         **Validates: Requirements 7.1**
         """
         result_dict = nl_result.to_dict()
         
-        assert "result" in result_dict
-        assert isinstance(result_dict["result"], dict)
+        assert "fact_tree" in result_dict
+        assert isinstance(result_dict["fact_tree"], dict)
         
-        # Verify FactTree JSON structure
-        fact_tree_json = result_dict["result"]
+        fact_tree_json = result_dict["fact_tree"]
         assert "description" in fact_tree_json
         assert "children" in fact_tree_json
         assert "citations" in fact_tree_json
@@ -216,10 +216,10 @@ class TestNLQueryResultPreservesMetadataFields:
         
         **Validates: Requirements 7.2**
         """
-        # Create a simple FactTree
         fact_tree = FactTreeBuilder.build_count(count=42, query_time_ms=10.0)
         
         nl_result = NLQueryResult(
+            state=ResponseState.DONE,
             fact_tree=fact_tree,
             query_type=query_type,
             match_method=match_method,
@@ -235,21 +235,35 @@ class TestNLQueryResultPreservesMetadataFields:
         assert result_dict["confidence"] == confidence
         assert result_dict["query_time_ms"] == query_time_ms
     
-    @given(nl_query_result_strategy())
-    @settings(max_examples=50)
-    def test_disambiguation_fields_preserved(self, nl_result: NLQueryResult):
+    def test_ask_state_backward_compat_disambiguation(self):
         """
-        Property test: Disambiguation fields are preserved in to_dict().
+        Test: ASK state exposes backward-compat disambiguation properties.
         
         **Validates: Requirements 7.3**
         """
+        nl_result = NLQueryResult(
+            state=ResponseState.ASK,
+            query_type="unknown",
+            match_method="auto",
+            confidence=0.5,
+            ask=AskPayload(
+                question="Your query is ambiguous.",
+                disambiguation_options=[
+                    {"intent": "find", "confidence": 0.6, "suggestion": "Did you mean 'find'?"},
+                    {"intent": "count", "confidence": 0.5, "suggestion": "Did you mean 'count'?"},
+                ],
+            ),
+        )
+        
+        # Backward compat properties
+        assert nl_result.disambiguation_needed is True
+        assert len(nl_result.disambiguation_suggestions) == 2
+        
+        # to_dict includes ask payload
         result_dict = nl_result.to_dict()
-        
-        assert "disambiguation_needed" in result_dict
-        assert result_dict["disambiguation_needed"] == nl_result.disambiguation_needed
-        
-        assert "disambiguation_suggestions" in result_dict
-        assert result_dict["disambiguation_suggestions"] == nl_result.disambiguation_suggestions
+        assert result_dict["state"] == "ASK"
+        assert "ask" in result_dict
+        assert result_dict["ask"]["question"] == "Your query is ambiguous."
     
     @given(data=st.data())
     @settings(max_examples=30)
@@ -269,6 +283,7 @@ class TestNLQueryResultPreservesMetadataFields:
         fact_tree = FactTreeBuilder.build_count(count=42, query_time_ms=10.0)
         
         nl_result = NLQueryResult(
+            state=ResponseState.DONE,
             fact_tree=fact_tree,
             query_type="count",
             match_method="rules",
