@@ -9,6 +9,9 @@ Validates: Requirement 13.5
 """
 
 import asyncio
+import gzip
+import io
+import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -47,6 +50,8 @@ class DeployResponse(BaseModel):
     status: str = "deployed"
     schema_index_status: str = "not_started"  # "not_started", "building", "ready", "failed"
     schema_index_message: Optional[str] = None
+    concepts_load_status: str = "not_applicable"  # "not_applicable", "loading", "failed"
+    concepts_load_job_id: Optional[str] = None
 
 
 class SchemaIndexStatusResponse(BaseModel):
@@ -98,6 +103,38 @@ async def get_current_user(
     if settings.deployment_mode == "local":
         return None
     return None
+
+
+def _extract_concepts_from_model(content: bytes) -> Optional[List[Dict[str, Any]]]:
+    """
+    Extract concepts from a .glyphh model file.
+    
+    The .glyphh format is gzip-compressed JSON. If the model contains
+    a "concepts" field, return it for auto-loading on deploy.
+    
+    Args:
+        content: Raw bytes of the .glyphh file
+    
+    Returns:
+        List of concept records if present, None otherwise
+    
+    Validates: Requirements 2.1
+    """
+    try:
+        # Decompress gzip content
+        decompressed = gzip.decompress(content)
+        model_data = json.loads(decompressed.decode('utf-8'))
+        
+        # Extract concepts if present
+        concepts = model_data.get("concepts")
+        if concepts is not None and isinstance(concepts, list) and len(concepts) > 0:
+            logger.info(f"Found {len(concepts)} embedded concepts in model")
+            return concepts
+        
+        return None
+    except Exception as e:
+        logger.warning(f"Could not extract concepts from model: {e}")
+        return None
 
 
 # Endpoints
@@ -171,6 +208,29 @@ async def deploy_model(
                 _build_schema_index_async(manager, org_id, model_id)
             )
         
+        # Check for embedded concepts and auto-trigger loading
+        # Validates: Requirements 2.1, 2.2, 2.5, 2.6
+        concepts_load_status = "not_applicable"
+        concepts_load_job_id = None
+        
+        concepts = _extract_concepts_from_model(content)
+        if concepts:
+            try:
+                from api.routes.listeners import get_async_listener_service
+                async_service = get_async_listener_service()
+                job_id = await async_service.start_load(
+                    org_id=org_id,
+                    model_id=model_id,
+                    records=concepts,
+                    batch_size=50,
+                )
+                concepts_load_status = "loading"
+                concepts_load_job_id = str(job_id)
+                logger.info(f"Auto-triggered concepts load job {job_id} for {org_id}/{model_id} with {len(concepts)} concepts")
+            except Exception as e:
+                logger.error(f"Failed to start concepts load: {e}")
+                concepts_load_status = "failed"
+        
         return DeployResponse(
             org_id=org_id,
             model_id=model_id,
@@ -179,6 +239,8 @@ async def deploy_model(
             status="deployed",
             schema_index_status="building",
             schema_index_message="Schema index building started in background",
+            concepts_load_status=concepts_load_status,
+            concepts_load_job_id=concepts_load_job_id,
         )
     except Exception as e:
         logger.error(f"Failed to deploy model: {e}")
