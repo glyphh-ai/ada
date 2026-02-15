@@ -124,22 +124,23 @@ class Settings(BaseSettings):
         description="Telemetry endpoint URL"
     )
     
-    # CORS - includes Studio origins for direct chat communication
+    # CORS — in local mode, allow all origins for dev flexibility
+    # In cloud/self-hosted mode, use explicit production origins
     cors_origins: List[str] = Field(
         default=[
-            "http://localhost:3000",  # Studio dev (vite)
-            "http://localhost:4321",  # Studio dev (astro)
-            "http://localhost:5173",  # Studio dev
-            "http://localhost:5174",  # Studio dev alternate
-            "http://127.0.0.1:3000",  # Studio dev localhost
-            "http://127.0.0.1:4321",  # Studio dev localhost (astro)
-            "http://127.0.0.1:5173",  # Studio dev localhost
-            "http://192.168.1.41:4321",  # Studio dev LAN
-            "http://192.168.1.41:5173",  # Web dev LAN
-            "https://studio.glyphh.com",  # Studio production
-            "https://*.glyphh.com",  # All Glyphh subdomains
+            "http://localhost:3000",
+            "http://localhost:4321",
+            "http://localhost:5173",
         ],
-        description="Allowed CORS origins for Studio direct chat"
+        description="Allowed CORS origins (ignored in local mode where * is used)"
+    )
+    cors_origins_production: List[str] = Field(
+        default=[
+            "https://studio.glyphh.com",
+            "https://app.glyphh.com",
+            "https://*.glyphh.com",
+        ],
+        description="Allowed CORS origins for production deployments"
     )
     
     @field_validator("jwt_secret_key")

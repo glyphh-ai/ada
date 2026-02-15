@@ -113,14 +113,24 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allow_headers=["*"],
-)
+# CORS middleware — wildcard in local mode, explicit origins in production
+if settings.deployment_mode == "local":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    origins = settings.cors_origins_production or settings.cors_origins
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+        allow_headers=["*"],
+    )
 
 # Custom middleware
 app.add_middleware(CorrelationIDMiddleware)
@@ -176,11 +186,14 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
 
 def _is_allowed_origin(origin: str) -> bool:
     """Check if origin is in allowed CORS origins list."""
+    # Local mode allows everything
+    if settings.deployment_mode == "local":
+        return True
     import fnmatch
-    for allowed in settings.cors_origins:
+    origins = settings.cors_origins_production or settings.cors_origins
+    for allowed in origins:
         if allowed == "*" or allowed == origin:
             return True
-        # Support wildcard patterns like https://*.glyphh.com
         if fnmatch.fnmatch(origin, allowed):
             return True
     return False
