@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from glyphh.fact_tree.builder import FactTree
 
-from domains.nl_query.service import NLQueryResult
+from domains.nl_query.service import NLQueryResult, ResponseState
 from domains.query.fact_tree_builder import FactTreeBuilder
 
 
@@ -60,8 +60,9 @@ def fact_tree_strategy(draw) -> FactTree:
 
 @composite
 def nl_query_result_strategy(draw) -> NLQueryResult:
-    """Generate a valid NLQueryResult for testing."""
+    """Generate a valid NLQueryResult with DONE state for testing."""
     return NLQueryResult(
+        state=ResponseState.DONE,
         fact_tree=draw(fact_tree_strategy()),
         query_type=draw(st.sampled_from([
             "similarity_search", "count", "list", "temporal_predict", "fact_tree", "unknown"
@@ -77,8 +78,6 @@ def nl_query_result_strategy(draw) -> NLQueryResult:
             )
         )),
         query_time_ms=draw(st.floats(min_value=0.0, max_value=10000.0, allow_nan=False)),
-        disambiguation_needed=draw(st.booleans()),
-        disambiguation_suggestions=draw(st.lists(st.text(min_size=1, max_size=50), max_size=3)),
     )
 
 
@@ -103,20 +102,24 @@ class TestMCPServerBackwardCompatibility:
         
         **Validates: Requirements 11.1**
         """
-        # Simulate MCPServer response by using to_dict()
         response = nl_result.to_dict()
         
+        # Verify state is present
+        assert "state" in response
+        assert response["state"] == "DONE"
+        
         # Verify FactTree structure is present
-        assert "result" in response
-        assert isinstance(response["result"], dict)
-        assert "description" in response["result"]
-        assert "children" in response["result"]
+        assert "fact_tree" in response
+        assert isinstance(response["fact_tree"], dict)
+        assert "description" in response["fact_tree"]
+        assert "children" in response["fact_tree"]
         
         # Verify legacy fields are present
         assert "query_type" in response
         assert "confidence" in response
         assert "query_time_ms" in response
         assert "match_method" in response
+        assert "trace_id" in response
     
     @given(nl_query_result_strategy())
     @settings(max_examples=100)
@@ -185,7 +188,7 @@ class TestMCPServerBackwardCompatibility:
         **Validates: Requirements 8.1, 11.3**
         """
         response = nl_result.to_dict()
-        fact_tree_json = response["result"]
+        fact_tree_json = response["fact_tree"]
         
         # Verify required FactTree JSON fields
         assert "description" in fact_tree_json
@@ -221,11 +224,11 @@ class TestMCPServerBackwardCompatibility:
         fact_tree = FactTreeBuilder.build_count(count=42, query_time_ms=10.0)
         
         nl_result = NLQueryResult(
+            state=ResponseState.DONE,
             fact_tree=fact_tree,
             query_type=query_type,
             match_method=match_method,
             confidence=confidence,
-            translated_query=None,
             query_time_ms=query_time_ms,
         )
         
@@ -238,8 +241,8 @@ class TestMCPServerBackwardCompatibility:
         assert response["query_time_ms"] == query_time_ms
         
         # FactTree must also be present
-        assert "result" in response
-        assert isinstance(response["result"], dict)
+        assert "fact_tree" in response
+        assert isinstance(response["fact_tree"], dict)
     
     @given(nl_query_result_strategy())
     @settings(max_examples=50)
@@ -263,4 +266,4 @@ class TestMCPServerBackwardCompatibility:
         assert parsed["query_type"] == response["query_type"]
         assert parsed["confidence"] == response["confidence"]
         assert parsed["query_time_ms"] == response["query_time_ms"]
-        assert "result" in parsed
+        assert "fact_tree" in parsed

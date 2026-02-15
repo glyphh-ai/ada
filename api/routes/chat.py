@@ -287,7 +287,9 @@ async def chat_stream(
                 debug=False,
             )
             
-            # Check if result indicates disambiguation needed
+            from domains.nl_query.service import ResponseState
+            
+            # Check state for disambiguation (ASK)
             if result.disambiguation_needed:
                 yield _sse_event("disambiguation", {
                     "message": "Your query is ambiguous. Please clarify:",
@@ -297,12 +299,12 @@ async def chat_stream(
                 })
                 return
             
-            # Check if result contains an error (e.g., encoding failure)
-            if isinstance(result.result, dict) and "error" in result.result:
-                error_result = result.result
+            # Check for ERROR state
+            if result.state == ResponseState.ERROR:
+                error_msg = result.error.message if result.error else "Query could not be processed"
                 yield _sse_event("complete", {
-                    "message": error_result.get("message", "Query could not be processed"),
-                    "result": error_result,
+                    "message": error_msg,
+                    "result": result.to_dict(),
                     "source": "error",
                     "confidence": 0.0,
                     "query_type": result.query_type,
@@ -331,17 +333,18 @@ async def chat_stream(
             else:
                 source = "glyphh"
             
-            # Phase 4: Complete - return raw result like MCP does
-            # The Studio formats the result on the client side
+            # Phase 4: Complete - return result via to_dict()
             yield _sse_event("complete", {
                 "message": "Query complete",
-                "result": result.result,  # Raw result, same as MCP response
+                "result": result.result,  # Backward compat property
                 "source": source,
                 "confidence": result.confidence,
                 "query_type": result.query_type,
                 "match_method": result.match_method,
                 "progress": 100,
                 "query_time_ms": result.query_time_ms,
+                "state": result.state.value,
+                "trace_id": result.trace_id,
             })
             
         except HTTPException as e:
@@ -390,8 +393,9 @@ async def chat_sync(
         debug=False,
     )
     
-    # Handle disambiguation
-    # Validates: Requirements 12.2, 12.5
+    from domains.nl_query.service import ResponseState
+    
+    # Handle disambiguation (ASK state)
     if result.disambiguation_needed:
         return ChatResponse(
             response="Your query is ambiguous. Please clarify your intent.",
@@ -404,11 +408,14 @@ async def chat_sync(
             disambiguation_suggestions=result.disambiguation_suggestions,
         )
     
-    if result.match_method == "none":
+    # Handle ERROR state
+    if result.state == ResponseState.ERROR:
         raise HTTPException(
             status_code=422,
             detail={
-                "message": "Could not understand query",
+                "state": result.state.value,
+                "message": result.error.message if result.error else "Could not understand query",
+                "error_code": result.error.error_code if result.error else "UNKNOWN",
                 "confidence": result.confidence,
             }
         )

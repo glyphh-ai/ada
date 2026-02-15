@@ -140,11 +140,21 @@ class NLQueryRequest(BaseModel):
 
 
 class NLQueryResponse(BaseModel):
-    """Response from natural language query"""
-    result: Any  # Can be SimilaritySearchResponse, FactTreeResponse, or TemporalPredictResponse
-    query_type: str  # similarity, fact_tree, temporal
-    translated_query: Optional[Dict[str, Any]] = None  # Only if debug=True
-    query_time_ms: float
+    """Response from natural language query with state pattern."""
+    state: str  # DONE, ASK, BLOCKED, AUTH_REQUIRED, ERROR
+    result: Optional[Any] = None  # Backward compat: FactTree JSON for DONE
+    fact_tree: Optional[Dict[str, Any]] = None
+    query_type: str = ""
+    match_method: str = ""
+    confidence: float = 0.0
+    trace_id: Optional[str] = None
+    translated_query: Optional[Dict[str, Any]] = None
+    query_time_ms: float = 0.0
+    matched_route: Optional[str] = None
+    ask: Optional[Dict[str, Any]] = None
+    blocked: Optional[Dict[str, Any]] = None
+    auth_required: Optional[Dict[str, Any]] = None
+    error: Optional[Dict[str, Any]] = None
 
 
 # ============================================================================

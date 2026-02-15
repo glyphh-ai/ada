@@ -6,14 +6,16 @@ The core principle: "When your LLM can't afford to be wrong, sidecar it with Gly
 
 Updated to support AutoSchemaMatcher for automatic schema-based NL query matching.
 Updated to return SDK FactTree in all responses for unified response format.
-Validates: Requirements 3, 4, 5, 7.1, 7.2, 7.3, 12.2, 12.5
+Updated with response state pattern: DONE/ASK/BLOCKED/AUTH_REQUIRED/ERROR.
 
 Design Principle: "When your LLM can't afford to be wrong, sidecar it with Glyphh"
 """
 
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from glyphh.fact_tree.builder import FactTree
@@ -29,45 +31,176 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Response State Model
+# ---------------------------------------------------------------------------
+
+class ResponseState(str, Enum):
+    """Response state indicating the outcome of an operation."""
+    DONE = "DONE"
+    ASK = "ASK"
+    BLOCKED = "BLOCKED"
+    AUTH_REQUIRED = "AUTH_REQUIRED"
+    ERROR = "ERROR"
+
+
+@dataclass
+class AskPayload:
+    """Payload for ASK state - missing slots or disambiguation needed."""
+    question: str
+    missing_slots: List[str] = field(default_factory=list)
+    disambiguation_options: List[Dict[str, Any]] = field(default_factory=list)
+    provided_slots: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "question": self.question,
+            "missing_slots": self.missing_slots,
+            "disambiguation_options": self.disambiguation_options,
+            "provided_slots": self.provided_slots,
+        }
+
+
+@dataclass
+class BlockedPayload:
+    """Payload for BLOCKED state - policy/permission prevented execution."""
+    reason: str
+    policy_refs: List[str] = field(default_factory=list)
+    constraint: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "reason": self.reason,
+            "policy_refs": self.policy_refs,
+            "constraint": self.constraint,
+        }
+
+
+@dataclass
+class AuthRequiredPayload:
+    """Payload for AUTH_REQUIRED state - authentication needed."""
+    provider: str
+    app: str
+    auth_hint: str = "Connect the required account to proceed."
+    tool_id: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "app": self.app,
+            "auth_hint": self.auth_hint,
+            "tool_id": self.tool_id,
+        }
+
+
+@dataclass
+class ErrorPayload:
+    """Payload for ERROR state - unexpected failure."""
+    error_code: str
+    message: str
+    debug_info: Optional[Dict[str, Any]] = None
+    recoverable: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        result = {
+            "error_code": self.error_code,
+            "message": self.message,
+            "recoverable": self.recoverable,
+        }
+        if self.debug_info:
+            result["debug_info"] = self.debug_info
+        return result
+
+
+# ---------------------------------------------------------------------------
+# NLQueryResult with Response State Pattern
+# ---------------------------------------------------------------------------
+
 @dataclass
 class NLQueryResult:
     """
     Result of executing a natural language query.
-    
-    Updated to contain a FactTree instead of raw result data.
-    The fact_tree field contains the SDK FactTree which can be
-    serialized via to_json() for transport.
-    
-    Validates: Requirements 7.1, 7.2, 7.3
+
+    Uses the response state pattern:
+    - DONE: Completed successfully; has fact_tree + trace_id
+    - ASK: Missing slots / needs disambiguation; returns question + slots[]
+    - BLOCKED: Policy/permission prevented execution; returns reason + policy_refs
+    - AUTH_REQUIRED: Authentication needed; returns provider + app + auth_hint
+    - ERROR: Unexpected failure; returns error_code + debug_info (safe)
     """
-    fact_tree: FactTree  # SDK FactTree with full structure
-    query_type: str
-    match_method: str  # "rules", "llm", "auto", "hybrid", or "none"
-    confidence: float
-    translated_query: Optional[Dict[str, Any]]
-    query_time_ms: float
-    disambiguation_needed: bool = False
-    disambiguation_suggestions: List[str] = field(default_factory=list)
-    
+    state: ResponseState
+    fact_tree: Optional[FactTree] = None
+    query_type: str = ""
+    match_method: str = ""  # "rules", "llm", "auto", "hybrid", or "none"
+    confidence: float = 0.0
+    trace_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    translated_query: Optional[Dict[str, Any]] = None
+    query_time_ms: float = 0.0
+    matched_route: Optional[str] = None
+
+    # State-specific payloads
+    ask: Optional[AskPayload] = None
+    blocked: Optional[BlockedPayload] = None
+    auth_required: Optional[AuthRequiredPayload] = None
+    error: Optional[ErrorPayload] = None
+
+    @property
+    def disambiguation_needed(self) -> bool:
+        """Backward compat: True when state is ASK with disambiguation options."""
+        return (
+            self.state == ResponseState.ASK
+            and self.ask is not None
+            and len(self.ask.disambiguation_options) > 0
+        )
+
+    @property
+    def disambiguation_suggestions(self) -> List[str]:
+        """Backward compat: Disambiguation suggestions as strings."""
+        if self.ask and self.ask.disambiguation_options:
+            return [
+                opt.get("suggestion", opt.get("intent", str(opt)))
+                for opt in self.ask.disambiguation_options
+            ]
+        return []
+
+    @property
+    def result(self) -> Any:
+        """Backward compat: Returns fact_tree JSON for DONE, error dict otherwise."""
+        if self.state == ResponseState.DONE and self.fact_tree is not None:
+            return self.fact_tree.to_json()
+        if self.state == ResponseState.ERROR and self.error is not None:
+            return {"error": self.error.to_dict()}
+        return {}
+
     def to_dict(self) -> Dict[str, Any]:
-        """
-        Serialize to dictionary for API response.
-        
-        Returns both the FactTree JSON and legacy fields for
-        backward compatibility.
-        
-        Validates: Requirements 7.1, 11.1
-        """
-        return {
-            "result": self.fact_tree.to_json(),
+        """Serialize to dictionary for API response."""
+        result = {
+            "state": self.state.value,
+            "confidence": self.confidence,
+            "trace_id": self.trace_id,
             "query_type": self.query_type,
             "match_method": self.match_method,
-            "confidence": self.confidence,
-            "translated_query": self.translated_query,
             "query_time_ms": self.query_time_ms,
-            "disambiguation_needed": self.disambiguation_needed,
-            "disambiguation_suggestions": self.disambiguation_suggestions,
         }
+
+        if self.matched_route:
+            result["matched_route"] = self.matched_route
+
+        if self.translated_query:
+            result["translated_query"] = self.translated_query
+
+        if self.state == ResponseState.DONE and self.fact_tree is not None:
+            result["fact_tree"] = self.fact_tree.to_json()
+        elif self.state == ResponseState.ASK and self.ask:
+            result["ask"] = self.ask.to_dict()
+        elif self.state == ResponseState.BLOCKED and self.blocked:
+            result["blocked"] = self.blocked.to_dict()
+        elif self.state == ResponseState.AUTH_REQUIRED and self.auth_required:
+            result["auth_required"] = self.auth_required.to_dict()
+        elif self.state == ResponseState.ERROR and self.error:
+            result["error"] = self.error.to_dict()
+
+        return result
 
 
 class NLQueryService:
@@ -147,22 +280,20 @@ class NLQueryService:
     ) -> NLQueryResult:
         """
         Execute a natural language query.
-        
+
         Flow:
         1. Try auto-schema matching if AutoSchemaMatcher is available
         2. Try rules-based matching (IntentMatcher)
-        3. If confidence >= threshold: execute directly
-        4. If confidence < threshold AND LLM enabled: use LLM fallback
-        5. If confidence < threshold AND no LLM: execute with lower confidence
-        
-        Validates: Requirements 3, 4, 5, 12.2, 12.5
+        3. If confidence >= threshold: execute directly -> DONE
+        4. If confidence < threshold AND LLM enabled: use LLM fallback -> DONE
+        5. If confidence < threshold AND no LLM: -> ERROR (NO_MATCH)
+        6. Disambiguation -> ASK
         """
         start_time = time.time()
-        
+
         logger.info(f"NL query received: '{query}' for org={org_id}, model={model_id}")
-        
+
         # Step 0: Try auto-schema matching if available
-        # Validates: Requirements 3, 4, 5
         if self._auto_schema_matcher is not None:
             try:
                 auto_result = await self._execute_auto_schema_query(
@@ -176,90 +307,84 @@ class NLQueryService:
                     return auto_result
             except Exception as e:
                 logger.warning(f"Auto-schema matching failed: {e}, falling back to rules")
-        
+
         # Step 1: Try rules-based matching
         match_result = await self.intent_matcher.match_intent(query)
-        
+
         # Accept any match with confidence > 0.3 (SDK HDC similarity is more conservative)
         min_acceptable_confidence = 0.3
-        
+
         if match_result and match_result.confidence >= min_acceptable_confidence:
             logger.info(
                 f"Rules match: intent={match_result.intent}, "
                 f"confidence={match_result.confidence:.3f}"
             )
-            
-            result = await self._execute_structured_query(
+
+            fact_tree = await self._execute_structured_query(
                 org_id,
                 model_id,
                 match_result.intent,
                 match_result.structured_query,
             )
-            
+
             elapsed_ms = (time.time() - start_time) * 1000
-            
+
             return NLQueryResult(
-                fact_tree=result,
+                state=ResponseState.DONE,
+                fact_tree=fact_tree,
                 query_type=match_result.intent,
                 match_method="rules",
                 confidence=match_result.confidence,
                 translated_query=match_result.structured_query if debug else None,
                 query_time_ms=elapsed_ms,
-                disambiguation_needed=False,
-                disambiguation_suggestions=[],
             )
-        
+
         # Step 2: Try LLM fallback if available
         if self.llm_fallback is not None:
             logger.info("Rules confidence too low, trying LLM fallback")
-            
+
             try:
                 llm_result = await self.llm_fallback.translate_query(query, f"org={org_id}, model={model_id}")
-                
+
                 if llm_result:
-                    result = await self._execute_structured_query(
+                    fact_tree = await self._execute_structured_query(
                         org_id,
                         model_id,
                         llm_result.get("operation", "similarity_search"),
                         llm_result,
                     )
-                    
+
                     elapsed_ms = (time.time() - start_time) * 1000
-                    
+
                     return NLQueryResult(
-                        fact_tree=result,
+                        state=ResponseState.DONE,
+                        fact_tree=fact_tree,
                         query_type=llm_result.get("operation", "unknown"),
                         match_method="llm",
                         confidence=0.0,
                         translated_query=llm_result if debug else None,
                         query_time_ms=elapsed_ms,
-                        disambiguation_needed=False,
-                        disambiguation_suggestions=[],
                     )
             except Exception as e:
                 logger.warning(f"LLM fallback failed: {e}")
-        
-        # Step 3: No match - return error FactTree
+
+        # Step 3: No match -> ERROR
         logger.info(f"No intent match for query: '{query}'")
-        
+
         elapsed_ms = (time.time() - start_time) * 1000
-        
-        # Build error FactTree for no match case
-        error_fact_tree = FactTreeBuilder.build_error(
-            error_message="No intent match found for query",
-            error_type="NoMatchError",
-            query=query,
-        )
-        
+
         return NLQueryResult(
-            fact_tree=error_fact_tree,
+            state=ResponseState.ERROR,
             query_type="unknown",
             match_method="none",
             confidence=match_result.confidence if match_result else 0.0,
-            translated_query=None,
             query_time_ms=elapsed_ms,
-            disambiguation_needed=False,
-            disambiguation_suggestions=[],
+            error=ErrorPayload(
+                error_code="NO_MATCH",
+                message="No intent match found for query",
+                debug_info={"query": query},
+                recoverable=True,
+            ),
         )
     
     async def _execute_auto_schema_query(
@@ -272,30 +397,15 @@ class NLQueryService:
     ) -> Optional[NLQueryResult]:
         """
         Execute a query using auto-schema matching.
-        
-        Uses the AutoSchemaMatcher to process the query through the
-        auto-matching pipeline:
-        1. Tokenize query
-        2. Match tokens against schema vectors
-        3. Infer intent from matches and keywords
-        4. Extract parameters
-        5. Handle disambiguation if needed
-        
-        Args:
-            org_id: Organization ID
-            model_id: Model ID
-            query: Natural language query
-            debug: Whether to include debug info
-            start_time: Query start time for timing
-        
-        Returns:
-            NLQueryResult if auto-matching succeeds, None otherwise
-        
-        Validates: Requirements 3, 4, 5, 12.2, 12.5
+
+        Returns NLQueryResult with appropriate state:
+        - DONE: Match found and executed
+        - ASK: Disambiguation needed
+        - None: Confidence too low, fall through to rules
         """
         if self._auto_schema_matcher is None:
             return None
-        
+
         # Check cache if schema index is available
         cache_key = None
         if self._schema_index is not None:
@@ -303,47 +413,45 @@ class NLQueryService:
             cached_match = self._schema_index.get_cached_result(cache_key)
             if cached_match is not None:
                 logger.info(f"Cache hit for query: '{query}'")
-                # Use cached match result to build response
-                # Note: We still need to execute the query, but we can skip matching
-        
+
         # Use AutoSchemaMatcher to match the query
         auto_result = self._auto_schema_matcher.match_query(query)
-        
+
         # Cache the match result if schema index is available
         if self._schema_index is not None and cache_key is not None:
             self._schema_index.cache_match_result(cache_key, auto_result.match_result)
-        
-        # Check if disambiguation is needed
-        # Validates: Requirements 12.2, 12.5
+
+        # Check if disambiguation is needed -> ASK
         if auto_result.disambiguation_needed:
             logger.info(
                 f"Disambiguation needed for query: '{query}', "
                 f"options: {[opt.intent_type for opt in auto_result.disambiguation_options]}"
             )
-            
-            # Build disambiguation suggestions
-            suggestions = self._build_disambiguation_suggestions(auto_result)
-            
+
+            options = [
+                {
+                    "intent": opt.intent_type,
+                    "confidence": opt.confidence,
+                    "suggestion": f"Did you mean '{opt.intent_type}'? (confidence: {opt.confidence:.0%})",
+                }
+                for opt in auto_result.disambiguation_options
+            ]
+
             elapsed_ms = (time.time() - start_time) * 1000
-            
-            # Build disambiguation FactTree
-            disambiguation_fact_tree = FactTreeBuilder.build_error(
-                error_message="Disambiguation needed - multiple intents matched",
-                error_type="DisambiguationNeeded",
-                query=query,
-            )
-            
+
             return NLQueryResult(
-                fact_tree=disambiguation_fact_tree,
+                state=ResponseState.ASK,
                 query_type=auto_result.intent.intent_type,
                 match_method=auto_result.match_method,
                 confidence=auto_result.confidence,
                 translated_query=auto_result.to_dict() if debug else None,
                 query_time_ms=elapsed_ms,
-                disambiguation_needed=True,
-                disambiguation_suggestions=suggestions,
+                ask=AskPayload(
+                    question="Your query is ambiguous. Please clarify:",
+                    disambiguation_options=options,
+                ),
             )
-        
+
         # Check confidence threshold
         min_acceptable_confidence = 0.3
         if auto_result.confidence < min_acceptable_confidence:
@@ -352,94 +460,40 @@ class NLQueryService:
                 f"falling back to rules"
             )
             return None
-        
+
         logger.info(
             f"Auto-schema match: intent={auto_result.intent.intent_type}, "
             f"confidence={auto_result.confidence:.3f}, "
             f"method={auto_result.match_method}"
         )
-        
+
         # Map auto-schema intent to operation
         operation = self._map_intent_to_operation(auto_result.intent.intent_type)
-        
+
         # Build structured query from extracted parameters
         structured_query = self._build_structured_query_from_auto_result(
             auto_result, operation, query
         )
-        
-        # Execute the query
-        result = await self._execute_structured_query(
+
+        # Execute the query -> DONE
+        fact_tree = await self._execute_structured_query(
             org_id,
             model_id,
             operation,
             structured_query,
         )
-        
+
         elapsed_ms = (time.time() - start_time) * 1000
-        
+
         return NLQueryResult(
-            fact_tree=result,
+            state=ResponseState.DONE,
+            fact_tree=fact_tree,
             query_type=auto_result.intent.intent_type,
             match_method=auto_result.match_method,
             confidence=auto_result.confidence,
             translated_query=auto_result.to_dict() if debug else None,
             query_time_ms=elapsed_ms,
-            disambiguation_needed=False,
-            disambiguation_suggestions=[],
         )
-    
-    def _build_disambiguation_suggestions(
-        self,
-        auto_result: 'AutoMatchResult'
-    ) -> List[str]:
-        """
-        Build disambiguation suggestions from auto-match result.
-        
-        Creates human-readable suggestions for each disambiguation option
-        to help the user clarify their query.
-        
-        Args:
-            auto_result: The AutoMatchResult with disambiguation options
-        
-        Returns:
-            List of suggestion strings
-        
-        Validates: Requirements 12.2, 12.5
-        """
-        suggestions = []
-        
-        for option in auto_result.disambiguation_options:
-            intent_type = option.intent_type
-            confidence = option.confidence
-            
-            # Build suggestion based on intent type
-            if intent_type == "find":
-                suggestions.append(
-                    f"Did you mean to find/search for something? "
-                    f"(confidence: {confidence:.0%})"
-                )
-            elif intent_type == "count":
-                suggestions.append(
-                    f"Did you mean to count items? "
-                    f"(confidence: {confidence:.0%})"
-                )
-            elif intent_type == "filter":
-                suggestions.append(
-                    f"Did you mean to filter by a condition? "
-                    f"(confidence: {confidence:.0%})"
-                )
-            elif intent_type == "similar":
-                suggestions.append(
-                    f"Did you mean to find similar items? "
-                    f"(confidence: {confidence:.0%})"
-                )
-            else:
-                suggestions.append(
-                    f"Did you mean '{intent_type}'? "
-                    f"(confidence: {confidence:.0%})"
-                )
-        
-        return suggestions
     
     def _map_intent_to_operation(self, intent_type: str) -> str:
         """
@@ -613,21 +667,19 @@ class NLQueryService:
     ) -> FactTree:
         """
         Execute a structured query against the QueryService.
-        
-        All operations now return FactTree instead of raw dictionaries.
-        Uses FactTreeBuilder.build_error() for error cases.
-        
-        Validates: Requirements 1.1, 8.3
+
+        All operations return FactTree. On failure, raises so the caller
+        can decide whether to return ERROR state or handle differently.
         """
         from domains.models.schemas import (
             SimilaritySearchRequest,
             FactTreeRequest,
             TemporalPredictRequest,
         )
-        
+
         # Normalize operation name to canonical form
         operation = self._normalize_operation(operation)
-        
+
         try:
             if operation == "similarity_search":
                 request = SimilaritySearchRequest(

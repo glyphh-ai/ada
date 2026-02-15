@@ -32,12 +32,20 @@ class NLQueryRequest(BaseModel):
 
 
 class NLQueryResponse(BaseModel):
-    result: Any
-    query_type: str
-    match_method: str
-    confidence: float
+    state: str
+    result: Optional[Any] = None
+    fact_tree: Optional[Dict[str, Any]] = None
+    query_type: str = ""
+    match_method: str = ""
+    confidence: float = 0.0
+    trace_id: Optional[str] = None
     translated_query: Optional[Dict[str, Any]] = None
-    query_time_ms: float
+    query_time_ms: float = 0.0
+    matched_route: Optional[str] = None
+    ask: Optional[Dict[str, Any]] = None
+    blocked: Optional[Dict[str, Any]] = None
+    auth_required: Optional[Dict[str, Any]] = None
+    error: Optional[Dict[str, Any]] = None
 
 
 class IntentsResponse(BaseModel):
@@ -215,32 +223,14 @@ async def execute_nl_query(
     
     query_time_ms = (time.time() - start_time) * 1000
     
-    if result.match_method == "none":
-        suggestions = [
-            "Try rephrasing your query",
-            "Use keywords like 'find', 'similar', 'verify', 'predict'",
-            "Example: 'find similar to machine learning'",
-            "Example: 'verify that X is related to Y'",
-            "Example: 'predict what comes after X'",
-        ]
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": "Could not understand query",
-                "suggestions": suggestions,
-                "original_query": request.query,
-                "confidence": result.confidence,
-            }
-        )
+    # Serialize via to_dict() which handles all states
+    response_data = result.to_dict()
     
-    return NLQueryResponse(
-        result=result.result,
-        query_type=result.query_type,
-        match_method=result.match_method,
-        confidence=result.confidence,
-        translated_query=result.translated_query if request.debug else None,
-        query_time_ms=query_time_ms,
-    )
+    # Backward compat: include result field for DONE state
+    if result.fact_tree is not None:
+        response_data["result"] = result.fact_tree.to_json()
+    
+    return NLQueryResponse(**response_data)
 
 
 @router.get("/intents", response_model=IntentsResponse)
