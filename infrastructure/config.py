@@ -134,6 +134,8 @@ class Settings(BaseSettings):
             "http://127.0.0.1:3000",  # Studio dev localhost
             "http://127.0.0.1:4321",  # Studio dev localhost (astro)
             "http://127.0.0.1:5173",  # Studio dev localhost
+            "http://192.168.1.41:4321",  # Studio dev LAN
+            "http://192.168.1.41:5173",  # Web dev LAN
             "https://studio.glyphh.com",  # Studio production
             "https://*.glyphh.com",  # All Glyphh subdomains
         ],
