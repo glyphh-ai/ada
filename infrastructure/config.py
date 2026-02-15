@@ -128,9 +128,11 @@ class Settings(BaseSettings):
     cors_origins: List[str] = Field(
         default=[
             "http://localhost:3000",  # Studio dev (vite)
+            "http://localhost:4321",  # Studio dev (astro)
             "http://localhost:5173",  # Studio dev
             "http://localhost:5174",  # Studio dev alternate
             "http://127.0.0.1:3000",  # Studio dev localhost
+            "http://127.0.0.1:4321",  # Studio dev localhost (astro)
             "http://127.0.0.1:5173",  # Studio dev localhost
             "https://studio.glyphh.com",  # Studio production
             "https://*.glyphh.com",  # All Glyphh subdomains
