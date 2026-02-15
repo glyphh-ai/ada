@@ -48,6 +48,15 @@ class NLQueryResponse(BaseModel):
     error: Optional[Dict[str, Any]] = None
 
 
+class NormalizeRequest(BaseModel):
+    query: str = Field(..., description="Query text to normalize", min_length=1)
+
+
+class NormalizeResponse(BaseModel):
+    normalized_query: str
+    changed: bool
+
+
 class IntentsResponse(BaseModel):
     intents: List[str]
     patterns: Dict[str, List[str]]
@@ -247,3 +256,33 @@ async def get_intents(
         intents=intents["intents"],
         patterns=intents["patterns"],
     )
+
+# Normalize Endpoint
+def _get_llm_fallback():
+    """Get LLM fallback instance for normalization. Returns None if unavailable."""
+    try:
+        from domains.nl_query.llm_fallback import LLMFallback
+        llm_fallback = LLMFallback(model_name=settings.nl_model)
+        if not llm_fallback.is_available():
+            return None
+        return llm_fallback
+    except ImportError:
+        return None
+
+
+@router.post("/normalize")
+async def normalize_query(
+    org_id: str,
+    model_id: str,
+    request: NormalizeRequest,
+    current_user: AuthenticatedUser = Depends(validate_org_access),
+) -> NormalizeResponse:
+    """Normalize query text: fix spelling and grammar via LLM."""
+    llm_fallback = _get_llm_fallback()
+
+    if llm_fallback is None:
+        return NormalizeResponse(normalized_query=request.query, changed=False)
+
+    normalized_text, changed = await llm_fallback.normalize_text(request.query)
+    return NormalizeResponse(normalized_query=normalized_text, changed=changed)
+

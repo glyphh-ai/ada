@@ -51,6 +51,15 @@ Now translate this query:
 
 JSON response:"""
 
+    # Prompt template for query normalization (spelling/grammar fix)
+    NORMALIZATION_PROMPT = """Fix any spelling and grammar errors in the following text. 
+Return ONLY the corrected text, nothing else.
+If the text is already correct, return it unchanged.
+
+Text: {query}
+
+Corrected text:"""
+
     def __init__(
         self,
         model_name: str = "microsoft/Phi-3.5-mini-instruct",
@@ -217,6 +226,60 @@ JSON response:"""
             logger.error(f"LLM translation failed: {e}")
             return None
     
+    async def normalize_text(self, query: str) -> tuple[str, bool]:
+        """
+        Normalize query text: fix spelling and grammar.
+        
+        Args:
+            query: Raw query text to normalize
+            
+        Returns:
+            Tuple of (normalized_text, was_changed).
+            On any failure, returns (query, False).
+        """
+        if not self._load_model():
+            return (query, False)
+
+        try:
+            prompt = self.NORMALIZATION_PROMPT.format(query=query)
+
+            inputs = self._tokenizer(
+                prompt,
+                return_tensors="pt",
+                truncation=True,
+                max_length=512,
+            )
+            inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
+
+            import torch
+            with torch.no_grad():
+                outputs = self._model.generate(
+                    **inputs,
+                    max_new_tokens=128,
+                    temperature=0.1,
+                    do_sample=False,
+                    pad_token_id=self._tokenizer.eos_token_id,
+                )
+
+            response = self._tokenizer.decode(
+                outputs[0][inputs["input_ids"].shape[1]:],
+                skip_special_tokens=True,
+            )
+
+            normalized = response.strip()
+
+            if not normalized:
+                logger.warning("LLM normalization returned empty response")
+                return (query, False)
+
+            changed = normalized != query
+            logger.info(f"LLM normalization: changed={changed}")
+            return (normalized, changed)
+
+        except Exception as e:
+            logger.warning(f"LLM normalization failed: {e}")
+            return (query, False)
+
     def unload_model(self) -> None:
         """Unload the model to free memory."""
         if self._model is not None:
