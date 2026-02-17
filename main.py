@@ -107,7 +107,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="Glyphh Runtime",
     description="Execution environment for deployed .glyphh models",
-    version="1.0.0",
+    version="0.2.0",
     docs_url="/docs" if settings.deployment_mode == "local" else None,
     redoc_url="/redoc" if settings.deployment_mode == "local" else None,
     lifespan=lifespan,
