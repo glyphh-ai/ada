@@ -206,14 +206,14 @@ class TestGlyphStorageSerialization:
         assert "concept_text" in str(exc_info.value)
     
     def test_from_json_invalid_embedding_dimension(self):
-        """Test that wrong embedding dimension raises ValidationException."""
+        """Test that oversized embedding dimension raises ValidationException."""
         storage = GlyphStorage(None)
         
         with pytest.raises(ValidationException) as exc_info:
             storage.from_json({
                 "concept_text": "test",
-                "embedding": [0.1] * 100,
+                "embedding": [0.1] * 3000,
                 "embedding_format": "array",
             })
         
-        assert "768 dimensions" in str(exc_info.value)
+        assert "exceeds runtime limit" in str(exc_info.value)
