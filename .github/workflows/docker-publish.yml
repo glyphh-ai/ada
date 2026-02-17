@@ -20,7 +20,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: glyphh-ai/runtime
+  IMAGE_NAME: glyphh-ai/glyphh-runtime
 
 jobs:
   build:
