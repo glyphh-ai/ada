@@ -46,6 +46,9 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
+      - name: Install Glyphh SDK
+        run: pip install "glyphh @ git+https://${{ secrets.SDK_RELEASES_TOKEN }}@github.com/glyphh-ai/glyphh-sdk.git@main"
+
       - name: Run unit tests
         run: pytest tests/unit/ -v --tb=short
         env:
