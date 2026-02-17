@@ -77,6 +77,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     resource_manager = ResourceManager(async_session_maker)
     logger.info("Resource manager initialized")
     
+    # Auto-deploy bundled assistant model (if SDK is installed with model)
+    try:
+        from scripts.deploy_bundled_assistant import deploy_in_process
+        await deploy_in_process(model_manager)
+    except Exception as e:
+        logger.debug(f"Assistant auto-deploy skipped: {e}")
+    
     yield
     
     # Graceful shutdown
