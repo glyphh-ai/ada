@@ -47,7 +47,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Install Glyphh SDK
-        run: pip install "glyphh @ git+https://${{ secrets.SDK_RELEASES_TOKEN }}@github.com/glyphh-ai/glyphh-sdk.git@main"
+        run: pip install "glyphh @ git+https://${{ secrets.RUNTIME_SDK_TOKEN }}@github.com/glyphh-ai/glyphh-sdk.git@${{ secrets.RUNTIME_SDK_REF || 'main' }}"
 
       - name: Run unit tests
         run: pytest tests/unit/ -v --tb=short
@@ -101,7 +101,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             SDK_REF=main
-            SDK_TOKEN=${{ secrets.SDK_RELEASES_TOKEN }}
+            SDK_TOKEN=${{ secrets.RUNTIME_SDK_TOKEN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -186,4 +186,4 @@ jobs:
           draft: false
           prerelease: false
         env:
-          GITHUB_TOKEN: ${{ secrets.SDK_RELEASES_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RUNTIME_RELEASES_TOKEN }}

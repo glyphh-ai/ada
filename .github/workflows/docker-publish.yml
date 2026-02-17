@@ -71,7 +71,7 @@ jobs:
           build-args: |
             ENABLE_NL_QUERY=${{ matrix.variant == 'full' }}
             SDK_REF=main
-            SDK_TOKEN=${{ secrets.SDK_RELEASES_TOKEN }}
+            SDK_TOKEN=${{ secrets.RUNTIME_SDK_TOKEN }}
             HF_TOKEN=${{ matrix.variant == 'full' && secrets.HUGGINGFACE_HUB_TOKEN || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
