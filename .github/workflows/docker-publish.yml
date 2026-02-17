@@ -61,6 +61,14 @@ jobs:
             type=semver,pattern={{version}}-${{ matrix.variant }}
             type=sha,prefix=${{ matrix.variant }}-
       
+      - name: Resolve latest SDK version
+        id: sdk
+        run: |
+          SDK_TAG=$(curl -sf -H "Authorization: token ${{ secrets.RUNTIME_SDK_TOKEN }}" \
+            https://api.github.com/repos/glyphh-ai/glyphh-sdk/releases/latest | jq -r .tag_name)
+          echo "ref=${SDK_TAG}" >> $GITHUB_OUTPUT
+          echo "Resolved SDK version: ${SDK_TAG}"
+
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
@@ -70,7 +78,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             ENABLE_NL_QUERY=${{ matrix.variant == 'full' }}
-            SDK_REF=main
+            SDK_REF=${{ steps.sdk.outputs.ref }}
             SDK_TOKEN=${{ secrets.RUNTIME_SDK_TOKEN }}
             HF_TOKEN=${{ matrix.variant == 'full' && secrets.HUGGINGFACE_HUB_TOKEN || '' }}
           cache-from: type=gha
