@@ -49,7 +49,7 @@ ARG SDK_TOKEN
 
 # Install SDK from private GitHub repo
 RUN if [ -n "$SDK_TOKEN" ]; then \
-        pip install --no-cache-dir "glyphh @ git+https://${SDK_TOKEN}@github.com/glyphh/glyphh-sdk.git@${SDK_REF}"; \
+        pip install --no-cache-dir "glyphh @ git+https://${SDK_TOKEN}@github.com/glyphh-ai/glyphh-sdk.git@${SDK_REF}"; \
     else \
         echo "Warning: SDK_TOKEN not provided, skipping SDK installation"; \
     fi
