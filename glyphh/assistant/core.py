@@ -55,7 +55,7 @@ class AssistantResponse:
     command: Optional[str] = None
     code: Optional[str] = None
     confidence: float = 0.0
-    match_method: str = "offline"  # "offline", "rules", "llm", "auto", "hybrid"
+    match_method: str = "glyphh"  # "glyphh", "glyphh_corrected", "rules", "llm", "llm_assisted", "hybrid"
     query_type: str = ""
     trace_id: str = ""
     missing_slot: Optional[str] = None
@@ -482,7 +482,7 @@ class Assistant:
             return AssistantResponse(
                 state="ERROR",
                 content="I'm not sure what you're asking. Try 'help' to see what I can do.",
-                match_method="offline",
+                match_method="glyphh",
                 metadata={
                     "why": {
                         "query": query,
@@ -655,7 +655,7 @@ class Assistant:
                     state="ERROR",
                     content="I'm not sure what you're asking. Try 'help' to see what I can do.",
                     confidence=best_score,
-                    match_method="offline",
+                    match_method="glyphh",
                     metadata={
                         "why": {
                             "query": query,
@@ -712,11 +712,11 @@ class Assistant:
 
         # Determine match_method based on normalization
         if normalization_method == "offline_spell_fix":
-            match_method = "offline_corrected"
+            match_method = "glyphh_corrected"
         elif normalization_method == "llm":
             match_method = "llm_assisted"
         else:
-            match_method = "offline"
+            match_method = "glyphh"
 
         # Add normalization metadata when normalization was applied
         if normalized_query is not None and normalization_method is not None:
