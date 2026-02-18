@@ -565,8 +565,11 @@ class ModelChatService:
                     })
 
         if confidence_override is not None:
-            # Use the NL pipeline's confidence if it's higher (intent match confidence)
-            confidence = max(confidence, confidence_override)
+            # Use the similarity score as primary confidence (it reflects
+            # actual match quality). Only fall back to intent confidence
+            # when there are no match results (e.g. count operations).
+            if confidence == 0.0 and not matches:
+                confidence = confidence_override
 
         return {
             "state": "DONE" if text else "ERROR",
