@@ -1,0 +1,13 @@
+name: Glyphh Assistant
+description: Internal assistant model that powers the CLI and Studio chat. Routes natural language to knowledge concepts, commands, workflows, and demos.
+version: 0.2.0
+author: Glyphh AI
+license: proprietary
+icon: 🤖
+category: assistant
+public: false
+tags:
+  - assistant
+  - internal
+  - chat
+  - cli

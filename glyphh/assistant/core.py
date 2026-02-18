@@ -470,7 +470,7 @@ class Assistant:
         if self._encoder is None:
             return AssistantResponse(
                 state="ERROR",
-                content="Assistant model not found. Run `python scripts/build_assistant_model.py` to build it.",
+                content="Assistant model not found. Run `python models/assistant/build.py` to build it.",
             )
 
         query_concept = self._extract_query_concept(query)

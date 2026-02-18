@@ -5,22 +5,23 @@ The runtime ships with curated models in models/. Enterprise users
 can also place custom models in custom_models/. This endpoint exposes
 what's available for deployment.
 
-GET /catalog/models — list all available models (core + custom)
+GET /catalog/models — list all public models (hub-visible)
+GET /catalog/models?include_private=true — list all models
 GET /catalog/models/{model_id} — get details for a specific model
 """
 
 import logging
-import yaml
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
+
+from domains.models import discover_models, LoadedModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
-# Model directories relative to runtime root
 _RUNTIME_ROOT = Path(__file__).parent.parent.parent
 _CORE_MODELS_DIR = _RUNTIME_ROOT / "models"
 _CUSTOM_MODELS_DIR = _RUNTIME_ROOT / "custom_models"
@@ -32,9 +33,14 @@ class CatalogModel(BaseModel):
     name: str
     description: str = ""
     version: str = ""
+    author: str = "Glyphh AI"
+    icon: str = ""
     category: str = ""
-    source: str = "core"  # "core" or "custom"
-    has_config: bool = False
+    public: bool = True
+    tags: List[str] = []
+    source: str = "core"
+    has_custom_encoder: bool = False
+    has_build_script: bool = False
     has_model_file: bool = False
     exemplar_count: int = 0
 
@@ -46,83 +52,57 @@ class CatalogResponse(BaseModel):
     runtime_version: str = ""
 
 
-def _scan_model_dir(base_dir: Path, source: str) -> List[CatalogModel]:
-    """Scan a directory for model subdirectories with .glyphh files."""
-    models = []
-    if not base_dir.exists():
-        return models
-
-    for model_dir in sorted(base_dir.iterdir()):
-        if not model_dir.is_dir() or model_dir.name.startswith("."):
-            continue
-
-        model_id = model_dir.name
-        config_path = model_dir / "config.yaml"
-        glyphh_files = list(model_dir.glob("*.glyphh"))
-
-        # Read config if available
-        config = {}
-        if config_path.exists():
-            try:
-                config = yaml.safe_load(config_path.read_text()) or {}
-            except Exception as e:
-                logger.warning(f"Failed to read config for {model_id}: {e}")
-
-        # Count exemplars from data/ directory
-        data_dir = model_dir / "data"
-        exemplar_count = 0
-        if data_dir.exists():
-            for jsonl_file in data_dir.glob("*.jsonl"):
-                try:
-                    exemplar_count += sum(1 for _ in jsonl_file.open())
-                except Exception:
-                    pass
-
-        models.append(CatalogModel(
-            model_id=model_id,
-            name=config.get("name", model_id),
-            description=config.get("description", ""),
-            version=config.get("version", ""),
-            category=config.get("category", ""),
-            source=source,
-            has_config=config_path.exists(),
-            has_model_file=len(glyphh_files) > 0,
-            exemplar_count=exemplar_count,
-        ))
-
-    return models
+def _to_catalog_model(m: LoadedModel) -> CatalogModel:
+    return CatalogModel(
+        model_id=m.model_id,
+        name=m.manifest.name,
+        description=m.manifest.description,
+        version=m.manifest.version,
+        author=m.manifest.author,
+        icon=m.manifest.icon,
+        category=m.manifest.category,
+        public=m.manifest.public,
+        tags=m.manifest.tags,
+        source=m.source,
+        has_custom_encoder=m.has_custom_encoder,
+        has_build_script=m.has_build_script,
+        has_model_file=m.glyphh_path is not None,
+        exemplar_count=m.exemplar_count,
+    )
 
 
 @router.get("/models", response_model=CatalogResponse)
-async def list_catalog_models() -> CatalogResponse:
-    """List all models available on this runtime instance.
+async def list_catalog_models(
+    include_private: bool = Query(False, description="Include private/internal models"),
+) -> CatalogResponse:
+    """List models available on this runtime.
 
-    Scans models/ (core, shipped with runtime) and custom_models/
-    (enterprise, user-created) directories.
+    By default only public models are returned (hub-visible).
+    Pass include_private=true to see all models including internal ones.
     """
     from main import app
 
-    core_models = _scan_model_dir(_CORE_MODELS_DIR, "core")
-    custom_models = _scan_model_dir(_CUSTOM_MODELS_DIR, "custom")
-    all_models = core_models + custom_models
+    all_models = discover_models(_CORE_MODELS_DIR, _CUSTOM_MODELS_DIR)
+
+    if not include_private:
+        all_models = [m for m in all_models if m.manifest.public]
+
+    catalog = [_to_catalog_model(m) for m in all_models]
 
     return CatalogResponse(
-        models=all_models,
-        total=len(all_models),
+        models=catalog,
+        total=len(catalog),
         runtime_version=app.version,
     )
 
 
 @router.get("/models/{model_id}", response_model=CatalogModel)
 async def get_catalog_model(model_id: str) -> CatalogModel:
-    """Get details for a specific model in the catalog."""
-    # Check core first, then custom
-    for base_dir, source in [(_CORE_MODELS_DIR, "core"), (_CUSTOM_MODELS_DIR, "custom")]:
-        model_dir = base_dir / model_id
-        if model_dir.exists() and model_dir.is_dir():
-            models = _scan_model_dir(base_dir, source)
-            for m in models:
-                if m.model_id == model_id:
-                    return m
+    """Get details for a specific model."""
+    all_models = discover_models(_CORE_MODELS_DIR, _CUSTOM_MODELS_DIR)
+
+    for m in all_models:
+        if m.model_id == model_id:
+            return _to_catalog_model(m)
 
     raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found in catalog")

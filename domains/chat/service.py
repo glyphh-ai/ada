@@ -180,15 +180,70 @@ class ModelChatService:
     async def _query_model(self, query: str) -> dict[str, Any] | None:
         """Query the deployed model via the appropriate engine.
 
-        The assistant model uses its own HDC encoder (router-style with
-        intent/action/context segments). All other models use the generic
-        NL query pipeline.
+        If the model has a custom encoder (encoder.py in its directory),
+        uses the dedicated HDC engine with that encoder. Otherwise falls
+        through to the generic NL query pipeline.
+
+        No special cases — every model is the same shape.
         """
-        # Assistant model — use the dedicated Assistant engine
-        if self.org_id == "glyphh" and self.model_id == "assistant":
-            return await self._query_assistant(query)
+        from domains.models import load_model
+        from pathlib import Path
+
+        runtime_root = Path(__file__).parent.parent.parent
+        model_dir = runtime_root / "models" / self.model_id
+        if not model_dir.exists():
+            model_dir = runtime_root / "custom_models" / self.model_id
+
+        if model_dir.exists():
+            loaded = load_model(model_dir)
+            if loaded.has_custom_encoder:
+                return await self._query_custom_encoder_model(loaded, query)
 
         # Generic models — NL query pipeline
+        return await self._query_generic(query)
+
+    async def _query_custom_encoder_model(
+        self, loaded: Any, query: str,
+    ) -> dict[str, Any] | None:
+        """Query a model that has a custom encoder via the HDC engine."""
+        try:
+            cache_key = f"_model_{self.model_id}"
+            if not hasattr(ModelChatService, cache_key):
+                from glyphh.assistant.core import Assistant, AssistantConfig
+
+                config = AssistantConfig(
+                    model_path=loaded.glyphh_path,
+                    threshold=0.35,
+                )
+                assistant = Assistant(config)
+                assistant.load()
+                setattr(ModelChatService, cache_key, assistant)
+
+            assistant = getattr(ModelChatService, cache_key)
+            response = assistant._ask_offline(query)
+
+            return {
+                "state": response.state,
+                "confidence": response.confidence,
+                "match_method": response.match_method,
+                "command": response.command,
+                "code": response.code,
+                "fact_tree": {
+                    "text": response.content,
+                    "description": f"{self.model_id} response",
+                    "value": response.content,
+                    "children": [],
+                    "citations": [],
+                    "data_context": response.metadata or {},
+                },
+            }
+
+        except Exception as e:
+            logger.warning(f"Custom encoder query failed ({self.model_id}): {e}")
+            return None
+
+    async def _query_generic(self, query: str) -> dict[str, Any] | None:
+        """Query a model via the generic NL query pipeline."""
         try:
             from domains.query.service import QueryService
             from infrastructure.database import async_session_maker
@@ -223,45 +278,6 @@ class ModelChatService:
 
         except Exception as e:
             logger.warning(f"Model query failed ({self.org_id}/{self.model_id}): {e}")
-            return None
-
-    async def _query_assistant(self, query: str) -> dict[str, Any] | None:
-        """Query the assistant model using its dedicated HDC engine."""
-        try:
-            if not hasattr(ModelChatService, "_assistant_instance"):
-                from glyphh.assistant.core import Assistant, AssistantConfig
-                from pathlib import Path
-
-                model_path = Path(__file__).parent.parent.parent / "models" / "assistant" / "assistant.glyphh"
-                config = AssistantConfig(
-                    model_path=model_path,
-                    threshold=0.35,
-                )
-                assistant = Assistant(config)
-                assistant.load()
-                ModelChatService._assistant_instance = assistant
-
-            assistant = ModelChatService._assistant_instance
-            response = assistant._ask_offline(query)
-
-            return {
-                "state": response.state,
-                "confidence": response.confidence,
-                "match_method": response.match_method,
-                "command": response.command,
-                "code": response.code,
-                "fact_tree": {
-                    "text": response.content,
-                    "description": "Assistant Response",
-                    "value": response.content,
-                    "children": [],
-                    "citations": [],
-                    "data_context": response.metadata or {},
-                },
-            }
-
-        except Exception as e:
-            logger.warning(f"Assistant query failed: {e}")
             return None
 
     async def _synthesize(

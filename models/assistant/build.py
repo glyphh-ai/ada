@@ -2,12 +2,11 @@
 """
 Build assistant.glyphh from JSONL knowledge files.
 
-Self-contained script that lives inside the SDK repo. Can be run
-standalone or as part of the release pipeline.
+Standard model build script. Run from the model directory or
+via the runtime's model build pipeline:
 
-Usage:
-    python scripts/build_assistant_model.py
-    python scripts/build_assistant_model.py --output path/to/output.glyphh
+    python models/assistant/build.py
+    python models/assistant/build.py --output path/to/output.glyphh
 """
 
 import argparse
@@ -15,17 +14,23 @@ import json
 import sys
 from pathlib import Path
 
-# Ensure the runtime repo is importable
-runtime_root = Path(__file__).parent.parent
-sys.path.insert(0, str(runtime_root))
+MODEL_DIR = Path(__file__).parent
+RUNTIME_ROOT = MODEL_DIR.parent.parent
 
-from glyphh.model.package import GlyphhModel
-from glyphh.assistant.encoder_config import ASSISTANT_ENCODER_CONFIG
-from glyphh.assistant.concept_converter import entry_to_concept, procedure_to_concepts
+# Ensure both the runtime root (for glyphh.*) and model dir (for encoder.py) are importable
+sys.path.insert(0, str(RUNTIME_ROOT))
+sys.path.insert(0, str(MODEL_DIR))
 
-DATA_DIR = runtime_root / "models" / "assistant" / "data"
-DEFAULT_OUTPUT = runtime_root / "models" / "assistant" / "assistant.glyphh"
-JSONL_FILES = ["commands.jsonl", "concepts.jsonl", "gql.jsonl", "quick_actions.jsonl", "workflows.jsonl", "followups.jsonl"]
+from encoder import ENCODER_CONFIG  # noqa: E402 — from MODEL_DIR
+from glyphh.model.package import GlyphhModel  # noqa: E402
+from glyphh.assistant.concept_converter import entry_to_concept, procedure_to_concepts  # noqa: E402
+
+DATA_DIR = MODEL_DIR / "data"
+DEFAULT_OUTPUT = MODEL_DIR / "assistant.glyphh"
+JSONL_FILES = [
+    "commands.jsonl", "concepts.jsonl", "gql.jsonl",
+    "quick_actions.jsonl", "workflows.jsonl", "followups.jsonl",
+]
 
 
 def load_all_jsonl(data_dir: Path) -> list[dict]:
@@ -72,7 +77,10 @@ def concept_to_record(concept) -> dict:
     }
 
 
-def build_model(output_path: Path) -> None:
+def build(output_path: Path | None = None) -> None:
+    """Standard build entry point."""
+    output = output_path or DEFAULT_OUTPUT
+
     print("Loading JSONL data files...")
     entries = load_all_jsonl(DATA_DIR)
     if not entries:
@@ -100,25 +108,21 @@ def build_model(output_path: Path) -> None:
 
     model = GlyphhModel(
         name="glyphh-assistant",
-        version="1.0.0",
-        encoder_config=ASSISTANT_ENCODER_CONFIG,
+        version="0.2.0",
+        encoder_config=ENCODER_CONFIG,
         glyphs=[],
         readme="# Glyphh Assistant\n\nRouter-style model for the CLI assistant.",
         metadata={"domain": "assistant", "entry_count": len(records)},
     )
     model.set_concepts(records)
 
-    print(f"Saving to {output_path}...")
-    model.to_file(str(output_path))
-    print(f"\n+ Built {output_path} ({len(records)} concepts, dim={ASSISTANT_ENCODER_CONFIG.dimension})")
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Build assistant.glyphh")
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    args = parser.parse_args()
-    build_model(args.output)
+    print(f"Saving to {output}...")
+    model.to_file(str(output))
+    print(f"\n+ Built {output} ({len(records)} concepts, dim={ENCODER_CONFIG.dimension})")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Build assistant.glyphh")
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    args = parser.parse_args()
+    build(args.output)
