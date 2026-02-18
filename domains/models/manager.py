@@ -346,8 +346,10 @@ class ModelManager:
         Restore a model from its DB config row.
         
         Reconstructs the encoder and similarity calculator from the
-        stored encoder_config JSONB. Returns None if the row doesn't
-        exist or the encoder_config is missing.
+        stored encoder_config JSONB. Also attempts to load the custom
+        encode_query_fn from the model directory on disk (if it still
+        exists), so that query encoding works the same as after a fresh
+        startup via register_model_encoders.
         """
         async with self._db_session_factory() as session:
             result = await session.execute(
@@ -382,6 +384,11 @@ class ModelManager:
             encoder = adapter.create_encoder(encoder_config)
             similarity_calculator = adapter.create_similarity_calculator()
             
+            # Try to load encode_query_fn from the model directory on disk
+            encode_query_fn = None
+            if db_config.model_path:
+                encode_query_fn = self._load_encode_query_fn(db_config.model_path)
+            
             class RestoredModel:
                 """Minimal model proxy for DB-restored models."""
                 def __init__(self, name, version, config):
@@ -406,6 +413,7 @@ class ModelManager:
                 meta_name=db_config.meta_name or model_id,
                 short_description=db_config.short_description or "",
                 long_description=db_config.long_description or "",
+                encode_query_fn=encode_query_fn,
             )
             
             self._models[(org_id, model_id)] = loaded_model
@@ -413,6 +421,7 @@ class ModelManager:
             logger.info(
                 f"Restored model '{db_config.meta_name}' v{db_config.model_version} "
                 f"from DB for org={org_id}, model={model_id}"
+                f"{' (with custom encode_query_fn)' if encode_query_fn else ''}"
             )
             
             return loaded_model
@@ -421,6 +430,26 @@ class ModelManager:
             logger.error(
                 f"Failed to restore model org={org_id}, model={model_id} from DB: {e}"
             )
+            return None
+    
+    @staticmethod
+    def _load_encode_query_fn(model_path: str) -> Optional[Any]:
+        """Load encode_query_fn from a model directory's encoder.py.
+
+        Used by _load_from_db to restore the custom query encoder when
+        lazy-loading a model that was registered on a previous startup.
+        Returns None silently if the file doesn't exist or has no
+        encode_query function.
+        """
+        try:
+            from domains.models.loader import load_encoder_config
+            model_dir = Path(model_path)
+            if not model_dir.is_dir():
+                return None
+            _, _, encode_query_fn, _ = load_encoder_config(model_dir)
+            return encode_query_fn
+        except Exception as e:
+            logger.debug(f"Could not load encode_query_fn from {model_path}: {e}")
             return None
     
     async def list_models(self) -> List[ModelInfoResponse]:

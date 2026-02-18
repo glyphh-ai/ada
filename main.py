@@ -83,12 +83,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     # Auto-deploy models from directory (JSONL → DB)
     try:
-        from scripts.deploy_models import deploy_all_models, register_model_encoders
+        from scripts.deploy_models import deploy_all_models
         results = await deploy_all_models(
             model_manager=model_manager,
             session_factory=async_session_maker,
         )
-        await register_model_encoders(model_manager, async_session_maker)
         total_glyphs = sum(results.values())
         logger.info(f"Deployed {len(results)} models, {total_glyphs} total glyphs")
     except Exception as e:

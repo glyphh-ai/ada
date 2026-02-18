@@ -197,11 +197,12 @@ class TestDeadCodeRemoval:
 
     def test_main_calls_deploy_all_models(self):
         """main.py should call deploy_all_models from deploy_models.
+        Models are lazy-loaded from DB on first query — no eager
+        register_model_encoders call needed.
         **Validates: Requirements 5.1**"""
         main_path = Path(__file__).parent.parent.parent / "main.py"
         content = main_path.read_text()
         assert "deploy_all_models" in content
-        assert "register_model_encoders" in content
 
 
 
