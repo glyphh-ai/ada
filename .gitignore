@@ -70,6 +70,6 @@ Thumbs.db
 # Hypothesis test cache
 .hypothesis/
 
-# Rust
-target/
-Cargo.lock
+# Glyphh engine (embedded SDK) — track the package, ignore caches
+glyphh/__pycache__/
+glyphh/**/__pycache__/
