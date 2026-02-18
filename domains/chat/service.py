@@ -201,9 +201,57 @@ class ModelChatService:
                 )
             if raw_content and confidence > 0.0:
                 return await self._synthesize(message, glyphh_result, history, trace_id)
+
+            # Zero confidence: check if the model is actually functional
+            # before letting the LLM generate ungrounded responses
+            if confidence == 0.0:
+                model_ok = await self._check_model_health()
+                if not model_ok:
+                    return ChatResult(
+                        content=(
+                            f"the {self.model_id} model is not deployed or has no data. "
+                            "please check that the model directory exists and the runtime "
+                            "has deployed it successfully."
+                        ),
+                        state="ERROR",
+                        match_method="none",
+                        trace_id=trace_id,
+                    )
+                # Model is healthy but had zero confidence — no match
+                return ChatResult(
+                    content="no matching answer found in the knowledge base.",
+                    state="NO_MATCH",
+                    confidence=0.0,
+                    match_method="glyphh",
+                    provider="glyphh",
+                    trace_id=trace_id,
+                )
+
             return await self._llm_fallback(message, history, trace_id)
 
         # No LLM — return whatever Glyphh gave us
+        if confidence == 0.0:
+            model_ok = await self._check_model_health()
+            if not model_ok:
+                return ChatResult(
+                    content=(
+                        f"the {self.model_id} model is not deployed or has no data. "
+                        "please check that the model directory exists and the runtime "
+                        "has deployed it successfully."
+                    ),
+                    state="ERROR",
+                    match_method="none",
+                    trace_id=trace_id,
+                )
+            return ChatResult(
+                content="no matching answer found in the knowledge base.",
+                state="NO_MATCH",
+                confidence=0.0,
+                match_method="glyphh",
+                provider="glyphh",
+                trace_id=trace_id,
+            )
+
         return ChatResult(
             content=raw_content or "no answer found.",
             confidence=confidence,
@@ -229,6 +277,24 @@ class ModelChatService:
 
         # Step 2: DB-backed query (similarity search with custom encode_query_fn)
         return await self._query_generic(query)
+
+    async def _check_model_health(self) -> bool:
+        """Check if the model has glyphs deployed and is functional.
+
+        Returns True if the model has data in the DB, False otherwise.
+        """
+        try:
+            from domains.models.storage import GlyphStorage
+            from infrastructure.database import async_session_maker
+
+            async with async_session_maker() as session:
+                storage = GlyphStorage(session)
+                count = await storage.count_glyphs(self.org_id, self.model_id)
+                return count > 0
+        except Exception as e:
+            logger.warning(f"Model health check failed ({self.org_id}/{self.model_id}): {e}")
+            return False
+
 
     async def _check_stored_procedures(self, query: str) -> dict[str, Any] | None:
         """Check if query matches a stored procedure for this model.
