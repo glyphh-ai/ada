@@ -1,0 +1,67 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/engine",
+    "crates/models",
+    "crates/runtime-core",
+    "crates/runtime-api",
+    "crates/platform-client",
+    "crates/ui-host",
+    "bin/glyphh",
+]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2021"
+license = "BUSL-1.1"
+repository = "https://github.com/glyphh-ai/glyphh-runtime"
+
+[workspace.dependencies]
+# Internal crates
+glyphh-engine = { path = "crates/engine" }
+glyphh-models = { path = "crates/models" }
+glyphh-runtime-core = { path = "crates/runtime-core" }
+glyphh-runtime-api = { path = "crates/runtime-api" }
+glyphh-platform-client = { path = "crates/platform-client" }
+glyphh-ui-host = { path = "crates/ui-host" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Web framework
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "chrono", "uuid"] }
+
+# Crypto / hashing
+sha2 = "0.10"
+rand = "0.8"
+rand_chacha = "0.3"
+
+# Compression (for .glyphh files)
+flate2 = "1"
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

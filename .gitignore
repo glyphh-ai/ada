@@ -69,3 +69,7 @@ Thumbs.db
 
 # Hypothesis test cache
 .hypothesis/
+
+# Rust
+target/
+Cargo.lock

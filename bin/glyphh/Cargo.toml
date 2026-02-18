@@ -1,0 +1,17 @@
+[package]
+name = "glyphh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Glyphh runtime — single binary entry point"
+
+[[bin]]
+name = "glyphh"
+path = "src/main.rs"
+
+[dependencies]
+glyphh-runtime-api = { workspace = true }
+glyphh-ui-host = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

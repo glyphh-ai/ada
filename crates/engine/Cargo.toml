@@ -1,0 +1,16 @@
+[package]
+name = "glyphh-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure glyph execution engine: VSA math, encoding, similarity, GQL parsing"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
