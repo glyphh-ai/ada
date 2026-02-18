@@ -8,10 +8,13 @@ import uuid
 from datetime import datetime
 from typing import List
 
-from sqlalchemy import Column, String, Text, DateTime, CheckConstraint
+from sqlalchemy import Column, JSON, String, Text, DateTime
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 
 from infrastructure.database.connection import Base
+
+# Use ARRAY(Text) on PostgreSQL, plain JSON on SQLite/others
+ArrayType = JSON().with_variant(ARRAY(Text), "postgresql")
 
 
 class StoredProcedureModel(Base):
@@ -27,7 +30,7 @@ class StoredProcedureModel(Base):
         model_id: Model ID for scoping
         name: Unique procedure name within org/model scope
         gql_query: The GQL query string
-        lexicons: List of keywords for NL matching
+        lexicons: List of keywords for NL matching (ARRAY on PG, JSON on SQLite)
         description: Human-readable description
         created_at: Creation timestamp
         updated_at: Last update timestamp
@@ -39,15 +42,10 @@ class StoredProcedureModel(Base):
     model_id = Column(String(255), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     gql_query = Column(Text, nullable=False)
-    lexicons = Column(ARRAY(Text), nullable=False)
+    lexicons = Column(ArrayType, nullable=False)
     description = Column(Text, default="")
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-    
-    __table_args__ = (
-        CheckConstraint("name ~ '^[a-zA-Z][a-zA-Z0-9_]*$'", name="ck_procedure_valid_name"),
-        CheckConstraint("array_length(lexicons, 1) > 0", name="ck_procedure_has_lexicons"),
-    )
     
     def __repr__(self) -> str:
         return f"<StoredProcedure(name={self.name}, org_id={self.org_id}, model_id={self.model_id})>"
