@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     # Model storage
     model_storage_path: str = Field(
         default="/data/models",
-        description="Persistent directory for deployed .glyphh model files"
+        description="Persistent directory for model data"
     )
     
     # Edge generation

@@ -1,9 +1,13 @@
 """
-Glyphh Runtime - Execution environment for deployed .glyphh models
+Glyphh Runtime - Execution environment for directory-based models
 
 This runtime serves deployed models through REST and MCP APIs,
 handling persistent storage, multi-model management, licensing,
 authentication, and real-time data ingestion.
+
+Models are directories under models/ and custom_models/ containing
+manifest.yaml, encoder.py, and data/*.jsonl files. On startup, the
+runtime discovers and deploys eligible models to PostgreSQL.
 """
 
 import logging
@@ -119,7 +123,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # Create FastAPI application
 app = FastAPI(
     title="Glyphh Runtime",
-    description="Execution environment for deployed .glyphh models",
+    description="Execution environment for directory-based models",
     version="0.2.11",
     docs_url="/docs" if settings.deployment_mode == "local" else None,
     redoc_url="/redoc" if settings.deployment_mode == "local" else None,
