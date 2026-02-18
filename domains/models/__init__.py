@@ -5,6 +5,7 @@ from .loader import (
     load_encoder_config,
     load_model,
     discover_models,
+    count_exemplars,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "load_encoder_config",
     "load_model",
     "discover_models",
+    "count_exemplars",
 ]

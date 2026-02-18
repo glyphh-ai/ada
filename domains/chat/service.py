@@ -28,6 +28,36 @@ logger = logging.getLogger(__name__)
 _MAX_HISTORY_TURNS = 6
 
 
+def _extract_glyph_metadata(response_data: dict) -> dict:
+    """Extract response/command/code from glyph metadata in NL query results.
+
+    Looks through fact_tree children for glyph metadata and surfaces
+    the top match's response, command, and code fields.
+    """
+    fact_tree = response_data.get("fact_tree")
+    if not fact_tree:
+        return response_data
+
+    children = fact_tree.get("children", []) if isinstance(fact_tree, dict) else []
+    if not children:
+        return response_data
+
+    top = children[0] if children else {}
+    metadata = top.get("data_context", {}) or top.get("metadata", {})
+
+    if metadata.get("response") and not response_data.get("command"):
+        response_data.setdefault("command", metadata.get("command"))
+    if metadata.get("code") and not response_data.get("code"):
+        response_data.setdefault("code", metadata.get("code"))
+
+    # Use response from metadata as fact_tree text if not already set
+    if metadata.get("response"):
+        if isinstance(fact_tree, dict) and not fact_tree.get("text"):
+            fact_tree["text"] = metadata["response"]
+
+    return response_data
+
+
 @dataclass
 class ChatTurn:
     """A single turn in the conversation."""
@@ -185,88 +215,21 @@ class ModelChatService:
         )
 
     async def _query_model(self, query: str) -> dict[str, Any] | None:
-        """Query the deployed model through the unified NL pipeline.
+        """Query the deployed model through the unified pipeline.
 
-        Flow for every model:
+        Flow:
           1. Check stored procedures (GQL queries registered for this model)
-          2. If model has embedded concepts (.glyphh with custom encoder):
-             encode with model's encoder → similarity search against concepts
-          3. Otherwise: generic NL pipeline (IntentMatcher → QueryService)
-          4. Return FactTree-shaped result for LLM synthesis
-
-        No special cases — every model goes through the same pipeline.
+          2. DB-backed similarity search via QueryService
+          3. Return FactTree-shaped result for LLM synthesis
         """
         # Step 1: Check stored procedures first (highest priority)
         proc_result = await self._check_stored_procedures(query)
         if proc_result is not None:
             return proc_result
 
-        # Step 2: Try embedded concept search (models with .glyphh + custom encoder)
-        concept_result = await self._query_embedded_concepts(query)
-        if concept_result is not None:
-            return concept_result
-
-        # Step 3: Generic NL pipeline (DB-backed models)
+        # Step 2: DB-backed query (similarity search with custom encode_query_fn)
         return await self._query_generic(query)
 
-    async def _query_embedded_concepts(
-        self, query: str,
-    ) -> dict[str, Any] | None:
-        """Query a model's embedded concepts via its custom HDC encoder.
-
-        This is the path for models that ship with a .glyphh file containing
-        pre-encoded concepts (like the assistant model). Uses the model's own
-        encoder for similarity search against embedded exemplars.
-        """
-        from domains.models import load_model
-        from pathlib import Path
-
-        runtime_root = Path(__file__).parent.parent.parent
-        model_dir = runtime_root / "models" / self.model_id
-        if not model_dir.exists():
-            model_dir = runtime_root / "custom_models" / self.model_id
-        if not model_dir.exists():
-            return None
-
-        loaded = load_model(model_dir)
-        if not loaded.has_custom_encoder or not loaded.glyphh_path:
-            return None
-
-        try:
-            cache_key = f"_model_{self.model_id}"
-            if not hasattr(ModelChatService, cache_key):
-                from glyphh.assistant.core import Assistant, AssistantConfig
-
-                config = AssistantConfig(
-                    model_path=loaded.glyphh_path,
-                    threshold=0.35,
-                )
-                assistant = Assistant(config)
-                assistant.load()
-                setattr(ModelChatService, cache_key, assistant)
-
-            assistant = getattr(ModelChatService, cache_key)
-            response = assistant._ask_offline(query)
-
-            return {
-                "state": response.state,
-                "confidence": response.confidence,
-                "match_method": response.match_method,
-                "command": response.command,
-                "code": response.code,
-                "fact_tree": {
-                    "text": response.content,
-                    "description": f"{self.model_id} response",
-                    "value": response.content,
-                    "children": [],
-                    "citations": [],
-                    "data_context": response.metadata or {},
-                },
-            }
-
-        except Exception as e:
-            logger.warning(f"Embedded concept query failed ({self.model_id}): {e}")
-            return None
     async def _check_stored_procedures(self, query: str) -> dict[str, Any] | None:
         """Check if query matches a stored procedure for this model.
 
@@ -359,9 +322,15 @@ class ModelChatService:
 
 
     async def _query_generic(self, query: str) -> dict[str, Any] | None:
-        """Query a model via the generic NL query pipeline."""
+        """Query a model via DB similarity search.
+
+        Uses QueryService.similarity_search which now dispatches to
+        the model's custom encode_query_fn when available.
+        Extracts response/command/code from glyph metadata.
+        """
         try:
             from domains.query.service import QueryService
+            from domains.models.schemas import SimilaritySearchRequest
             from infrastructure.database import async_session_maker
             from main import model_manager
 
@@ -370,27 +339,78 @@ class ModelChatService:
                 return None
 
             service = QueryService(model_manager, async_session_maker)
-            from domains.nl_query.service import NLQueryService
-            from domains.nl_query.intent_matcher import IntentMatcher
 
-            intent_matcher = IntentMatcher(confidence_threshold=0.85)
-            nl_service = NLQueryService(
-                query_service=service,
-                intent_matcher=intent_matcher,
-                confidence_threshold=0.85,
-            )
+            # Try NL query pipeline first (if available)
+            try:
+                from domains.nl_query.service import NLQueryService
+                from domains.nl_query.intent_matcher import IntentMatcher
 
-            result = await nl_service.execute_nl_query(
+                intent_matcher = IntentMatcher(confidence_threshold=0.85)
+                nl_service = NLQueryService(
+                    query_service=service,
+                    intent_matcher=intent_matcher,
+                    confidence_threshold=0.85,
+                )
+
+                result = await nl_service.execute_nl_query(
+                    org_id=self.org_id,
+                    model_id=self.model_id,
+                    query=query,
+                )
+
+                response_data = result.to_dict()
+                if result.fact_tree is not None:
+                    response_data["result"] = result.fact_tree.to_json()
+
+                # Extract glyph metadata from NL result
+                response_data = _extract_glyph_metadata(response_data)
+                return response_data
+
+            except ImportError:
+                pass  # NL pipeline not available, fall through to direct search
+
+            # Direct similarity search fallback
+            request = SimilaritySearchRequest(query=query, top_k=5)
+            fact_tree = await service.similarity_search(
                 org_id=self.org_id,
                 model_id=self.model_id,
-                query=query,
+                request=request,
             )
 
-            response_data = result.to_dict()
-            if result.fact_tree is not None:
-                response_data["result"] = result.fact_tree.to_json()
+            # Build result dict from FactTree
+            ft_json = fact_tree.to_json() if hasattr(fact_tree, "to_json") else {}
+            ft_dict = json.loads(ft_json) if isinstance(ft_json, str) else ft_json
 
-            return response_data
+            # Extract top match metadata
+            children = ft_dict.get("children", [])
+            top_metadata = {}
+            confidence = 0.0
+            text = ""
+
+            if children:
+                top = children[0]
+                top_metadata = top.get("data_context", {}) or top.get("metadata", {})
+                confidence = top.get("confidence", 0.0)
+                text = top_metadata.get("response", "") or top.get("text", "")
+
+            command = top_metadata.get("command")
+            code = top_metadata.get("code")
+
+            return {
+                "state": "DONE" if text else "ERROR",
+                "confidence": confidence,
+                "match_method": "glyphh",
+                "command": command,
+                "code": code,
+                "fact_tree": {
+                    "text": text,
+                    "description": f"{self.model_id} response",
+                    "value": text,
+                    "children": children,
+                    "citations": ft_dict.get("citations", []),
+                    "data_context": top_metadata,
+                },
+            }
 
         except Exception as e:
             logger.warning(f"Model query failed ({self.org_id}/{self.model_id}): {e}")

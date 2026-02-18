@@ -62,6 +62,7 @@ class LoadedModel:
         meta_name: str,
         short_description: str,
         long_description: str,
+        encode_query_fn: Optional[Any] = None,
     ):
         self.org_id = org_id
         self.model_id = model_id
@@ -74,6 +75,7 @@ class LoadedModel:
         self.meta_name = meta_name
         self.short_description = short_description
         self.long_description = long_description
+        self.encode_query_fn = encode_query_fn
 
 
 class ReEncodeJob:

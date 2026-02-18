@@ -6,6 +6,7 @@ license: proprietary
 icon: 🤖
 category: assistant
 public: false
+load_on_startup: true
 tags:
   - assistant
   - internal

@@ -39,6 +39,7 @@ class ModelManifest:
     icon: str = ""
     category: str = ""
     public: bool = True
+    load_on_startup: bool = False
     tags: list[str] = field(default_factory=list)
 
 
@@ -52,6 +53,8 @@ class LoadedModel:
     encoder_config: Any = None
     has_custom_encoder: bool = False
     has_build_script: bool = False
+    encode_query_fn: Any = None  # callable(query: str) -> Concept
+    entry_to_record_fn: Any = None  # callable(entry: dict) -> dict
     source: str = "core"  # "core" or "custom"
     exemplar_count: int = 0
 
@@ -91,6 +94,7 @@ def load_manifest(model_dir: Path) -> ModelManifest:
             icon=data.get("icon", ""),
             category=data.get("category", ""),
             public=data.get("public", True),
+            load_on_startup=data.get("load_on_startup", False),
             tags=data.get("tags", []),
         )
     except Exception as e:
@@ -98,23 +102,23 @@ def load_manifest(model_dir: Path) -> ModelManifest:
         return ModelManifest(model_id=model_id, name=model_id)
 
 
-def load_encoder_config(model_dir: Path) -> tuple[Any, bool]:
+def load_encoder_config(model_dir: Path) -> tuple[Any, bool, Any, Any]:
     """Load encoder config from a model directory.
 
-    Returns (encoder_config, is_custom).
-    If encoder.py exists, imports ENCODER_CONFIG from it.
-    Otherwise returns (None, False) — caller uses config.yaml.
+    Returns (encoder_config, is_custom, encode_query_fn, entry_to_record_fn).
+    If encoder.py exists, imports ENCODER_CONFIG and optional functions.
+    Otherwise returns (None, False, None, None).
     """
     encoder_path = model_dir / "encoder.py"
     if not encoder_path.exists():
-        return None, False
+        return None, False, None, None
 
     try:
         spec = importlib.util.spec_from_file_location(
             f"model_encoder_{model_dir.name}", encoder_path
         )
         if spec is None or spec.loader is None:
-            return None, False
+            return None, False, None, None
 
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -122,14 +126,17 @@ def load_encoder_config(model_dir: Path) -> tuple[Any, bool]:
         encoder_config = getattr(module, "ENCODER_CONFIG", None)
         if encoder_config is None:
             logger.warning(f"encoder.py in {model_dir.name} has no ENCODER_CONFIG")
-            return None, False
+            return None, False, None, None
+
+        encode_query_fn = getattr(module, "encode_query", None)
+        entry_to_record_fn = getattr(module, "entry_to_record", None)
 
         logger.info(f"Loaded custom encoder for {model_dir.name}")
-        return encoder_config, True
+        return encoder_config, True, encode_query_fn, entry_to_record_fn
 
     except Exception as e:
         logger.warning(f"Failed to load encoder.py for {model_dir.name}: {e}")
-        return None, False
+        return None, False, None, None
 
 
 def count_exemplars(model_dir: Path) -> int:
@@ -149,7 +156,7 @@ def count_exemplars(model_dir: Path) -> int:
 def load_model(model_dir: Path, source: str = "core") -> LoadedModel:
     """Load a model from its directory."""
     manifest = load_manifest(model_dir)
-    encoder_config, has_custom = load_encoder_config(model_dir)
+    encoder_config, has_custom, encode_query_fn, entry_to_record_fn = load_encoder_config(model_dir)
     glyphh_files = list(model_dir.glob("*.glyphh"))
 
     return LoadedModel(
@@ -160,6 +167,8 @@ def load_model(model_dir: Path, source: str = "core") -> LoadedModel:
         encoder_config=encoder_config,
         has_custom_encoder=has_custom,
         has_build_script=(model_dir / "build.py").exists(),
+        encode_query_fn=encode_query_fn,
+        entry_to_record_fn=entry_to_record_fn,
         source=source,
         exemplar_count=count_exemplars(model_dir),
     )

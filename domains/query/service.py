@@ -649,19 +649,33 @@ class QueryService:
         model_id: str = None,
     ) -> List[float]:
         """
-        Encode query text using SDK encoder with lexicon-based role matching.
+        Encode query text using SDK encoder.
         
         Flow:
-        1. Extract role lexicons from encoder config
-        2. Match query against lexicons to identify relevant roles
-        3. Find a reference glyph from existing data that matches the query
-        4. Use reference glyph's embedding for similarity search
-        5. Fall back to direct encoding if no reference found
+        1. If model has a custom encode_query_fn, use it to create a Concept
+        2. Encode the Concept with the model's Encoder
+        3. Fall back to generic lexicon-based encoding if no custom fn
+        4. If custom fn raises, fall back to generic encoding
         """
         try:
             from glyphh import Concept
             
-            # Extract role lexicons from encoder config
+            # Try custom encode_query_fn first
+            if org_id and model_id:
+                loaded_model = await self._model_manager.get_model(org_id, model_id)
+                if loaded_model and getattr(loaded_model, 'encode_query_fn', None):
+                    try:
+                        concept = loaded_model.encode_query_fn(query)
+                        glyph = encoder.encode(concept)
+                        return glyph.global_cortex.data.astype(float).tolist()
+                    except Exception as e:
+                        logger.warning(
+                            f"Custom encode_query_fn failed for {model_id}: {e}, "
+                            f"falling back to generic encoding"
+                        )
+                        # fall through to generic encoding
+            
+            # Generic encoding: lexicon matching + reference glyph lookup
             role_lexicons = self._extract_role_lexicons(encoder)
             
             if role_lexicons:
