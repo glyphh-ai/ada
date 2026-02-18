@@ -30,6 +30,7 @@ opentelemetry-exporter-otlp>=1.20.0
 numpy>=1.24.0
 httpx>=0.24.0
 psutil>=5.9.0
+pyyaml>=6.0
 
 # SDK (installed separately via GitHub)
 # glyphh @ git+https://${SDK_TOKEN}@github.com/glyphh-ai/glyphh-sdk.git@${SDK_REF}
