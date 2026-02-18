@@ -1,0 +1,154 @@
+{
+  "concepts": [
+    {
+      "name": "red_car",
+      "attributes": {
+        "type": "car",
+        "color": "red",
+        "size": "medium",
+        "speed": "fast"
+      },
+      "relationships": [
+        ["has_part", "wheels"],
+        ["has_part", "engine"],
+        ["used_for", "transportation"]
+      ],
+      "metadata": {
+        "domain": "automotive",
+        "created_by": "test_user",
+        "timestamp": 1705320600
+      }
+    },
+    {
+      "name": "blue_car",
+      "attributes": {
+        "type": "car",
+        "color": "blue",
+        "size": "medium",
+        "speed": "fast"
+      },
+      "relationships": [
+        ["has_part", "wheels"],
+        ["has_part", "engine"],
+        ["used_for", "transportation"]
+      ],
+      "metadata": {
+        "domain": "automotive",
+        "created_by": "test_user",
+        "timestamp": 1705320900
+      }
+    },
+    {
+      "name": "red_truck",
+      "attributes": {
+        "type": "truck",
+        "color": "red",
+        "size": "large",
+        "speed": "slow"
+      },
+      "relationships": [
+        ["has_part", "wheels"],
+        ["has_part", "engine"],
+        ["used_for", "cargo_transport"]
+      ],
+      "metadata": {
+        "domain": "automotive",
+        "created_by": "test_user",
+        "timestamp": 1705321200
+      }
+    },
+    {
+      "name": "bicycle",
+      "attributes": {
+        "type": "bicycle",
+        "color": "green",
+        "size": "small",
+        "speed": "slow"
+      },
+      "relationships": [
+        ["has_part", "wheels"],
+        ["has_part", "pedals"],
+        ["used_for", "exercise"]
+      ],
+      "metadata": {
+        "domain": "automotive",
+        "created_by": "test_user",
+        "timestamp": 1705321500
+      }
+    },
+    {
+      "name": "apple",
+      "attributes": {
+        "type": "fruit",
+        "color": "red",
+        "size": "small",
+        "taste": "sweet"
+      },
+      "relationships": [
+        ["part_of", "tree"],
+        ["used_for", "eating"]
+      ],
+      "metadata": {
+        "domain": "food",
+        "created_by": "test_user",
+        "timestamp": 1705321800
+      }
+    },
+    {
+      "name": "banana",
+      "attributes": {
+        "type": "fruit",
+        "color": "yellow",
+        "size": "medium",
+        "taste": "sweet"
+      },
+      "relationships": [
+        ["part_of", "tree"],
+        ["used_for", "eating"]
+      ],
+      "metadata": {
+        "domain": "food",
+        "created_by": "test_user",
+        "timestamp": 1705322100
+      }
+    },
+    {
+      "name": "dog",
+      "attributes": {
+        "type": "animal",
+        "color": "brown",
+        "size": "medium",
+        "sound": "bark"
+      },
+      "relationships": [
+        ["has_part", "legs"],
+        ["has_part", "tail"],
+        ["used_for", "companionship"]
+      ],
+      "metadata": {
+        "domain": "animals",
+        "created_by": "test_user",
+        "timestamp": 1705322400
+      }
+    },
+    {
+      "name": "cat",
+      "attributes": {
+        "type": "animal",
+        "color": "black",
+        "size": "small",
+        "sound": "meow"
+      },
+      "relationships": [
+        ["has_part", "legs"],
+        ["has_part", "tail"],
+        ["used_for", "companionship"]
+      ],
+      "metadata": {
+        "domain": "animals",
+        "created_by": "test_user",
+        "timestamp": 1705322700
+      }
+    }
+  ]
+}

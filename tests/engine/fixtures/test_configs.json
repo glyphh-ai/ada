@@ -1,0 +1,95 @@
+{
+  "configs": [
+    {
+      "name": "minimal_config",
+      "description": "Minimal configuration with default settings",
+      "config": {
+        "dimension": 1000,
+        "seed": 42,
+        "num_layers": 1,
+        "segments_per_layer": 2,
+        "default_roles": ["type", "value"]
+      }
+    },
+    {
+      "name": "standard_config",
+      "description": "Standard configuration for typical use cases",
+      "config": {
+        "dimension": 5000,
+        "seed": 12345,
+        "num_layers": 1,
+        "segments_per_layer": 2,
+        "default_roles": ["type", "color", "size", "value"],
+        "similarity_weights": {
+          "cortex": 1.0,
+          "layer": 0.8,
+          "segment": 0.9,
+          "role": 1.0
+        },
+        "security_weights": {
+          "cortex": 0.9,
+          "layer": 0.8,
+          "segment": 0.7,
+          "role": 0.5
+        }
+      }
+    },
+    {
+      "name": "high_dimensional_config",
+      "description": "High-dimensional configuration for complex models",
+      "config": {
+        "dimension": 10000,
+        "seed": 99999,
+        "num_layers": 2,
+        "segments_per_layer": 3,
+        "default_roles": ["type", "color", "size", "shape", "material"],
+        "similarity_weights": {
+          "cortex": 1.0,
+          "layer": 0.7,
+          "segment": 0.85,
+          "role": 0.9
+        },
+        "security_weights": {
+          "cortex": 1.0,
+          "layer": 0.9,
+          "segment": 0.8,
+          "role": 0.6
+        }
+      }
+    },
+    {
+      "name": "multi_layer_config",
+      "description": "Multi-layer configuration for hierarchical encoding",
+      "config": {
+        "dimension": 8000,
+        "seed": 54321,
+        "num_layers": 3,
+        "segments_per_layer": 2,
+        "default_roles": ["type", "attribute", "relation"],
+        "similarity_weights": {
+          "cortex": 1.0,
+          "layer": 0.75,
+          "segment": 0.8,
+          "role": 0.95
+        },
+        "security_weights": {
+          "cortex": 0.95,
+          "layer": 0.85,
+          "segment": 0.75,
+          "role": 0.65
+        }
+      }
+    },
+    {
+      "name": "low_dimensional_config",
+      "description": "Low-dimensional configuration for testing and debugging",
+      "config": {
+        "dimension": 500,
+        "seed": 1,
+        "num_layers": 1,
+        "segments_per_layer": 1,
+        "default_roles": ["type"]
+      }
+    }
+  ]
+}
