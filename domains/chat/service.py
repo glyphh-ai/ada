@@ -112,24 +112,26 @@ class ModelChatService:
     ) -> ChatResult:
         """Process a user message through Glyphh match + optional LLM.
 
-        1. If follow-up with history: LLM-only with conversation context
-        2. Query the Glyphh model via internal service
-        3. If confident match with content: return pure Glyphh answer
-        4. If match but no content: LLM synthesizes from fact_tree
-        5. Fallback: LLM answers from general knowledge
+        Every query — including follow-ups — goes through Glyphh first.
+        The LLM is only used when Glyphh has no confident match, and even
+        then it's grounded in whatever Glyphh facts are available.
+
+        1. Query the Glyphh model
+        2. If confident match with content: return pure Glyphh answer
+        3. If follow-up with low confidence: LLM with history + Glyphh facts
+        4. If low confidence, not follow-up: LLM fallback with Glyphh facts
+        5. No LLM available: return raw Glyphh result or error
         """
         trace_id = str(uuid.uuid4())[:8]
         history = history or []
 
-        # Follow-ups go straight to LLM with conversation context
-        if is_followup and history and self._llm:
-            return await self._llm_with_history(message, history, trace_id)
-
-        # Query the Glyphh model
+        # Always query the Glyphh model first — no exceptions
         glyphh_result = await self._query_model(message)
 
         if glyphh_result is None:
             # Model query failed entirely
+            if is_followup and history and self._llm:
+                return await self._llm_with_history(message, history, trace_id)
             if self._llm:
                 return await self._llm_fallback(message, history, trace_id)
             return ChatResult(
@@ -144,9 +146,11 @@ class ModelChatService:
         command = glyphh_result.get("command")
         code = glyphh_result.get("code")
         match_method = glyphh_result.get("match_method", "glyphh")
+        state = glyphh_result.get("state", "DONE")
 
         # Pure Glyphh path: confident match with content → return directly
-        if raw_content and confidence > 0.0:
+        # This applies to ALL queries including follow-ups
+        if raw_content and state == "DONE" and confidence >= 0.35:
             return ChatResult(
                 content=raw_content,
                 command=command,
@@ -154,25 +158,28 @@ class ModelChatService:
                 confidence=confidence,
                 match_method=match_method,
                 fact_tree=fact_tree,
-                state=glyphh_result.get("state", "DONE"),
+                state=state,
                 provider="glyphh",
                 trace_id=trace_id,
             )
 
-        # Match but no content → LLM synthesizes from fact_tree
-        if confidence > 0.0 and self._llm:
-            return await self._synthesize(message, glyphh_result, history, trace_id)
-
-        # No match → LLM fallback
+        # Low confidence — LLM assists, grounded in Glyphh facts
         if self._llm:
+            if is_followup and history:
+                return await self._llm_with_history(
+                    message, history, trace_id, glyphh_result=glyphh_result,
+                )
+            if raw_content and confidence > 0.0:
+                return await self._synthesize(message, glyphh_result, history, trace_id)
             return await self._llm_fallback(message, history, trace_id)
 
+        # No LLM — return whatever Glyphh gave us
         return ChatResult(
-            content="no answer found.",
+            content=raw_content or "no answer found.",
             confidence=confidence,
             match_method=match_method,
             fact_tree=fact_tree,
-            state="DONE",
+            state=state,
             provider="glyphh",
             trace_id=trace_id,
         )
@@ -353,15 +360,40 @@ class ModelChatService:
         message: str,
         history: list[ChatTurn],
         trace_id: str,
+        glyphh_result: dict[str, Any] | None = None,
     ) -> ChatResult:
-        """LLM response for conversational follow-ups using history context."""
+        """LLM response for conversational follow-ups, grounded in Glyphh facts.
+
+        If Glyphh returned a partial match, include those facts so the LLM
+        doesn't hallucinate. If no Glyphh result, the LLM uses history only
+        but is instructed to stay within the domain.
+        """
+        # Build grounding context from Glyphh result if available
+        grounding = ""
+        confidence = 0.0
+        if glyphh_result:
+            confidence = glyphh_result.get("confidence", 0.0)
+            fact_tree = glyphh_result.get("fact_tree")
+            raw_content = fact_tree.get("text", "") if fact_tree else ""
+            if raw_content:
+                grounding = (
+                    f"\n\n--- Glyphh knowledge base (confidence: {confidence:.0%}) ---\n"
+                    f"{raw_content}\n"
+                    f"--- end ---\n\n"
+                    "Use the knowledge base content above to ground your answer. "
+                    "If the confidence is low, you may paraphrase but don't invent "
+                    "features or details not in the knowledge base."
+                )
+
         extra = (
             "\n\nThis is a conversational follow-up. The user is continuing "
             "a previous topic. Use the conversation history to give a relevant, "
-            "grounded answer. Stay factual — don't speculate."
+            "grounded answer. Stay factual — don't speculate. If you don't have "
+            "enough information from the knowledge base or conversation history, "
+            "say so honestly rather than making things up."
         )
         messages: list[LLMMessage] = [
-            LLMMessage(role="system", content=self._system_prompt + extra),
+            LLMMessage(role="system", content=self._system_prompt + extra + grounding),
         ]
         for turn in history[-_MAX_HISTORY_TURNS:]:
             messages.append(LLMMessage(role=turn.role, content=turn.content))
@@ -371,6 +403,7 @@ class ModelChatService:
             llm_resp = await self._llm.complete(messages, max_tokens=512, temperature=0.3)
             return ChatResult(
                 content=llm_resp.content.strip(),
+                confidence=confidence,
                 match_method="llm-followup",
                 provider=self._llm.provider_name(),
                 usage=llm_resp.usage,
@@ -378,6 +411,18 @@ class ModelChatService:
             )
         except Exception as e:
             logger.error(f"LLM follow-up failed: {e}")
+            # Fall back to raw Glyphh content if available
+            if glyphh_result:
+                ft = glyphh_result.get("fact_tree")
+                fallback = ft.get("text", "") if ft else ""
+                if fallback:
+                    return ChatResult(
+                        content=fallback,
+                        confidence=confidence,
+                        match_method="glyphh-fallback",
+                        provider="glyphh",
+                        trace_id=trace_id,
+                    )
             return ChatResult(
                 content="couldn't generate a follow-up response. try asking again.",
                 state="ERROR",
