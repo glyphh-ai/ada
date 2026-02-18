@@ -365,21 +365,10 @@ class ModelChatService:
                 request=request,
             )
 
-            return {
-                "state": "DONE",
-                "confidence": 1.0,
-                "match_method": "stored_procedure",
-                "command": None,
-                "code": None,
-                "fact_tree": {
-                    "text": fact_tree.text if hasattr(fact_tree, 'text') else str(fact_tree),
-                    "description": f"Procedure: {procedure.name}",
-                    "value": "",
-                    "children": [],
-                    "citations": [],
-                    "data_context": {"procedure": procedure.name},
-                },
-            }
+            result = self._parse_fact_tree(fact_tree, match_method="stored_procedure")
+            # Override confidence for stored procedures (exact match)
+            result["confidence"] = 1.0
+            return result
 
         except Exception as e:
             logger.warning(f"Procedure execution failed ({procedure.name}): {e}")
@@ -424,13 +413,8 @@ class ModelChatService:
                     query=query,
                 )
 
-                response_data = result.to_dict()
-                if result.fact_tree is not None:
-                    response_data["result"] = result.fact_tree.to_json()
-
-                # Extract glyph metadata from NL result
-                response_data = _extract_glyph_metadata(response_data)
-                return response_data
+                # Parse the NL result into the format chat() expects
+                return self._parse_nl_result(result)
 
             except ImportError:
                 pass  # NL pipeline not available, fall through to direct search
@@ -443,44 +427,162 @@ class ModelChatService:
                 request=request,
             )
 
-            # Build result dict from FactTree
-            ft_json = fact_tree.to_json() if hasattr(fact_tree, "to_json") else {}
-            ft_dict = json.loads(ft_json) if isinstance(ft_json, str) else ft_json
-
-            # Extract top match metadata
-            children = ft_dict.get("children", [])
-            top_metadata = {}
-            confidence = 0.0
-            text = ""
-
-            if children:
-                top = children[0]
-                top_metadata = top.get("data_context", {}) or top.get("metadata", {})
-                confidence = top.get("confidence", 0.0)
-                text = top_metadata.get("response", "") or top.get("text", "")
-
-            command = top_metadata.get("command")
-            code = top_metadata.get("code")
-
-            return {
-                "state": "DONE" if text else "ERROR",
-                "confidence": confidence,
-                "match_method": "glyphh",
-                "command": command,
-                "code": code,
-                "fact_tree": {
-                    "text": text,
-                    "description": f"{self.model_id} response",
-                    "value": text,
-                    "children": children,
-                    "citations": ft_dict.get("citations", []),
-                    "data_context": top_metadata,
-                },
-            }
+            return self._parse_fact_tree(fact_tree)
 
         except Exception as e:
             logger.warning(f"Model query failed ({self.org_id}/{self.model_id}): {e}")
             return None
+
+    def _parse_nl_result(self, result: Any) -> dict[str, Any] | None:
+        """Parse an NLQueryResult into the dict format chat() expects.
+
+        The NL pipeline returns a FactTree with SDK structure
+        (description/value/children). We need to extract the top match's
+        metadata (response, command, code) and build a flat dict with
+        a fact_tree that has a 'text' key.
+        """
+        from domains.nl_query.service import ResponseState
+
+        state_str = result.state.value if hasattr(result.state, "value") else str(result.state)
+
+        # Handle error states from the NL pipeline
+        if result.state == ResponseState.ERROR:
+            error_msg = ""
+            if result.error:
+                error_msg = result.error.message
+            return {
+                "state": "ERROR",
+                "confidence": 0.0,
+                "match_method": result.match_method or "none",
+                "command": None,
+                "code": None,
+                "fact_tree": {
+                    "text": error_msg,
+                    "description": "error",
+                    "value": error_msg,
+                    "children": [],
+                    "citations": [],
+                    "data_context": {},
+                },
+            }
+
+        # For DONE state, extract match data from the FactTree
+        if result.fact_tree is None:
+            return {
+                "state": state_str,
+                "confidence": result.confidence,
+                "match_method": result.match_method or "none",
+                "command": None,
+                "code": None,
+                "fact_tree": {"text": "", "children": [], "citations": [], "data_context": {}},
+            }
+
+        return self._parse_fact_tree(
+            result.fact_tree,
+            confidence_override=result.confidence,
+            match_method=result.match_method or "glyphh",
+        )
+
+    def _parse_fact_tree(
+        self,
+        fact_tree: Any,
+        confidence_override: float | None = None,
+        match_method: str = "glyphh",
+    ) -> dict[str, Any]:
+        """Parse an SDK FactTree into the dict format chat() expects.
+
+        Walks the FactTree children to find match results, extracts
+        glyph metadata (response, command, code), and builds a flat
+        dict with a fact_tree sub-dict containing a 'text' key.
+        """
+        ft_json = fact_tree.to_json() if hasattr(fact_tree, "to_json") else {}
+        ft_dict = json.loads(ft_json) if isinstance(ft_json, str) else ft_json
+
+        # Walk children to find match results
+        # FactTree structure: root -> [query, results, metadata]
+        # results -> [match_1, match_2, ...]
+        # Each match has value: {concept_text, metadata, similarity_score, ...}
+        matches = []
+        all_children = ft_dict.get("children", [])
+
+        for child in all_children:
+            # Check if this is a "results" group node
+            if child.get("description", "").lower() == "results":
+                matches = child.get("children", [])
+                break
+            # Or a direct match node (Match 1, Match 2, ...)
+            desc = child.get("description", "")
+            if desc.startswith("Match "):
+                matches.append(child)
+
+        # Also check for error nodes
+        for child in all_children:
+            if child.get("description", "").lower() == "error details":
+                error_msg = child.get("value", "")
+                error_type = (child.get("data_context") or {}).get("error_type", "")
+                return {
+                    "state": "ERROR",
+                    "confidence": 0.0,
+                    "match_method": match_method,
+                    "command": None,
+                    "code": None,
+                    "fact_tree": {
+                        "text": error_msg,
+                        "description": error_type,
+                        "value": error_msg,
+                        "children": all_children,
+                        "citations": [],
+                        "data_context": {"error_type": error_type},
+                    },
+                }
+
+        # Extract top match
+        text = ""
+        confidence = 0.0
+        command = None
+        code = None
+        top_metadata = {}
+        result_children = []
+
+        if matches:
+            top = matches[0]
+            top_value = top.get("value", {})
+            if isinstance(top_value, dict):
+                top_metadata = top_value.get("metadata", {})
+                text = top_metadata.get("response", "") or top_value.get("concept_text", "")
+                command = top_metadata.get("command")
+                code = top_metadata.get("code")
+                confidence = top_value.get("final_score", 0.0) or top_value.get("similarity_score", 0.0)
+
+            # Build children in the format _extract_glyph_metadata expects
+            for m in matches:
+                mv = m.get("value", {})
+                if isinstance(mv, dict):
+                    result_children.append({
+                        "text": (mv.get("metadata") or {}).get("response", "") or mv.get("concept_text", ""),
+                        "data_context": mv.get("metadata", {}),
+                        "confidence": mv.get("final_score", 0.0),
+                    })
+
+        if confidence_override is not None:
+            # Use the NL pipeline's confidence if it's higher (intent match confidence)
+            confidence = max(confidence, confidence_override)
+
+        return {
+            "state": "DONE" if text else "ERROR",
+            "confidence": confidence,
+            "match_method": match_method,
+            "command": command,
+            "code": code,
+            "fact_tree": {
+                "text": text,
+                "description": f"{self.model_id} response",
+                "value": text,
+                "children": result_children,
+                "citations": ft_dict.get("citations", []),
+                "data_context": top_metadata,
+            },
+        }
 
     async def _synthesize(
         self,
