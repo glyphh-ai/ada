@@ -169,9 +169,8 @@ class Assistant:
         self._calculator = None
         self._exemplar_glyphs = None
         self._exemplar_metadata = None
-        # Track which runtimes/platforms are unreachable so we only try once
+        # Track which runtimes are unreachable so we only try once
         self._failed_runtimes: set = set()
-        self._failed_platforms: set = set()
         # Conversation history for LLM context
         self._history: list = []
     def load(self):
@@ -198,21 +197,19 @@ class Assistant:
             self._update_history(query, offline_response.content)
             return offline_response
 
-        # 1. Platform LLM-assisted chat (fallback for low-confidence or errors)
-        platform_urls = []
-        if self.config.platform_url and self.config.platform_url not in self._failed_platforms:
-            platform_urls.append(self.config.platform_url)
-        # Also try well-known platform URL
-        default_platform = "https://api.glyphh.ai"
-        if default_platform not in self._failed_platforms and default_platform != self.config.platform_url:
-            platform_urls.append(default_platform)
+        # 1. Runtime LLM-assisted chat (fallback for low-confidence or follow-ups)
+        runtime_urls = []
+        if self.config.runtime_url and self.config.runtime_url not in self._failed_runtimes:
+            runtime_urls.append(self.config.runtime_url)
+        if PRODUCTION_RUNTIME_URL not in self._failed_runtimes:
+            runtime_urls.append(PRODUCTION_RUNTIME_URL)
 
-        for purl in platform_urls:
+        for rurl in runtime_urls:
             try:
-                return self._ask_platform(query, purl, is_followup=is_followup)
+                return self._ask_platform(query, rurl, is_followup=is_followup)
             except Exception as e:
-                logger.debug(f"Platform unavailable ({purl}): {e}")
-                self._failed_platforms.add(purl)
+                logger.debug(f"Runtime chat unavailable ({rurl}): {e}")
+                self._failed_runtimes.add(rurl)
 
         # 2. No platform available — return the offline response as-is
         self._update_history(query, offline_response.content)
@@ -292,17 +289,26 @@ class Assistant:
             return False
 
     # ------------------------------------------------------------------
-    # Platform mode (LLM ↔ Glyphh orchestration)
+    # Runtime chat mode (LLM ↔ Glyphh orchestration)
     # ------------------------------------------------------------------
 
-    _PLATFORM_TIMEOUT = 15  # seconds — LLM calls take longer than raw runtime
+    _CHAT_TIMEOUT = 15  # seconds — LLM calls take longer than raw queries
 
-    def _ask_platform(self, query: str, platform_url: str, is_followup: bool = False) -> AssistantResponse:
-        """POST to platform /api/v1/assistant/chat for LLM-assisted response."""
+    def _ask_platform(self, query: str, runtime_url: str, is_followup: bool = False) -> AssistantResponse:
+        """POST to runtime /{org_id}/{model_id}/chat/message for LLM-assisted response.
+        
+        The runtime now owns all LLM orchestration. We talk to the runtime
+        directly instead of going through the platform.
+        """
         import urllib.request
         import urllib.error
 
-        url = f"{platform_url.rstrip('/')}/api/v1/assistant/chat"
+        # Use the runtime URL, not the platform URL
+        runtime_url = self.config.runtime_url or PRODUCTION_RUNTIME_URL
+        url = (
+            f"{runtime_url.rstrip('/')}"
+            f"/{self.config.org_id}/{self.config.model_id}/chat/message"
+        )
         payload = json.dumps({
             "message": query,
             "history": [
@@ -318,7 +324,7 @@ class Assistant:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=self._PLATFORM_TIMEOUT) as resp:
+            with urllib.request.urlopen(req, timeout=self._CHAT_TIMEOUT) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
             raise ConnectionError(f"Platform unreachable: {e}")

@@ -37,3 +37,7 @@ psutil>=5.9.0
 # NL Query (optional - only in full image)
 # transformers>=4.35.0
 # torch>=2.0.0
+
+# LLM providers (optional - for chat endpoint LLM formatting)
+# Without this, chat endpoints return pure Glyphh output
+openai>=1.0.0

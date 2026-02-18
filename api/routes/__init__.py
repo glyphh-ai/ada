@@ -13,6 +13,7 @@ from api.routes.chat import router as chat_router
 from api.routes.procedures import router as procedures_router
 from api.routes.charts import router as charts_router
 from api.routes.viewer import router as viewer_router
+from api.routes.model_chat import router as model_chat_router
 
 __all__ = [
     "deployment_router",
@@ -26,4 +27,5 @@ __all__ = [
     "procedures_router",
     "charts_router",
     "viewer_router",
+    "model_chat_router",
 ]

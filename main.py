@@ -218,6 +218,7 @@ from api.routes import (
     chat_router,
     charts_router,
     viewer_router,
+    model_chat_router,
 )
 from api.routes.procedures import router as procedures_router
 
@@ -233,6 +234,7 @@ app.include_router(listeners_router)
 app.include_router(jobs_router)
 app.include_router(org_scoped_router)
 app.include_router(chat_router)
+app.include_router(model_chat_router)
 
 
 if __name__ == "__main__":
