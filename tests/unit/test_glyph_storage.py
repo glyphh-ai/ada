@@ -109,7 +109,7 @@ class TestGlyphStorage:
         )
         
         assert updated.concept_text == "updated concept"
-        assert updated.glyph_metadata["updated"] is True
+        assert updated.metadata["updated"] is True
     
     @pytest.mark.asyncio
     async def test_delete_glyph_success(self, test_db, sample_org_id, sample_model_id, sample_embedding):
@@ -193,7 +193,7 @@ class TestGlyphStorageSerialization:
         concept_text, embedding, metadata = storage.from_json(data)
         
         assert concept_text == "test concept"
-        assert len(embedding) == 768
+        assert len(embedding) == 2000
         assert metadata["test"] is True
     
     def test_from_json_missing_concept(self):

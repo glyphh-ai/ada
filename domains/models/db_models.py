@@ -13,6 +13,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+import json as _json
+import struct as _struct
+
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Column,
@@ -29,14 +32,46 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
+from sqlalchemy.types import TypeDecorator
 
 # Use JSONB on PostgreSQL, plain JSON on SQLite/others
 JSONType = JSON().with_variant(JSONB(), "postgresql")
 
 
-def VectorType(dim: int):
-    """Vector column type: pgvector on PostgreSQL, LargeBinary on SQLite/others."""
-    return LargeBinary().with_variant(Vector(dim), "postgresql")
+class VectorType(TypeDecorator):
+    """Vector column: pgvector on PostgreSQL, JSON-encoded text on SQLite.
+
+    Accepts and returns Python ``list[float]``.  On PostgreSQL the
+    underlying type is ``pgvector.Vector(dim)``; on SQLite it falls
+    back to ``Text`` with JSON serialization so that tests using
+    in-memory SQLite work without pgvector.
+    """
+
+    impl = Text  # default impl for non-PG dialects
+    cache_ok = True
+
+    def __init__(self, dim: int):
+        self.dim = dim
+        super().__init__()
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(Vector(self.dim))
+        return dialect.type_descriptor(Text())
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        if dialect.name == "postgresql":
+            return value  # pgvector handles list[float] natively
+        return _json.dumps(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        if dialect.name == "postgresql":
+            return value  # pgvector returns list[float]
+        return _json.loads(value)
 
 from infrastructure.database.connection import Base
 

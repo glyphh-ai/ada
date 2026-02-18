@@ -112,9 +112,9 @@ def sample_model_id() -> str:
 
 @pytest.fixture
 def sample_embedding() -> list:
-    """Generate a sample 768-dim embedding"""
+    """Generate a sample 2000-dim embedding (matches VectorType(2000) in db_models)."""
     import numpy as np
-    return np.random.randn(768).astype(float).tolist()
+    return np.random.randn(2000).astype(float).tolist()
 
 
 @pytest.fixture
