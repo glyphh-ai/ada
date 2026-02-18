@@ -185,13 +185,38 @@ class ModelChatService:
         )
 
     async def _query_model(self, query: str) -> dict[str, Any] | None:
-        """Query the deployed model via the appropriate engine.
+        """Query the deployed model through the unified NL pipeline.
 
-        If the model has a custom encoder (encoder.py in its directory),
-        uses the dedicated HDC engine with that encoder. Otherwise falls
-        through to the generic NL query pipeline.
+        Flow for every model:
+          1. Check stored procedures (GQL queries registered for this model)
+          2. If model has embedded concepts (.glyphh with custom encoder):
+             encode with model's encoder → similarity search against concepts
+          3. Otherwise: generic NL pipeline (IntentMatcher → QueryService)
+          4. Return FactTree-shaped result for LLM synthesis
 
-        No special cases — every model is the same shape.
+        No special cases — every model goes through the same pipeline.
+        """
+        # Step 1: Check stored procedures first (highest priority)
+        proc_result = await self._check_stored_procedures(query)
+        if proc_result is not None:
+            return proc_result
+
+        # Step 2: Try embedded concept search (models with .glyphh + custom encoder)
+        concept_result = await self._query_embedded_concepts(query)
+        if concept_result is not None:
+            return concept_result
+
+        # Step 3: Generic NL pipeline (DB-backed models)
+        return await self._query_generic(query)
+
+    async def _query_embedded_concepts(
+        self, query: str,
+    ) -> dict[str, Any] | None:
+        """Query a model's embedded concepts via its custom HDC encoder.
+
+        This is the path for models that ship with a .glyphh file containing
+        pre-encoded concepts (like the assistant model). Uses the model's own
+        encoder for similarity search against embedded exemplars.
         """
         from domains.models import load_model
         from pathlib import Path
@@ -200,19 +225,13 @@ class ModelChatService:
         model_dir = runtime_root / "models" / self.model_id
         if not model_dir.exists():
             model_dir = runtime_root / "custom_models" / self.model_id
+        if not model_dir.exists():
+            return None
 
-        if model_dir.exists():
-            loaded = load_model(model_dir)
-            if loaded.has_custom_encoder:
-                return await self._query_custom_encoder_model(loaded, query)
+        loaded = load_model(model_dir)
+        if not loaded.has_custom_encoder or not loaded.glyphh_path:
+            return None
 
-        # Generic models — NL query pipeline
-        return await self._query_generic(query)
-
-    async def _query_custom_encoder_model(
-        self, loaded: Any, query: str,
-    ) -> dict[str, Any] | None:
-        """Query a model that has a custom encoder via the HDC engine."""
         try:
             cache_key = f"_model_{self.model_id}"
             if not hasattr(ModelChatService, cache_key):
@@ -246,8 +265,98 @@ class ModelChatService:
             }
 
         except Exception as e:
-            logger.warning(f"Custom encoder query failed ({self.model_id}): {e}")
+            logger.warning(f"Embedded concept query failed ({self.model_id}): {e}")
             return None
+    async def _check_stored_procedures(self, query: str) -> dict[str, Any] | None:
+        """Check if query matches a stored procedure for this model.
+
+        Stored procedures are GQL queries registered via the API with
+        lexicons for NL matching. They take priority over all other paths.
+        """
+        try:
+            from domains.procedures.service import StoredProcedureService
+            from infrastructure.database import async_session_maker
+
+            proc_service = StoredProcedureService(async_session_maker)
+            procedures = await proc_service.list(self.org_id, self.model_id)
+
+            if not procedures:
+                return None
+
+            # Simple lexicon matching — find best procedure match
+            best_match = None
+            best_score = 0.0
+            query_lower = query.lower()
+            query_words = set(query_lower.split())
+
+            for proc in procedures:
+                for lexicon in proc.lexicons:
+                    lex_words = set(lexicon.lower().split())
+                    if not lex_words:
+                        continue
+                    overlap = len(query_words & lex_words)
+                    score = overlap / max(len(lex_words), 1)
+                    if score > best_score:
+                        best_score = score
+                        best_match = proc
+
+            if best_match and best_score >= 0.5:
+                logger.info(
+                    f"Stored procedure match: {best_match.name} "
+                    f"(score={best_score:.2f})"
+                )
+                # Execute the procedure's GQL query
+                return await self._execute_procedure(best_match)
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Stored procedure check skipped: {e}")
+            return None
+
+    async def _execute_procedure(self, procedure: Any) -> dict[str, Any] | None:
+        """Execute a stored procedure's GQL query and return as FactTree."""
+        try:
+            from domains.query.service import QueryService
+            from domains.models.schemas import SimilaritySearchRequest
+            from infrastructure.database import async_session_maker
+            from main import model_manager
+
+            if model_manager is None:
+                return None
+
+            service = QueryService(model_manager, async_session_maker)
+            request = SimilaritySearchRequest(
+                query=procedure.gql_query,
+                top_k=10,
+            )
+            fact_tree = await service.similarity_search(
+                org_id=self.org_id,
+                model_id=self.model_id,
+                request=request,
+            )
+
+            return {
+                "state": "DONE",
+                "confidence": 1.0,
+                "match_method": "stored_procedure",
+                "command": None,
+                "code": None,
+                "fact_tree": {
+                    "text": fact_tree.text if hasattr(fact_tree, 'text') else str(fact_tree),
+                    "description": f"Procedure: {procedure.name}",
+                    "value": "",
+                    "children": [],
+                    "citations": [],
+                    "data_context": {"procedure": procedure.name},
+                },
+            }
+
+        except Exception as e:
+            logger.warning(f"Procedure execution failed ({procedure.name}): {e}")
+            return None
+
+
 
     async def _query_generic(self, query: str) -> dict[str, Any] | None:
         """Query a model via the generic NL query pipeline."""
