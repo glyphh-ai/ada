@@ -21,12 +21,22 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
+
+# Use JSONB on PostgreSQL, plain JSON on SQLite/others
+JSONType = JSON().with_variant(JSONB(), "postgresql")
+
+
+def VectorType(dim: int):
+    """Vector column type: pgvector on PostgreSQL, LargeBinary on SQLite/others."""
+    return LargeBinary().with_variant(Vector(dim), "postgresql")
 
 from infrastructure.database.connection import Base
 
@@ -47,8 +57,8 @@ class Glyph(Base):
     org_id = Column(String(255), nullable=False, index=True)
     model_id = Column(String(255), nullable=False, index=True)
     concept_text = Column(Text, nullable=False)
-    embedding = Column(Vector(2000), nullable=False)  # Global cortex - max 2000 dims (pgvector HNSW index limit)
-    glyph_metadata = Column("metadata", JSONB, default=dict)
+    embedding = Column(VectorType(2000), nullable=False)  # Global cortex - max 2000 dims (pgvector HNSW index limit)
+    glyph_metadata = Column("metadata", JSONType, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -117,7 +127,7 @@ class GlyphVector(Base):
     model_id = Column(String(255), nullable=False, index=True)
     level = Column(String(20), nullable=False)  # 'layer', 'segment', 'role'
     path = Column(String(500), nullable=False)  # e.g., 'semantic.attributes.color'
-    embedding = Column(Vector(2000), nullable=False)
+    embedding = Column(VectorType(2000), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     # Relationship back to glyph
@@ -173,7 +183,7 @@ class Edge(Base):
     )
     edge_type = Column(String(50), nullable=False)  # similarity, contrast, etc.
     weight = Column(Float, nullable=False)
-    edge_metadata = Column("metadata", JSONB, default=dict)
+    edge_metadata = Column("metadata", JSONType, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     expires_at = Column(DateTime, nullable=True)  # For TTL-based cache invalidation
     
@@ -233,10 +243,10 @@ class ModelConfig(Base):
     long_description = Column(Text, nullable=True)
     
     # Full encoder config for reconstructing the model without the .glyphh file
-    encoder_config = Column(JSONB, nullable=True)
+    encoder_config = Column(JSONType, nullable=True)
     
     # Similarity weights for each edge type
-    similarity_weights = Column(JSONB, default=lambda: {
+    similarity_weights = Column(JSONType, default=lambda: {
         "similarity": 1.0,
         "contrast": 0.5,
         "analogy": 0.7,
@@ -252,14 +262,14 @@ class ModelConfig(Base):
     max_tree_depth = Column(Integer, default=3)
     
     # Resource quotas
-    resource_quotas = Column(JSONB, default=lambda: {
+    resource_quotas = Column(JSONType, default=lambda: {
         "memory_mb": 1024,
         "storage_gb": 10,
         "max_glyphs": 1000000,
     })
     
     # Resource usage tracking
-    resource_usage = Column(JSONB, default=lambda: {
+    resource_usage = Column(JSONType, default=lambda: {
         "memory_mb": 0,
         "storage_gb": 0,
         "glyph_count": 0,
@@ -286,7 +296,7 @@ class Token(Base):
     token_hash = Column(String(255), nullable=False, unique=True)
     org_id = Column(String(255), nullable=False, index=True)
     model_id = Column(String(255), nullable=True, index=True)  # nullable for org-wide tokens
-    permissions = Column(JSONB, default=lambda: ["read"])
+    permissions = Column(JSONType, default=lambda: ["read"])
     status = Column(String(50), default="active")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
@@ -318,7 +328,7 @@ class ModelVersionHistory(Base):
     deployed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     deployed_by = Column(String(255), nullable=True)  # User ID or email
     is_current = Column(Integer, default=1)  # 1 = current version, 0 = historical
-    model_metadata = Column("metadata", JSONB, default=dict)  # Additional version metadata
+    model_metadata = Column("metadata", JSONType, default=dict)  # Additional version metadata
     
     __table_args__ = (
         Index("idx_version_history_org_model", org_id, model_id),
