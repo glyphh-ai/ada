@@ -744,8 +744,13 @@ class Assistant:
 
         model_path = self.config.model_path
         if model_path is None:
-            # Default: look next to the data dir
-            model_path = Path(__file__).parent / "model" / "assistant.glyphh"
+            # Default: look in models/ at the repo/package root
+            # Walk up from glyphh/assistant/core.py → repo root
+            _repo_root = Path(__file__).parent.parent.parent
+            model_path = _repo_root / "models" / "assistant" / "assistant.glyphh"
+            if not model_path.exists():
+                # Fallback: legacy path (SDK layout)
+                model_path = Path(__file__).parent / "model" / "assistant.glyphh"
 
         if not Path(model_path).exists():
             logger.warning(f"Assistant model not found at {model_path}")

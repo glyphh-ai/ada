@@ -25,13 +25,20 @@ logger = logging.getLogger(__name__)
 
 
 def find_model() -> Path | None:
-    """Locate assistant.glyphh inside the installed SDK package."""
+    """Locate assistant.glyphh — check models/ dir first, then legacy paths."""
+    # Primary: models/ directory at repo root
+    repo_root = Path(__file__).parent.parent
+    model_path = repo_root / "models" / "assistant" / "assistant.glyphh"
+    if model_path.exists():
+        return model_path
+
+    # Legacy: inside the glyphh engine package
     try:
         import glyphh
         pkg_dir = Path(glyphh.__file__).parent
-        model_path = pkg_dir / "assistant" / "model" / "assistant.glyphh"
-        if model_path.exists():
-            return model_path
+        legacy_path = pkg_dir / "assistant" / "model" / "assistant.glyphh"
+        if legacy_path.exists():
+            return legacy_path
     except ImportError:
         pass
 

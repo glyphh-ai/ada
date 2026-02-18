@@ -62,8 +62,7 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Model weights (downloaded at runtime)
-/models/
+# Model weights (downloaded at runtime — NOT the models/ source dir)
 *.bin
 *.safetensors
 
