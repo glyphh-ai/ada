@@ -12,7 +12,7 @@ instead of using config.yaml defaults.
 
 import hashlib
 import re
-from glyphh.core.config import EncoderConfig, Layer, Segment, Role, NumericConfig, EncodingStrategy
+from glyphh.core.config import EncoderConfig, Layer, Segment, Role, NumericConfig, EncodingStrategy, TemporalConfig
 from glyphh.core.types import Concept
 
 # ---------------------------------------------------------------------------
@@ -31,6 +31,12 @@ CONTEXT_TYPE_MAP = {"followup": 0.0, "standalone": 1.0}
 ENCODER_CONFIG = EncoderConfig(
     dimension=2000,
     seed=42,
+    # Use a deterministic role value for the temporal layer instead of
+    # datetime.now().  This ensures that both build-time glyph encoding
+    # and query-time encoding produce the same temporal vector, so the
+    # temporal layer doesn't inject non-determinism into similarity scores.
+    temporal_source="router.context.context_type",
+    temporal_config=TemporalConfig(signal_type="sequence"),
     layers=[
         Layer(
             name="router",
