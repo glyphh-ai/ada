@@ -43,15 +43,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
-
-      - name: Install Glyphh SDK
-        run: |
-          SDK_TAG=$(curl -sf -H "Authorization: token ${{ secrets.RUNTIME_SDK_TOKEN }}" \
-            https://api.github.com/repos/glyphh-ai/glyphh-sdk/releases/latest | jq -r .tag_name)
-          echo "Installing SDK @ ${SDK_TAG}"
-          pip install "glyphh @ git+https://${{ secrets.RUNTIME_SDK_TOKEN }}@github.com/glyphh-ai/glyphh-sdk.git@${SDK_TAG}"
+          pip install -e ".[runtime,dev]"
 
       - name: Run unit tests
         run: pytest tests/unit/ -v --tb=short
@@ -118,26 +110,14 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Resolve latest SDK version
-        id: sdk
-        run: |
-          SDK_TAG=$(curl -sf -H "Authorization: token ${{ secrets.RUNTIME_SDK_TOKEN }}" \
-            https://api.github.com/repos/glyphh-ai/glyphh-sdk/releases/latest | jq -r .tag_name)
-          echo "ref=${SDK_TAG}" >> $GITHUB_OUTPUT
-          echo "Resolved SDK version: ${SDK_TAG}"
-
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
-          target: lite
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            SDK_REF=${{ steps.sdk.outputs.ref }}
-            SDK_TOKEN=${{ secrets.RUNTIME_SDK_TOKEN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
