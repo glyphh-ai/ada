@@ -694,22 +694,17 @@ class NLQueryService:
                 )
             
             elif operation == "fact_tree":
-                request = FactTreeRequest(
-                    claim=query.get("query", query.get("claim", "")),
-                    max_depth=query.get("max_depth", 3),
+                # fact_tree intent is effectively a similarity search —
+                # route through similarity_search which properly encodes
+                # and returns scored results.
+                request = SimilaritySearchRequest(
+                    query=query.get("query", query.get("claim", "")),
+                    top_k=query.get("top_k", 10),
                 )
-                result = await self.query_service.generate_fact_tree(
+                return await self.query_service.similarity_search(
                     org_id=org_id,
                     model_id=model_id,
                     request=request,
-                )
-                # generate_fact_tree returns FactTreeResponse, convert to FactTree
-                # For now, wrap in a FactTree structure
-                return FactTreeBuilder.build_similarity_search(
-                    query=request.claim,
-                    results=[],
-                    query_time_ms=0.0,
-                    total_count=0,
                 )
             
             elif operation == "temporal_predict":

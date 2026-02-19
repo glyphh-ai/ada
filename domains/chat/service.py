@@ -395,32 +395,12 @@ class ModelChatService:
 
             service = QueryService(model_manager, async_session_maker)
 
-            # Try NL query pipeline first (if available)
-            try:
-                from domains.nl_query.service import NLQueryService
-                from domains.nl_query.intent_matcher import IntentMatcher
-
-                intent_matcher = IntentMatcher(confidence_threshold=0.85)
-                nl_service = NLQueryService(
-                    query_service=service,
-                    intent_matcher=intent_matcher,
-                    confidence_threshold=0.85,
-                )
-
-                result = await nl_service.execute_nl_query(
-                    org_id=self.org_id,
-                    model_id=self.model_id,
-                    query=query,
-                )
-
-                # Parse the NL result into the format chat() expects
-                return self._parse_nl_result(result)
-
-            except ImportError:
-                pass  # NL pipeline not available, fall through to direct search
-
-            # Direct similarity search fallback
-            request = SimilaritySearchRequest(query=query, top_k=5)
+            # Chat pipeline always uses direct similarity search.
+            # The NL intent matcher is unreliable for chat queries — it
+            # misclassifies natural language questions as count/fact_tree/etc.
+            # Similarity search with the custom encode_query_fn is the
+            # correct path for all chat queries.
+            request = SimilaritySearchRequest(query=query, top_k=10)
             fact_tree = await service.similarity_search(
                 org_id=self.org_id,
                 model_id=self.model_id,

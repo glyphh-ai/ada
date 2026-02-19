@@ -404,7 +404,7 @@ class QueryService:
         # Encode current state concepts
         state_embeddings = []
         for concept in request.current_state:
-            embedding = await self._encode_query(loaded_model.encoder, concept)
+            embedding = await self._encode_query(loaded_model.encoder, concept, org_id=org_id, model_id=model_id)
             state_embeddings.append(embedding)
         
         # Use SDK's BeamSearchPredictor if available
@@ -475,7 +475,7 @@ class QueryService:
         # Encode current state concepts
         state_embeddings = []
         for concept in request.current_state:
-            embedding = await self._encode_query(loaded_model.encoder, concept)
+            embedding = await self._encode_query(loaded_model.encoder, concept, org_id=org_id, model_id=model_id)
             state_embeddings.append(embedding)
         
         # Use SDK's BeamSearchPredictor if available
@@ -754,7 +754,7 @@ class QueryService:
         
         async with self._session_factory() as session:
             storage = GlyphStorage(session)
-            claim_embedding = await self._encode_query(loaded_model.encoder, claim)
+            claim_embedding = await self._encode_query(loaded_model.encoder, claim, org_id=org_id, model_id=model_id)
             
             results = await storage.similarity_search(
                 org_id=org_id,
