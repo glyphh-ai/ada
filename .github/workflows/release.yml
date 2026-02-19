@@ -20,7 +20,7 @@ jobs:
         python-version: ['3.10', '3.11']
     services:
       postgres:
-        image: postgres:15
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: glyphh
           POSTGRES_PASSWORD: glyphh_test
