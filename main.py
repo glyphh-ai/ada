@@ -13,7 +13,7 @@ runtime discovers and deploys eligible models to PostgreSQL.
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,8 +40,8 @@ settings = get_settings()
 _start_time = datetime.utcnow()
 
 # Global model manager instance
-model_manager: ModelManager = None
-resource_manager: ResourceManager = None
+model_manager: Optional[ModelManager] = None
+resource_manager: Optional[ResourceManager] = None
 
 
 def get_model_manager() -> ModelManager:
@@ -100,8 +100,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     # Close WebSocket connections
     try:
-        from api.routes.listeners import get_listener_service
-        listener_service = get_listener_service()
+        from api.routes.listeners import get_async_listener_service
+        listener_service = get_async_listener_service()
         await listener_service.close_all_connections("Server shutdown")
         logger.info("WebSocket connections closed")
     except Exception as e:

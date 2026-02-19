@@ -10,12 +10,13 @@ Updated to use SimilarityService for consistent similarity calculations.
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from glyphh.fact_tree.builder import FactTree
+from glyphh.fact_tree.builder import FactTree, Citation, FactNode
 
 from domains.models.manager import ModelManager
 from domains.models.storage import GlyphStorage
@@ -524,8 +525,8 @@ class QueryService:
         self,
         encoder: Any,
         query: str,
-        org_id: str = None,
-        model_id: str = None,
+        org_id: Optional[str] = None,
+        model_id: Optional[str] = None,
     ) -> List[float]:
         """
         Encode query text using the model's custom encode_query_fn.
@@ -615,6 +616,7 @@ class QueryService:
             )
             
             supporting_glyphs = []
+            relevance_scores = []
             for glyph_response, similarity in results:
                 # Apply security filter
                 security_weight = self._compute_security_weight(
@@ -623,26 +625,32 @@ class QueryService:
                 )
                 if security_weight > 0:
                     supporting_glyphs.append(glyph_response.id)
+                    relevance_scores.append(similarity)
                     citations.append(Citation(
-                        glyph_id=glyph_response.id,
-                        concept_text=glyph_response.concept_text,
-                        relevance_score=similarity,
+                        glyph_id=str(glyph_response.id),
+                        component="cortex",
+                        timestamp=datetime.utcnow(),
+                        version="v1",
+                        data_hash="",
                     ))
             
             # Compute confidence based on evidence
             if supporting_glyphs:
-                avg_relevance = sum(c.relevance_score for c in citations) / len(citations)
+                avg_relevance = sum(relevance_scores) / len(relevance_scores)
                 confidence = min(1.0, avg_relevance * 1.2)  # Boost slightly
             else:
                 confidence = 0.1  # Low confidence if no evidence
             
             # Create root node
-            nodes.append(FactTreeNode(
-                id=root_id,
-                claim=claim,
-                supporting_glyphs=supporting_glyphs,
-                confidence=confidence,
+            nodes.append(FactNode(
+                description=claim,
+                value=confidence,
                 children=[],
+                citations=citations,
+                data_context={
+                    "id": root_id,
+                    "supporting_glyphs": supporting_glyphs,
+                },
             ))
         
         return {
