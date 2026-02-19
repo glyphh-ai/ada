@@ -1,11 +1,10 @@
 """
 Natural Language Query Domain.
 
-Provides hybrid rules-first + LLM-fallback query translation.
+Routes NL queries to the appropriate operation via model encoders.
 
 Key Components:
-- IntentMatcher: Rules-based matching using HDC similarity
-- NLQueryService: Orchestrates rules + LLM fallback
+- NLQueryService: Orchestrates query routing (auto-schema → similarity search → LLM fallback)
 - LLMFallback: Optional LLM-based translation (Phi-3.5-mini-instruct)
 - SchemaIndex: Runtime schema index for fast NL query matching
 - SchemaIndexMetrics: Metrics for schema index performance
@@ -15,8 +14,6 @@ Design Principle: "When your LLM can't afford to be wrong, sidecar it with Glyph
 
 # Use lazy imports to avoid circular dependencies and missing deps during testing
 __all__ = [
-    "IntentMatcher",
-    "IntentMatch",
     "NLQueryService",
     "NLQueryResult",
     "LLMFallback",
@@ -27,13 +24,7 @@ __all__ = [
 
 def __getattr__(name):
     """Lazy import attributes to avoid import errors when deps are missing."""
-    if name == "IntentMatcher":
-        from domains.nl_query.intent_matcher import IntentMatcher
-        return IntentMatcher
-    elif name == "IntentMatch":
-        from domains.nl_query.intent_matcher import IntentMatch
-        return IntentMatch
-    elif name == "NLQueryService":
+    if name == "NLQueryService":
         from domains.nl_query.service import NLQueryService
         return NLQueryService
     elif name == "NLQueryResult":

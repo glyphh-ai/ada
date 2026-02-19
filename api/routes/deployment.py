@@ -330,7 +330,7 @@ async def update_model_config_full(
     """
     Apply a full config update to a deployed model.
     
-    For NL-only changes: hot-reload IntentMatcher patterns immediately.
+    For NL-only changes: hot-reload query patterns immediately.
     For encoder changes: update encoder and trigger background re-encode.
     
     This endpoint is called by Platform's push-update flow.

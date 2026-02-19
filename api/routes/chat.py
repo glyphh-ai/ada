@@ -62,24 +62,19 @@ def get_chat_services():
     """
     from main import model_manager
     from domains.query.service import QueryService
-    from domains.nl_query.intent_matcher import IntentMatcher
     from domains.nl_query.service import NLQueryService
     from infrastructure.database import async_session_maker
-    from shared.encoder_config_factory import EncoderConfigFactory
     
     if model_manager is None:
         raise HTTPException(status_code=503, detail="Model manager not initialized")
     
     # Get NL config from model if available
-    model_nl_config = None
     auto_schema_matcher = None
     schema_index = None
     
     try:
         model = model_manager.get_current_model() if hasattr(model_manager, 'get_current_model') else None
         if model is not None:
-            model_nl_config = EncoderConfigFactory.extract_nl_encoder_config(model)
-            
             # Try to get or create AutoSchemaMatcher for the model
             # Validates: Requirements 3, 4, 5
             auto_schema_matcher, schema_index = _get_auto_schema_matcher_for_chat(model)
@@ -88,10 +83,6 @@ def get_chat_services():
         logger.warning(f"Failed to extract NL config from model: {e}")
     
     query_service = QueryService(model_manager, async_session_maker)
-    intent_matcher = IntentMatcher(
-        confidence_threshold=0.85,
-        model_nl_config=model_nl_config
-    )
     
     llm_fallback = None
     try:
@@ -104,7 +95,6 @@ def get_chat_services():
     
     nl_service = NLQueryService(
         query_service=query_service,
-        intent_matcher=intent_matcher,
         llm_fallback=llm_fallback,
         confidence_threshold=0.85,
         schema_index=schema_index,

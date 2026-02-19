@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from glyphh.fact_tree.builder import FactTree
 
-from domains.nl_query.intent_matcher import IntentMatcher, IntentMatch
+from domains.nl_query.intent_matcher import IntentMatch
 from domains.query.service import QueryService
 from domains.query.fact_tree_builder import FactTreeBuilder
 
@@ -205,15 +205,15 @@ class NLQueryResult:
 
 class NLQueryService:
     """
-    Natural Language Query Service with hybrid rules + LLM approach.
+    Natural Language Query Service.
     
-    Uses rules-first matching via IntentMatcher (HDC similarity).
-    Falls back to LLM only when rules can't confidently match.
+    Routes NL queries to the appropriate operation:
+    - AutoSchemaMatcher for schema-based matching (when available)
+    - Direct similarity search as the default path
+    - LLM fallback when nothing else matches
     
-    Now supports AutoSchemaMatcher for automatic schema-based matching:
-    - When a SchemaIndex is provided, uses AutoSchemaMatcher for query processing
-    - AutoSchemaMatcher provides token-to-schema matching, intent inference, and parameter extraction
-    - Supports disambiguation when multiple intents have similar confidence
+    The legacy IntentMatcher has been removed — each model's own encoder
+    handles NL→query translation via encode_query_fn.
     
     Validates: Requirements 3, 4, 5, 12.2, 12.5
     """
@@ -221,7 +221,6 @@ class NLQueryService:
     def __init__(
         self,
         query_service: QueryService,
-        intent_matcher: IntentMatcher,
         llm_fallback: Optional[Any] = None,
         confidence_threshold: float = 0.85,
         schema_index: Optional['SchemaIndex'] = None,
@@ -232,16 +231,14 @@ class NLQueryService:
         
         Args:
             query_service: QueryService for executing structured queries
-            intent_matcher: IntentMatcher for rules-based matching
             llm_fallback: Optional LLMFallback for low-confidence queries
-            confidence_threshold: Minimum confidence for rules-based match
+            confidence_threshold: Minimum confidence threshold
             schema_index: Optional SchemaIndex for auto-schema matching
             auto_schema_matcher: Optional AutoSchemaMatcher for auto-schema matching
         
         Validates: Requirements 3, 4, 5
         """
         self.query_service = query_service
-        self.intent_matcher = intent_matcher
         self.llm_fallback = llm_fallback
         self.confidence_threshold = confidence_threshold
         self._schema_index = schema_index
@@ -283,11 +280,8 @@ class NLQueryService:
 
         Flow:
         1. Try auto-schema matching if AutoSchemaMatcher is available
-        2. Try rules-based matching (IntentMatcher)
-        3. If confidence >= threshold: execute directly -> DONE
-        4. If confidence < threshold AND LLM enabled: use LLM fallback -> DONE
-        5. If confidence < threshold AND no LLM: -> ERROR (NO_MATCH)
-        6. Disambiguation -> ASK
+        2. Default to similarity search (model's encode_query_fn handles NL)
+        3. If encoding fails: LLM fallback or ERROR
         """
         start_time = time.time()
 
@@ -306,25 +300,16 @@ class NLQueryService:
                 if auto_result is not None:
                     return auto_result
             except Exception as e:
-                logger.warning(f"Auto-schema matching failed: {e}, falling back to rules")
+                logger.warning(f"Auto-schema matching failed: {e}, falling back to similarity search")
 
-        # Step 1: Try rules-based matching
-        match_result = await self.intent_matcher.match_intent(query)
-
-        # Accept any match with confidence > 0.3 (SDK HDC similarity is more conservative)
-        min_acceptable_confidence = 0.3
-
-        if match_result and match_result.confidence >= min_acceptable_confidence:
-            logger.info(
-                f"Rules match: intent={match_result.intent}, "
-                f"confidence={match_result.confidence:.3f}"
-            )
-
+        # Step 1: Direct similarity search — the model's encode_query_fn
+        # handles NL→embedding translation
+        try:
             fact_tree = await self._execute_structured_query(
                 org_id,
                 model_id,
-                match_result.intent,
-                match_result.structured_query,
+                "similarity_search",
+                {"query": query, "top_k": 10},
             )
 
             elapsed_ms = (time.time() - start_time) * 1000
@@ -332,16 +317,18 @@ class NLQueryService:
             return NLQueryResult(
                 state=ResponseState.DONE,
                 fact_tree=fact_tree,
-                query_type=match_result.intent,
-                match_method="rules",
-                confidence=match_result.confidence,
-                translated_query=match_result.structured_query if debug else None,
+                query_type="similarity_search",
+                match_method="direct",
+                confidence=1.0,
+                translated_query={"operation": "similarity_search", "query": query} if debug else None,
                 query_time_ms=elapsed_ms,
             )
+        except Exception as e:
+            logger.warning(f"Similarity search failed: {e}")
 
         # Step 2: Try LLM fallback if available
         if self.llm_fallback is not None:
-            logger.info("Rules confidence too low, trying LLM fallback")
+            logger.info("Similarity search failed, trying LLM fallback")
 
             try:
                 llm_result = await self.llm_fallback.translate_query(query, f"org={org_id}, model={model_id}")
@@ -369,7 +356,7 @@ class NLQueryService:
                 logger.warning(f"LLM fallback failed: {e}")
 
         # Step 3: No match -> ERROR
-        logger.info(f"No intent match for query: '{query}'")
+        logger.info(f"No match for query: '{query}'")
 
         elapsed_ms = (time.time() - start_time) * 1000
 
@@ -377,11 +364,11 @@ class NLQueryService:
             state=ResponseState.ERROR,
             query_type="unknown",
             match_method="none",
-            confidence=match_result.confidence if match_result else 0.0,
+            confidence=0.0,
             query_time_ms=elapsed_ms,
             error=ErrorPayload(
                 error_code="NO_MATCH",
-                message="No intent match found for query",
+                message="Could not process query",
                 debug_info={"query": query},
                 recoverable=True,
             ),
@@ -584,7 +571,6 @@ class NLQueryService:
             try:
                 auto_result = self._auto_schema_matcher.match_query(query)
                 if auto_result.confidence >= 0.3:
-                    # Convert AutoMatchResult to IntentMatch for compatibility
                     return IntentMatch(
                         intent=auto_result.intent.intent_type,
                         confidence=auto_result.confidence,
@@ -595,29 +581,14 @@ class NLQueryService:
             except Exception as e:
                 logger.warning(f"Auto-schema translation failed: {e}")
         
-        match_result = await self.intent_matcher.match_intent(query)
-        
-        # Use same threshold as execute_nl_query (0.3) for consistency
-        min_acceptable_confidence = 0.3
-        if match_result and match_result.confidence >= min_acceptable_confidence:
-            return match_result, "rules"
-        
-        if self.llm_fallback is not None:
-            try:
-                llm_result = await self.llm_fallback.translate_query(query, "")
-                if llm_result:
-                    # Create a synthetic IntentMatch for LLM result
-                    return IntentMatch(
-                        intent=llm_result.get("operation", "unknown"),
-                        confidence=0.0,
-                        parameters=llm_result,
-                        pattern_matched=None,
-                        structured_query=llm_result,
-                    ), "llm"
-            except Exception:
-                pass
-        
-        return match_result, "none"
+        # Default: similarity search
+        return IntentMatch(
+            intent="similarity_search",
+            confidence=1.0,
+            parameters={},
+            pattern_matched=None,
+            structured_query={"operation": "similarity_search", "query": query},
+        ), "direct"
     
     def _normalize_operation(self, operation: str) -> str:
         """
@@ -788,4 +759,4 @@ class NLQueryService:
         Returns:
             Dictionary with intent names and example patterns
         """
-        return self.intent_matcher.get_intents()
+        return {"intents": ["similarity_search"], "patterns": {}}

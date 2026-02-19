@@ -1025,7 +1025,7 @@ class ModelManager:
         loaded_model: LoadedModel,
         new_config: Dict[str, Any],
     ) -> None:
-        """Hot-reload NL encoder config (IntentMatcher patterns)."""
+        """Hot-reload NL encoder config."""
         nl_config = new_config.get("nl_encoder_config")
         
         if nl_config is None:

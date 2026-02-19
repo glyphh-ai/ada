@@ -160,10 +160,8 @@ async def list_mcp_tools(
 def get_nl_query_service_for_org():
     """Get NL query service instance for org-scoped queries."""
     from main import model_manager
-    from domains.nl_query.intent_matcher import IntentMatcher
     from domains.nl_query.service import NLQueryService
     from infrastructure.database import async_session_maker
-    from shared.encoder_config_factory import EncoderConfigFactory
     
     if model_manager is None:
         raise HTTPException(status_code=503, detail="Model manager not initialized")
@@ -174,21 +172,7 @@ def get_nl_query_service_for_org():
             detail="Natural language query is not enabled. Set ENABLE_NL_QUERY=true"
         )
     
-    model_nl_config = None
-    try:
-        model = model_manager.get_current_model() if hasattr(model_manager, 'get_current_model') else None
-        if model is not None:
-            model_nl_config = EncoderConfigFactory.extract_nl_encoder_config(model)
-            if model_nl_config:
-                logger.info(f"Using NL encoder config from model with {len(model_nl_config.get('patterns', []))} patterns")
-    except Exception as e:
-        logger.warning(f"Failed to extract NL config from model: {e}")
-    
     query_service = QueryService(model_manager, async_session_maker)
-    intent_matcher = IntentMatcher(
-        confidence_threshold=0.85,
-        model_nl_config=model_nl_config
-    )
     
     llm_fallback = None
     try:
@@ -202,7 +186,6 @@ def get_nl_query_service_for_org():
     
     return NLQueryService(
         query_service=query_service,
-        intent_matcher=intent_matcher,
         llm_fallback=llm_fallback,
         confidence_threshold=0.85,
     )

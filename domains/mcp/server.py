@@ -79,9 +79,9 @@ class MCPServer:
     
     Exposes one tool: nl_query.
     Delegates all NL query logic to NLQueryService which handles:
-    - Rules-based intent matching (via IntentMatcher/SDK)
-    - LLM fallback when rules fail
-    - Executing the matched query
+    - Auto-schema matching (when available)
+    - Direct similarity search via model encoder
+    - LLM fallback when encoding fails
     """
     
     def __init__(
@@ -393,7 +393,6 @@ class MCPServer:
         - Includes procedure_name in response when matched
         """
         from domains.nl_query.service import NLQueryService
-        from domains.nl_query.intent_matcher import IntentMatcher
         from domains.procedures.service import StoredProcedureService
         from infrastructure.config import get_settings
         from infrastructure.database import async_session_maker
@@ -421,91 +420,39 @@ class MCPServer:
             await progress_handler.notify(
                 progress_token, 
                 progress=30, 
-                message="Matching intent..."
+                message="Processing query..."
             )
         
-        # Extract NL config from the loaded model's encoder config
-        from shared.encoder_config_factory import EncoderConfigFactory
-        model_nl_config = EncoderConfigFactory.extract_nl_encoder_config(loaded_model.sdk_model)
-        
-        # Create procedure service for stored procedure matching (Requirement 7.1)
-        procedure_service = None
+        # Create NL service — no intent matcher needed, model's encoder
+        # handles NL→embedding translation directly
+        llm_fallback = None
         try:
-            async with async_session_maker() as session:
-                procedure_service = StoredProcedureService(session)
-                
-                intent_matcher = IntentMatcher(
-                    confidence_threshold=0.85,
-                    model_nl_config=model_nl_config,
-                    procedure_service=procedure_service,
-                )
-                
+            from domains.nl_query.llm_fallback import LLMFallback
+            llm_fallback = LLMFallback(model_name=settings.nl_model)
+            if not llm_fallback.is_available():
                 llm_fallback = None
-                try:
-                    from domains.nl_query.llm_fallback import LLMFallback
-                    llm_fallback = LLMFallback(model_name=settings.nl_model)
-                    if not llm_fallback.is_available():
-                        llm_fallback = None
-                except ImportError:
-                    pass
-                
-                nl_service = NLQueryService(
-                    query_service=self._query_service,
-                    intent_matcher=intent_matcher,
-                    llm_fallback=llm_fallback,
-                    confidence_threshold=0.85,
-                )
-                
-                if progress_handler and progress_token:
-                    await progress_handler.notify(
-                        progress_token, 
-                        progress=50, 
-                        message="Executing query..."
-                    )
-                
-                result = await nl_service.execute_nl_query(
-                    org_id=org_id,
-                    model_id=model_id,
-                    query=query,
-                    debug=debug,
-                )
-        except Exception as e:
-            logger.warning(f"Failed to use procedure service: {e}, falling back to default matching")
-            # Fallback without procedure service
-            intent_matcher = IntentMatcher(
-                confidence_threshold=0.85,
-                model_nl_config=model_nl_config,
+        except ImportError:
+            pass
+        
+        nl_service = NLQueryService(
+            query_service=self._query_service,
+            llm_fallback=llm_fallback,
+            confidence_threshold=0.85,
+        )
+        
+        if progress_handler and progress_token:
+            await progress_handler.notify(
+                progress_token, 
+                progress=50, 
+                message="Executing query..."
             )
-            
-            llm_fallback = None
-            try:
-                from domains.nl_query.llm_fallback import LLMFallback
-                llm_fallback = LLMFallback(model_name=settings.nl_model)
-                if not llm_fallback.is_available():
-                    llm_fallback = None
-            except ImportError:
-                pass
-            
-            nl_service = NLQueryService(
-                query_service=self._query_service,
-                intent_matcher=intent_matcher,
-                llm_fallback=llm_fallback,
-                confidence_threshold=0.85,
-            )
-            
-            if progress_handler and progress_token:
-                await progress_handler.notify(
-                    progress_token, 
-                    progress=50, 
-                    message="Executing query..."
-                )
-            
-            result = await nl_service.execute_nl_query(
-                org_id=org_id,
-                model_id=model_id,
-                query=query,
-                debug=debug,
-            )
+        
+        result = await nl_service.execute_nl_query(
+            org_id=org_id,
+            model_id=model_id,
+            query=query,
+            debug=debug,
+        )
         
         if progress_handler and progress_token:
             await progress_handler.notify(
