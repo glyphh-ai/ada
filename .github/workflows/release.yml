@@ -199,39 +199,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Cross-publish to the public repo (glyphh-ai/public)
-  publish-to-public:
-    name: Publish to public repo
-    needs: [upload-release]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Get version from tag
-        id: version
-        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
-      - name: Create public release for runtime
-        uses: softprops/action-gh-release@v1
-        with:
-          repository: glyphh-ai/public
-          tag_name: runtime-${{ steps.version.outputs.tag }}
-          name: "Glyphh Runtime ${{ steps.version.outputs.tag }}"
-          body: |
-            ## Glyphh Runtime ${{ steps.version.outputs.tag }}
-
-            ### Install
-            ```bash
-            pip install glyphh==${{ steps.version.outputs.tag }}
-            pip install glyphh[runtime]==${{ steps.version.outputs.tag }}
-            ```
-
-            ### Docker
-            ```bash
-            docker pull ghcr.io/glyphh-ai/glyphh-runtime:${{ steps.version.outputs.tag }}
-            ```
-
-            ### Deployment
-            See [deployment docs](https://docs.glyphh.ai/deployment) for setup instructions.
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.RUNTIME_RELEASES_TOKEN }}
