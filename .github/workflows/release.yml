@@ -63,6 +63,30 @@ jobs:
         env:
           DATABASE_URL: postgresql://glyphh:glyphh_test@localhost:5432/glyphh_test
 
+  # Publish Python package to PyPI via Trusted Publisher (OIDC)
+  publish-pypi:
+    name: Publish to PyPI
+    needs: regression-tests
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # Required for Trusted Publisher OIDC
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
   build-and-push:
     name: Build and push Docker image
     needs: regression-tests
@@ -133,7 +157,7 @@ jobs:
   # Upload to the runtime repo's own release (mirrors SDK pattern)
   upload-release:
     name: Upload to runtime release
-    needs: [build-and-push]
+    needs: [build-and-push, publish-pypi]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -154,6 +178,12 @@ jobs:
           name: "Glyphh Runtime ${{ steps.version.outputs.tag }}"
           body: |
             ## Glyphh Runtime ${{ steps.version.outputs.tag }}
+
+            ### Install
+            ```bash
+            pip install glyphh==${{ steps.version.outputs.tag }}
+            pip install glyphh[runtime]==${{ steps.version.outputs.tag }}
+            ```
 
             ### Docker
             ```bash
@@ -187,6 +217,12 @@ jobs:
           name: "Glyphh Runtime ${{ steps.version.outputs.tag }}"
           body: |
             ## Glyphh Runtime ${{ steps.version.outputs.tag }}
+
+            ### Install
+            ```bash
+            pip install glyphh==${{ steps.version.outputs.tag }}
+            pip install glyphh[runtime]==${{ steps.version.outputs.tag }}
+            ```
 
             ### Docker
             ```bash
