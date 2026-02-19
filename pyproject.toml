@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "glyphh"
+version = "0.1.0"
+description = "Hyperdimensional Computing SDK and Runtime"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Glyphh AI", email = "support@glyphh.ai"},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# SDK-only dependencies (lightweight)
+dependencies = [
+    "numpy>=1.24.0",
+    "pyyaml>=6.0",
+    "click>=8.0.0",
+    "httpx>=0.24.0",
+]
+
+[project.optional-dependencies]
+# Full runtime server
+runtime = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "python-multipart>=0.0.6",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.28.0",
+    "pgvector>=0.2.0",
+    "alembic>=1.12.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "email-validator>=2.0.0",
+    "pyjwt>=2.8.0",
+    "prometheus-client>=0.17.0",
+    "psutil>=5.9.0",
+]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "hypothesis>=6.82.0",
+    "aiosqlite>=0.19.0",
+    "black>=23.7.0",
+    "isort>=5.12.0",
+    "mypy>=1.5.0",
+    "ruff>=0.0.285",
+]
+
+[project.scripts]
+glyphh = "glyphh.cli.main:cli"
+
+[project.urls]
+Homepage = "https://glyphh.ai"
+Repository = "https://github.com/glyphh-ai/glyphh-runtime"
+Documentation = "https://docs.glyphh.ai"
+
+[tool.setuptools.packages.find]
+include = ["glyphh*"]

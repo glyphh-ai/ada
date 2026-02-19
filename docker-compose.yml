@@ -1,15 +1,13 @@
-version: '3.8'
-
 services:
   db:
     image: pgvector/pgvector:pg16
-    container_name: glyphh-runtime-db
+    container_name: glyphh-db
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: glyphh_runtime
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-glyphh_runtime}
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -20,24 +18,19 @@ services:
       retries: 5
 
   runtime:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        ENABLE_NL_QUERY: "false"
+    build: .
     container_name: glyphh-runtime
     ports:
-      - "8000:8000"
+      - "${GLYPHH_PORT:-8002}:8002"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/glyphh_runtime
-      - DEPLOYMENT_MODE=local
-      - LOG_LEVEL=INFO
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-glyphh_runtime}
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-local}
+      - PORT=8002
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      - ./:/app
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
 
 volumes:
   pgdata:
