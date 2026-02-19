@@ -89,6 +89,9 @@ _VERB_MAP = {
     "delete": "manage", "remove": "manage", "update": "manage",
     "navigate": "navigate", "go": "navigate", "open": "navigate",
     "type": "navigate",
+    "hello": "greeting", "hi": "greeting", "hey": "greeting",
+    "howdy": "greeting", "yo": "greeting", "sup": "greeting",
+    "greetings": "greeting", "morning": "greeting",
 }
 
 _KNOWN_OBJECTS = [
@@ -101,6 +104,8 @@ _KNOWN_OBJECTS = [
 _STOP_WORDS = {
     "how", "do", "i", "a", "the", "to", "is", "what", "my", "an",
     "can", "does", "it", "in", "on", "for", "with", "me", "about",
+    "hello", "hi", "hey", "howdy", "yo", "sup", "greetings", "morning",
+    "good", "afternoon", "evening",
 }
 
 _ACTION_TYPE_MAP = {
@@ -133,6 +138,8 @@ def _extract_object(words):
 
 def _infer_domain(words):
     text = " ".join(words)
+    if any(w in text for w in ["hello", "hi", "hey", "howdy", "yo", "sup", "greetings", "morning"]):
+        return "greeting"
     if any(w in text for w in ["build", "create", "init", "add"]):
         return "build"
     if any(w in text for w in ["find", "search", "query", "similar"]):
