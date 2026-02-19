@@ -10,6 +10,7 @@ If this file exists in a model directory, the runtime imports from it
 instead of using config.yaml defaults.
 """
 
+import hashlib
 import re
 from glyphh.core.config import EncoderConfig, Layer, Segment, Role, NumericConfig, EncodingStrategy
 from glyphh.core.types import Concept
@@ -150,8 +151,11 @@ def encode_query(query: str) -> Concept:
     domain = _infer_domain(words)
     keywords = " ".join(words)
 
+    # Use a deterministic hash (not Python's randomized hash())
+    stable_id = int(hashlib.md5(query.encode()).hexdigest()[:8], 16)
+
     return Concept(
-        name=f"query_{abs(hash(query)) % 100000000:08d}",
+        name=f"query_{stable_id:08d}",
         attributes={
             "verb": verb,
             "object": obj,

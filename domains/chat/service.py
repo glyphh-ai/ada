@@ -181,6 +181,17 @@ class ModelChatService:
         # Pure Glyphh path: confident match with content → return directly
         # This applies to ALL queries including follow-ups
         if raw_content and state == "DONE" and confidence >= 0.35:
+            # Confidence floor: below this threshold, the match is noise
+            if confidence < 0.55:
+                return ChatResult(
+                    content="i'm not sure i understood that. try rephrasing, or type help for a list of things i can do.",
+                    confidence=confidence,
+                    match_method=match_method,
+                    fact_tree=fact_tree,
+                    state="LOW_CONFIDENCE",
+                    provider="glyphh",
+                    trace_id=trace_id,
+                )
             return ChatResult(
                 content=raw_content,
                 command=command,

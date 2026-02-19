@@ -208,6 +208,7 @@ class ModelManager:
             meta_name=meta_name,
             short_description=short_description,
             long_description=long_description,
+            encode_query_fn=self._load_encode_query_fn(str(path)),
         )
         
         # Serialize encoder config for DB storage
@@ -444,6 +445,9 @@ class ModelManager:
         try:
             from domains.models.loader import load_encoder_config
             model_dir = Path(model_path)
+            # model_path may be a .glyphh file — resolve to its parent directory
+            if model_dir.is_file():
+                model_dir = model_dir.parent
             if not model_dir.is_dir():
                 return None
             _, _, encode_query_fn, _ = load_encoder_config(model_dir)

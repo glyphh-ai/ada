@@ -317,8 +317,11 @@ class QueryService:
                     final_score=final_score,
                 ))
             
-            # Sort by final score descending and limit to top_k
-            scored_results.sort(key=lambda x: x.final_score, reverse=True)
+            # Sort by final score descending with stable tiebreaker (glyph ID)
+            # so near-equal scores always return in the same order
+            scored_results.sort(
+                key=lambda x: (-x.final_score, str(x.glyph.id)),
+            )
             scored_results = scored_results[:request.top_k]
         
         query_time_ms = (time.time() - start_time) * 1000
