@@ -1,8 +1,7 @@
 """
 Natural Language Query Service.
 
-Provides hybrid rules-first + LLM-fallback query translation and execution.
-The core principle: "When your LLM can't afford to be wrong, sidecar it with Glyphh."
+Provides query translation and execution via stored procedures and similarity search.
 
 Updated to support AutoSchemaMatcher for automatic schema-based NL query matching.
 Updated to return SDK FactTree in all responses for unified response format.
@@ -145,7 +144,7 @@ class NLQueryResult:
     state: ResponseState
     fact_tree: Optional[FactTree] = None
     query_type: str = ""
-    match_method: str = ""  # "rules", "llm", "auto", "hybrid", or "none"
+    match_method: str = ""  # "auto", "similarity", or "none"
     confidence: float = 0.0
     trace_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     translated_query: Optional[Dict[str, Any]] = None
@@ -224,7 +223,6 @@ class NLQueryService:
     Routes NL queries to the appropriate operation:
     - AutoSchemaMatcher for schema-based matching (when available)
     - Direct similarity search as the default path
-    - LLM fallback when nothing else matches
     
     The legacy IntentMatcher has been removed — each model's own encoder
     handles NL→query translation via encode_query_fn.
@@ -235,25 +233,20 @@ class NLQueryService:
     def __init__(
         self,
         query_service: QueryService,
-        llm_fallback: Optional[Any] = None,
         confidence_threshold: float = 0.85,
         schema_index: Optional['SchemaIndex'] = None,
         auto_schema_matcher: Optional['AutoSchemaMatcher'] = None,
     ):
         """
         Initialize the NL Query Service.
-        
+
         Args:
             query_service: QueryService for executing structured queries
-            llm_fallback: Optional LLMFallback for low-confidence queries
             confidence_threshold: Minimum confidence threshold
             schema_index: Optional SchemaIndex for auto-schema matching
             auto_schema_matcher: Optional AutoSchemaMatcher for auto-schema matching
-        
-        Validates: Requirements 3, 4, 5
         """
         self.query_service = query_service
-        self.llm_fallback = llm_fallback
         self.confidence_threshold = confidence_threshold
         self._schema_index = schema_index
         self._auto_schema_matcher = auto_schema_matcher
@@ -295,7 +288,7 @@ class NLQueryService:
         Flow:
         1. Try auto-schema matching if AutoSchemaMatcher is available
         2. Default to similarity search (model's encode_query_fn handles NL)
-        3. If encoding fails: LLM fallback or ERROR
+        3. If encoding fails: ERROR
         """
         start_time = time.time()
 
@@ -340,36 +333,7 @@ class NLQueryService:
         except Exception as e:
             logger.warning(f"Similarity search failed: {e}")
 
-        # Step 2: Try LLM fallback if available
-        if self.llm_fallback is not None:
-            logger.info("Similarity search failed, trying LLM fallback")
-
-            try:
-                llm_result = await self.llm_fallback.translate_query(query, f"org={org_id}, model={model_id}")
-
-                if llm_result:
-                    fact_tree = await self._execute_structured_query(
-                        org_id,
-                        model_id,
-                        llm_result.get("operation", "similarity_search"),
-                        llm_result,
-                    )
-
-                    elapsed_ms = (time.time() - start_time) * 1000
-
-                    return NLQueryResult(
-                        state=ResponseState.DONE,
-                        fact_tree=fact_tree,
-                        query_type=llm_result.get("operation", "unknown"),
-                        match_method="llm",
-                        confidence=0.0,
-                        translated_query=llm_result if debug else None,
-                        query_time_ms=elapsed_ms,
-                    )
-            except Exception as e:
-                logger.warning(f"LLM fallback failed: {e}")
-
-        # Step 3: No match -> ERROR
+        # Step 2: No match -> ERROR
         logger.info(f"No match for query: '{query}'")
 
         elapsed_ms = (time.time() - start_time) * 1000

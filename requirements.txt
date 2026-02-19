@@ -34,11 +34,3 @@ pyyaml>=6.0
 
 # SDK (installed separately via GitHub)
 # glyphh @ git+https://${SDK_TOKEN}@github.com/glyphh-ai/glyphh-sdk.git@${SDK_REF}
-
-# NL Query (optional - only in full image)
-# transformers>=4.35.0
-# torch>=2.0.0
-
-# LLM providers (optional - for chat endpoint LLM formatting)
-# Without this, chat endpoints return pure Glyphh output
-openai>=1.0.0

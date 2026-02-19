@@ -4,8 +4,7 @@ Natural Language Query Domain.
 Routes NL queries to the appropriate operation via model encoders.
 
 Key Components:
-- NLQueryService: Orchestrates query routing (auto-schema → similarity search → LLM fallback)
-- LLMFallback: Optional LLM-based translation (Phi-3.5-mini-instruct)
+- NLQueryService: Orchestrates query routing (auto-schema → similarity search)
 - SchemaIndex: Runtime schema index for fast NL query matching
 - SchemaIndexMetrics: Metrics for schema index performance
 
@@ -16,7 +15,6 @@ Design Principle: "When your LLM can't afford to be wrong, sidecar it with Glyph
 __all__ = [
     "NLQueryService",
     "NLQueryResult",
-    "LLMFallback",
     "SchemaIndex",
     "SchemaIndexMetrics",
 ]
@@ -30,9 +28,6 @@ def __getattr__(name):
     elif name == "NLQueryResult":
         from domains.nl_query.service import NLQueryResult
         return NLQueryResult
-    elif name == "LLMFallback":
-        from domains.nl_query.llm_fallback import LLMFallback
-        return LLMFallback
     elif name == "SchemaIndex":
         from domains.nl_query.schema_index import SchemaIndex
         return SchemaIndex

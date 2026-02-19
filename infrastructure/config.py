@@ -56,24 +56,6 @@ class Settings(BaseSettings):
         default=True,
         description="Enable natural language query interface"
     )
-    nl_model: str = Field(
-        default="microsoft/Phi-3.5-mini-instruct",
-        description="Model to use for NL query translation"
-    )
-    
-    # LLM provider for chat endpoints (runtime owns LLM selection)
-    llm_provider: str = Field(
-        default="openai",
-        description="LLM provider: openai (more providers coming)"
-    )
-    openai_api_key: Optional[str] = Field(
-        default=None,
-        description="OpenAI API key. If not set, chat endpoints return pure Glyphh output."
-    )
-    openai_model: str = Field(
-        default="gpt-4o-mini",
-        description="OpenAI model to use for chat synthesis"
-    )
     
     # Rate limiting
     rate_limit_per_minute: int = Field(
