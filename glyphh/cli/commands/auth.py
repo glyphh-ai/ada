@@ -1,0 +1,74 @@
+"""
+CLI auth commands — authentication management.
+
+auth login     Log in via browser (device flow)
+auth logout    Log out and clear session
+auth status    Show current auth status
+"""
+
+import click
+
+from .. import theme
+from ..auth import (
+    is_logged_in,
+    get_user,
+    device_login,
+    clear_session,
+    register_runtime,
+)
+
+
+@click.group("auth")
+def auth_group():
+    """Authentication management."""
+    pass
+
+
+@auth_group.command("login")
+def auth_login():
+    """Log in via browser."""
+    if is_logged_in():
+        user = get_user() or {}
+        name = user.get("first_name", user.get("email", ""))
+        click.secho(f"  Already logged in as {name}.", fg=theme.MUTED)
+        return
+    success = device_login()
+    if success:
+        register_runtime()
+
+
+@auth_group.command("logout")
+def auth_logout():
+    """Log out and clear session."""
+    clear_session()
+    click.secho("  Logged out.", fg=theme.MUTED)
+
+
+@auth_group.command("status")
+def auth_status():
+    """Show current auth status."""
+    if is_logged_in():
+        user = get_user() or {}
+        name = user.get("first_name", user.get("email", ""))
+        click.echo()
+        click.secho(f"  ● Logged in as {name}", fg=theme.SUCCESS)
+        click.echo()
+    else:
+        click.echo()
+        click.secho(f"  ● Not logged in", fg=theme.ERROR)
+        click.secho(f"  Run: auth login", fg=theme.TEXT_DIM)
+        click.echo()
+
+
+# ── Handler for interactive shell ──
+
+def handle_auth(func: str | None, args: str = ""):
+    """Route auth subcommands from the interactive shell."""
+    if func == "login":
+        auth_login.invoke(click.Context(auth_login))
+    elif func == "logout":
+        auth_logout.invoke(click.Context(auth_logout))
+    elif func == "status":
+        auth_status.invoke(click.Context(auth_status))
+    else:
+        click.secho("  usage: auth login | auth logout | auth status", fg=theme.MUTED)

@@ -1,9 +1,16 @@
 """
-Main CLI entry point using Click framework
+Main CLI entry point using Click framework.
+
+Supports both:
+  - Direct subcommands: glyphh auth login, glyphh model list
+  - Interactive shell:  glyphh (no args)
 """
 
 import click
 from .shell import shell
+from .commands.auth import auth_group
+from .commands.model import model_group
+from .commands.catalog import catalog_group
 
 
 @click.group(invoke_without_command=True)
@@ -15,12 +22,16 @@ def cli(ctx):
 
     \b
     Run 'glyphh' to start an interactive shell.
+    Run 'glyphh <category> <command>' for direct execution.
     """
     if ctx.invoked_subcommand is None:
         ctx.invoke(shell)
 
 
 cli.add_command(shell)
+cli.add_command(auth_group)
+cli.add_command(model_group)
+cli.add_command(catalog_group)
 
 
 if __name__ == "__main__":

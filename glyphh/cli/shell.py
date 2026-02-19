@@ -1,13 +1,17 @@
 """
 Interactive REPL shell for Glyphh CLI.
+
+Supports the same <category> <function> commands as direct CLI subcommands.
 """
 
 import click
-from typing import Optional
 from pathlib import Path
 
 from .banner import print_banner
-from .auth import is_logged_in, device_login, get_user, register_runtime
+from .auth import is_logged_in, device_login, register_runtime
+from .commands.auth import handle_auth
+from .commands.model import handle_model
+from .commands.catalog import handle_catalog
 from . import theme
 
 # Try to import readline for history/completion
@@ -18,6 +22,13 @@ except ImportError:
     HAS_READLINE = False
 
 HISTORY_FILE = Path.home() / ".glyphh" / "history"
+
+# Command routing table: category -> handler
+COMMAND_HANDLERS = {
+    "auth": handle_auth,
+    "model": handle_model,
+    "catalog": handle_catalog,
+}
 
 
 def setup_readline():
@@ -34,7 +45,6 @@ def setup_readline():
 
     readline.set_history_length(1000)
 
-    # macOS uses libedit
     if "libedit" in (readline.__doc__ or ""):
         readline.parse_and_bind("bind ^I rl_complete")
     else:
@@ -96,25 +106,25 @@ def shell(ctx):
                     click.clear()
                     print_banner()
                     continue
-
-                # Parse <category> <function> format
-                parts = line.lower().split(None, 1)
-                category = parts[0]
-                func = parts[1] if len(parts) > 1 else None
-
-                if category == "help":
+                elif line.lower() == "help":
                     _print_help()
                     continue
 
-                if category == "auth":
-                    _handle_auth(func)
-                    if func == "logout":
-                        break
-                    continue
+                # Parse <category> <function> [args] format
+                parts = line.split(None, 2)
+                category = parts[0].lower()
+                func = parts[1].lower() if len(parts) > 1 else None
+                args = parts[2] if len(parts) > 2 else ""
 
-                # Unrecognized
-                click.secho(f"  unknown command: {line}", fg=theme.MUTED)
-                click.secho("  type 'help' for available commands", fg=theme.TEXT_DIM)
+                handler = COMMAND_HANDLERS.get(category)
+                if handler:
+                    handler(func, args)
+                    # Exit shell after auth logout
+                    if category == "auth" and func == "logout":
+                        break
+                else:
+                    click.secho(f"  unknown command: {line}", fg=theme.MUTED)
+                    click.secho("  type 'help' for available commands", fg=theme.TEXT_DIM)
 
             except KeyboardInterrupt:
                 click.echo()
@@ -132,30 +142,26 @@ def _print_help():
     """Print available commands grouped by category."""
     click.echo()
     click.secho("  auth", fg=theme.ACCENT)
-    click.secho("    auth login       Log in via browser", fg=theme.MUTED)
-    click.secho("    auth logout      Log out and clear session", fg=theme.MUTED)
+    click.secho("    auth login              Log in via browser", fg=theme.MUTED)
+    click.secho("    auth logout             Log out and clear session", fg=theme.MUTED)
+    click.secho("    auth status             Show auth status", fg=theme.MUTED)
+    click.echo()
+    click.secho("  model", fg=theme.ACCENT)
+    click.secho("    model list              List local models", fg=theme.MUTED)
+    click.secho("    model deploy [path]     Deploy model to runtime", fg=theme.MUTED)
+    click.secho("    model status [id]       Check deployed status", fg=theme.MUTED)
+    click.secho("    model undeploy [id]     Remove from runtime", fg=theme.MUTED)
+    click.secho("    model init [name]       Scaffold new model", fg=theme.MUTED)
+    click.secho("    model package [path]    Create .glyphh file", fg=theme.MUTED)
+    click.echo()
+    click.secho("  catalog", fg=theme.ACCENT)
+    click.secho("    catalog list             Browse platform models", fg=theme.MUTED)
+    click.secho("    catalog search <query>   Search by name/category", fg=theme.MUTED)
+    click.secho("    catalog download <name>  Download .glyphh model", fg=theme.MUTED)
+    click.secho("    catalog info <name>      Show model details", fg=theme.MUTED)
     click.echo()
     click.secho("  general", fg=theme.ACCENT)
-    click.secho("    clear, home      Clear screen and show banner", fg=theme.MUTED)
-    click.secho("    exit, quit, q    Exit the shell", fg=theme.MUTED)
-    click.secho("    help             Show this message", fg=theme.MUTED)
+    click.secho("    clear, home             Clear screen and show banner", fg=theme.MUTED)
+    click.secho("    exit, quit, q           Exit the shell", fg=theme.MUTED)
+    click.secho("    help                    Show this message", fg=theme.MUTED)
     click.echo()
-
-
-def _handle_auth(func: str | None):
-    """Handle auth category commands."""
-    if func == "login":
-        if is_logged_in():
-            user = get_user() or {}
-            name = user.get("first_name", user.get("email", ""))
-            click.secho(f"  Already logged in as {name}.", fg=theme.MUTED)
-        else:
-            success = device_login()
-            if success:
-                register_runtime()
-    elif func == "logout":
-        from .auth import clear_session
-        clear_session()
-        click.secho("  Logged out.", fg=theme.MUTED)
-    else:
-        click.secho("  usage: auth login | auth logout", fg=theme.MUTED)
