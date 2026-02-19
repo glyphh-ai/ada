@@ -62,9 +62,19 @@ def shell(ctx):
     setup_readline()
     print_banner()
 
-    # Check if logged in — if not, run device auth flow
+    # Check if logged in — if not, prompt to login
     if not is_logged_in():
+        click.echo()
         click.secho("  Not logged in.", fg=theme.WARNING)
+        click.echo()
+        click.secho("  Press Enter to open the browser and log in, or type 'q' to quit.", fg=theme.MUTED)
+        try:
+            resp = input("  ")
+        except (KeyboardInterrupt, EOFError):
+            click.echo()
+            return
+        if resp.strip().lower() in ("q", "quit", "exit"):
+            return
         success = device_login()
         if not success:
             click.echo()
