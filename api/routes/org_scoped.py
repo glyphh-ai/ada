@@ -8,13 +8,14 @@ No namespace concept — org_id and model_id are passed directly to services.
 """
 
 import logging
-import time
-from typing import Any, Dict, List, Optional
+import tempfile
+import os
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
 
-from domains.auth.service import AuthService, User
+from domains.auth.service import AuthService
 from domains.mcp.server import MCPServer
 from domains.query.service import QueryService
 from infrastructure.config import get_settings
@@ -23,43 +24,6 @@ from shared.auth import AuthenticatedUser, get_current_user
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/{org_id}/{model_id}", tags=["org-scoped"])
 settings = get_settings()
-
-
-# Request/Response Models
-class NLQueryRequest(BaseModel):
-    query: str = Field(..., description="Natural language query", min_length=1)
-    debug: bool = Field(default=False, description="Include translation details")
-
-
-class NLQueryResponse(BaseModel):
-    state: str
-    result: Optional[Any] = None
-    fact_tree: Optional[Dict[str, Any]] = None
-    query_type: str = ""
-    match_method: str = ""
-    confidence: float = 0.0
-    trace_id: Optional[str] = None
-    translated_query: Optional[Dict[str, Any]] = None
-    query_time_ms: float = 0.0
-    matched_route: Optional[str] = None
-    ask: Optional[Dict[str, Any]] = None
-    blocked: Optional[Dict[str, Any]] = None
-    auth_required: Optional[Dict[str, Any]] = None
-    error: Optional[Dict[str, Any]] = None
-
-
-class NormalizeRequest(BaseModel):
-    query: str = Field(..., description="Query text to normalize", min_length=1)
-
-
-class NormalizeResponse(BaseModel):
-    normalized_query: str
-    changed: bool
-
-
-class IntentsResponse(BaseModel):
-    intents: List[str]
-    patterns: Dict[str, List[str]]
 
 
 # Dependency injection
@@ -74,25 +38,23 @@ async def validate_org_access(
 ) -> AuthenticatedUser:
     """
     Validate that the authenticated user has access to the org and model.
-    
+
     Uses JWT authentication from shared/auth.py which handles:
     - Local mode bypass (returns mock user)
     - JWT token validation and claim extraction
     - Token expiry and signature verification
-    
+
     Additionally validates that the JWT org_id matches the URL org_id.
     """
-    # In local mode, the auth module returns a mock user - allow access
     if current_user.org_id == "local-dev-org":
         return current_user
-    
-    # Validate org_id matches the authenticated user's org
+
     if current_user.org_id != org_id:
         raise HTTPException(
             status_code=403,
             detail="Organization mismatch - you don't have access to this organization"
         )
-    
+
     return current_user
 
 
@@ -103,14 +65,30 @@ async def get_mcp_server(
     """Get MCP server for org/model."""
     from main import model_manager
     from infrastructure.database import async_session_maker
-    
+
     if model_manager is None:
         raise HTTPException(status_code=503, detail="Model manager not initialized")
-    
+
     query_service = QueryService(model_manager, async_session_maker)
     auth_service = AuthService()
-    
+
     return MCPServer(query_service, auth_service)
+
+
+
+class UndeployRequest(BaseModel):
+    delete_data: bool = False
+
+
+async def get_model_manager():
+    """Get the ModelManager instance from main."""
+    from main import model_manager
+
+    if model_manager is None:
+        raise HTTPException(status_code=503, detail="Model manager not initialized")
+    return model_manager
+
+
 
 
 # MCP Endpoint
@@ -124,26 +102,25 @@ async def mcp_endpoint(
 ) -> Dict[str, Any]:
     """
     MCP endpoint for org-scoped model access.
-    
+
     Accepts JWT authentication from Studio for direct queries.
     Validates org_id in URL matches org_id in JWT token.
     """
     tool_name = request.get("tool")
     arguments = request.get("arguments", {})
-    
+
     if not tool_name:
         raise HTTPException(status_code=400, detail="Missing 'tool' field")
-    
-    # Pass org_id and model_id directly — no namespace construction
+
     arguments["org_id"] = org_id
     arguments["model_id"] = model_id
-    
+
     response = await mcp_server.handle_tool_call(
         tool_name=tool_name,
         arguments=arguments,
         auth_token="",
     )
-    
+
     return response.to_dict()
 
 
@@ -156,116 +133,193 @@ async def list_mcp_tools(
     return {"tools": mcp_server.get_tools_list()}
 
 
-# NL Query Service Factory
-def get_nl_query_service_for_org():
-    """Get NL query service instance for org-scoped queries."""
+# Model Lifecycle Endpoints
+
+@router.get("/ready")
+async def readiness_check(
+    org_id: str,
+    model_id: str,
+    current_user: AuthenticatedUser = Depends(validate_org_access),
+) -> Dict[str, Any]:
+    """Check if a model is deployed and ready to serve queries."""
     from main import model_manager
-    from domains.nl_query.service import NLQueryService
-    from infrastructure.database import async_session_maker
-    
+
     if model_manager is None:
-        raise HTTPException(status_code=503, detail="Model manager not initialized")
-    
-    if not settings.enable_nl_query:
-        raise HTTPException(
-            status_code=501,
-            detail="Natural language query is not enabled. Set ENABLE_NL_QUERY=true"
+        return {"ready": False, "status": "model_manager_not_initialized", "model_id": model_id}
+
+    loaded_model = await model_manager.get_model(org_id, model_id)
+    if loaded_model is None:
+        return {"ready": False, "status": "not_deployed", "model_id": model_id}
+
+    is_locked = model_manager.is_model_locked(org_id, model_id)
+    if is_locked:
+        return {"ready": False, "status": "locked", "model_id": model_id}
+
+    return {
+        "ready": True,
+        "status": "ready",
+        "model_id": model_id,
+        "meta_name": loaded_model.meta_name,
+    }
+
+
+@router.post("/model/deploy")
+async def deploy_model(
+    org_id: str,
+    model_id: str,
+    file: Optional[UploadFile] = File(None),
+    model_path: Optional[str] = None,
+    current_user: AuthenticatedUser = Depends(validate_org_access),
+    model_manager=Depends(get_model_manager),
+) -> Dict[str, Any]:
+    """
+    Deploy a .glyphh model.
+
+    Accepts either:
+    - A multipart file upload of a .glyphh file (field name: file)
+    - A form field model_path pointing to a filesystem path
+    """
+    from shared.exceptions import ModelLoadException, ModelIncompatibleException
+
+    resolved_path: Optional[str] = None
+    tmp_path: Optional[str] = None
+
+    try:
+        if file is not None:
+            # Multipart file upload — save to temp file
+            suffix = ".glyphh"
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+            try:
+                content = await file.read()
+                os.write(tmp_fd, content)
+            finally:
+                os.close(tmp_fd)
+            resolved_path = tmp_path
+        elif model_path is not None:
+            resolved_path = model_path
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Provide either a .glyphh file upload or a model_path.",
+            )
+
+        loaded_model = await model_manager.load_model(
+            model_path=resolved_path,
+            org_id=org_id,
+            model_id=model_id,
         )
-    
-    query_service = QueryService(model_manager, async_session_maker)
-    
-    llm_fallback = None
+
+        return {
+            "status": "deployed",
+            "model_id": model_id,
+            "version": loaded_model.sdk_model.version,
+            "meta_name": loaded_model.meta_name,
+        }
+
+    except ModelLoadException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ModelIncompatibleException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        # Clean up temp file if we created one
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+
+
+@router.post("/model/undeploy")
+async def undeploy_model(
+    org_id: str,
+    model_id: str,
+    request: UndeployRequest = UndeployRequest(),
+    current_user: AuthenticatedUser = Depends(validate_org_access),
+    model_manager=Depends(get_model_manager),
+) -> Dict[str, Any]:
+    """Unload a model from memory, optionally deleting its data."""
+    from shared.exceptions import ModelNotFoundException
+
     try:
-        from domains.nl_query.llm_fallback import LLMFallback
-        llm_fallback = LLMFallback(model_name=settings.nl_model)
-        if not llm_fallback.is_available():
-            llm_fallback = None
-            logger.info("LLM fallback disabled (transformers not available)")
-    except ImportError:
-        logger.info("LLM fallback disabled (import error)")
-    
-    return NLQueryService(
-        query_service=query_service,
-        llm_fallback=llm_fallback,
-        confidence_threshold=0.85,
-    )
+        await model_manager.unload_model(
+            org_id=org_id,
+            model_id=model_id,
+            delete_data=request.delete_data,
+        )
+        return {"status": "undeployed", "model_id": model_id}
+    except ModelNotFoundException:
+        raise HTTPException(status_code=404, detail=f"Model not found: {org_id}/{model_id}")
 
 
-# NL Query Endpoints
-@router.post("/query", response_model=NLQueryResponse)
-async def execute_nl_query(
-    org_id: str,
-    model_id: str,
-    request: NLQueryRequest,
-    current_user: AuthenticatedUser = Depends(validate_org_access),
-) -> NLQueryResponse:
-    """Execute a natural language query against the model."""
-    service = get_nl_query_service_for_org()
-    
-    logger.info(f"NL query: org={org_id}, model={model_id}, query='{request.query}'")
-    
-    start_time = time.time()
-    
-    result = await service.execute_nl_query(
-        org_id=org_id,
-        model_id=model_id,
-        query=request.query,
-        debug=request.debug,
-    )
-    
-    query_time_ms = (time.time() - start_time) * 1000
-    
-    # Serialize via to_dict() which handles all states
-    response_data = result.to_dict()
-    
-    # Backward compat: include result field for DONE state
-    if result.fact_tree is not None:
-        response_data["result"] = result.fact_tree.to_json()
-    
-    return NLQueryResponse(**response_data)
-
-
-@router.get("/intents", response_model=IntentsResponse)
-async def get_intents(
+@router.post("/model/re-encode")
+async def re_encode_model(
     org_id: str,
     model_id: str,
     current_user: AuthenticatedUser = Depends(validate_org_access),
-) -> IntentsResponse:
-    """Get available intents and patterns for the model."""
-    service = get_nl_query_service_for_org()
-    intents = service.get_intents()
-    
-    return IntentsResponse(
-        intents=intents["intents"],
-        patterns=intents["patterns"],
-    )
+    model_manager=Depends(get_model_manager),
+) -> Dict[str, Any]:
+    """Re-encode all glyphs for a deployed model."""
+    from shared.exceptions import ModelNotFoundException
 
-# Normalize Endpoint
-def _get_llm_fallback():
-    """Get LLM fallback instance for normalization. Returns None if unavailable."""
+    # Check if model is loaded
+    loaded_model = await model_manager.get_model(org_id, model_id)
+    if loaded_model is None:
+        raise HTTPException(status_code=404, detail=f"Model not found: {org_id}/{model_id}")
+
+    # Check if re-encode is already in progress
+    if model_manager.is_model_locked(org_id, model_id):
+        raise HTTPException(status_code=409, detail="Re-encode already in progress for this model")
+
     try:
-        from domains.nl_query.llm_fallback import LLMFallback
-        llm_fallback = LLMFallback(model_name=settings.nl_model)
-        if not llm_fallback.is_available():
-            return None
-        return llm_fallback
-    except ImportError:
-        return None
+        result = await model_manager.re_encode_model(
+            org_id=org_id,
+            model_id=model_id,
+        )
+        return {"job_id": result.job_id, "status": result.status}
+    except ModelNotFoundException:
+        raise HTTPException(status_code=404, detail=f"Model not found: {org_id}/{model_id}")
 
 
-@router.post("/normalize")
-async def normalize_query(
+@router.delete("/model")
+async def delete_model(
     org_id: str,
     model_id: str,
-    request: NormalizeRequest,
     current_user: AuthenticatedUser = Depends(validate_org_access),
-) -> NormalizeResponse:
-    """Normalize query text: fix spelling and grammar via LLM."""
-    llm_fallback = _get_llm_fallback()
+    model_manager=Depends(get_model_manager),
+) -> Dict[str, Any]:
+    """Full delete: unload model + purge all data (config, glyphs, vectors, edges, procedures)."""
+    from shared.exceptions import ModelNotFoundException
+    from infrastructure.database import async_session_maker
+    from sqlalchemy import delete as sql_delete
+    from domains.procedures.models import StoredProcedureModel
 
-    if llm_fallback is None:
-        return NormalizeResponse(normalized_query=request.query, changed=False)
+    # Check if model exists
+    loaded_model = await model_manager.get_model(org_id, model_id)
+    if loaded_model is None:
+        raise HTTPException(status_code=404, detail=f"Model not found: {org_id}/{model_id}")
 
-    normalized_text, changed = await llm_fallback.normalize_text(request.query)
-    return NormalizeResponse(normalized_query=normalized_text, changed=changed)
+    # Check if re-encode is in progress
+    if model_manager.is_model_locked(org_id, model_id):
+        raise HTTPException(status_code=409, detail="Cannot delete model while re-encode is in progress")
+
+    try:
+        # Unload model and delete config + glyph data
+        await model_manager.unload_model(
+            org_id=org_id,
+            model_id=model_id,
+            delete_data=True,
+        )
+
+        # Purge stored procedures
+        async with async_session_maker() as session:
+            await session.execute(
+                sql_delete(StoredProcedureModel).where(
+                    StoredProcedureModel.org_id == org_id,
+                    StoredProcedureModel.model_id == model_id,
+                )
+            )
+            await session.commit()
+
+        return {"status": "deleted", "model_id": model_id}
+    except ModelNotFoundException:
+        raise HTTPException(status_code=404, detail=f"Model not found: {org_id}/{model_id}")
 

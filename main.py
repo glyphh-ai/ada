@@ -217,34 +217,16 @@ def _is_allowed_origin(origin: str) -> bool:
 
 # Import and include routers
 from api.routes import (
-    deployment_router,
-    glyphs_router,
-    query_router,
     health_router,
     org_scoped_router,
     listeners_router,
-    jobs_router,
-    chat_router,
-    charts_router,
-    viewer_router,
-    model_chat_router,
     catalog_router,
 )
-from api.routes.procedures import router as procedures_router
 
 app.include_router(health_router)
-app.include_router(deployment_router)
-app.include_router(glyphs_router)
-app.include_router(query_router)
-app.include_router(procedures_router)
-app.include_router(charts_router)
-app.include_router(viewer_router)
 # listeners_router must come before org_scoped_router (more specific prefix)
 app.include_router(listeners_router)
-app.include_router(jobs_router)
 app.include_router(org_scoped_router)
-app.include_router(chat_router)
-app.include_router(model_chat_router)
 app.include_router(catalog_router)
 
 

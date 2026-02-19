@@ -249,6 +249,34 @@ class ModelManager:
                 )
                 session.add(config)
             await session.commit()
+
+            # Sync SDK-bundled stored procedures to the database
+            if sdk_model.has_stored_procedures():
+                from domains.procedures.service import StoredProcedureService
+                from domains.procedures.schemas import StoredProcedureCreate
+                procedure_service = StoredProcedureService(session)
+                sdk_proc_names = set()
+                for proc in sdk_model.stored_procedures:
+                    await procedure_service.upsert(
+                        org_id=org_id,
+                        model_id=model_id,
+                        data=StoredProcedureCreate(
+                            name=proc.name,
+                            gql_query=proc.gql_query,
+                            lexicons=proc.lexicons,
+                            description=proc.description,
+                        ),
+                    )
+                    sdk_proc_names.add(proc.name)
+                # Remove stale procedures no longer in the SDK model
+                existing_procs = await procedure_service.list(org_id, model_id)
+                for existing_proc in existing_procs:
+                    if existing_proc.name not in sdk_proc_names:
+                        await procedure_service.delete(org_id, model_id, existing_proc.name)
+                logger.info(
+                    f"Synced {len(sdk_model.stored_procedures)} stored procedures "
+                    f"for org={org_id}, model={model_id}"
+                )
         
         # Everything succeeded — now swap the in-memory model atomically
         old_model = self._models.get(key)

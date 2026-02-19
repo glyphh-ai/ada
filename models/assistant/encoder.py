@@ -26,7 +26,7 @@ CONTEXT_TYPE_NUMERIC = NumericConfig(
     max_value=2.0,
 )
 
-CONTEXT_TYPE_MAP = {"followup": 0.0, "standalone": 1.0}
+CONTEXT_TYPE_MAP = {"standalone": 1.0}
 
 ENCODER_CONFIG = EncoderConfig(
     dimension=2000,

@@ -347,29 +347,3 @@ class Token(Base):
         return f"<Token(id={self.id}, org_id={self.org_id}, status={self.status})>"
 
 
-class ModelVersionHistory(Base):
-    """
-    Model version history - tracks all deployed versions of a model.
-    
-    Records version, deployment timestamp, and deployer for each deployment.
-    History is retained even when the model is deleted (soft delete).
-    """
-    __tablename__ = "model_version_history"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    org_id = Column(String(255), nullable=False, index=True)
-    model_id = Column(String(255), nullable=False, index=True)
-    version = Column(String(50), nullable=False)
-    deployed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    deployed_by = Column(String(255), nullable=True)  # User ID or email
-    is_current = Column(Integer, default=1)  # 1 = current version, 0 = historical
-    model_metadata = Column("metadata", JSONType, default=dict)  # Additional version metadata
-    
-    __table_args__ = (
-        Index("idx_version_history_org_model", org_id, model_id),
-        Index("idx_version_history_current", org_id, model_id, is_current),
-        Index("idx_version_history_deployed", org_id, model_id, deployed_at.desc()),
-    )
-    
-    def __repr__(self) -> str:
-        return f"<ModelVersionHistory(org_id={self.org_id}, model_id={self.model_id}, version={self.version})>"

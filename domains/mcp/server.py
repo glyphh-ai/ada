@@ -2,17 +2,16 @@
 MCP Server Implementation for Glyphh Runtime.
 
 Implements the Model Context Protocol (MCP) for agent integration.
-Exposes the nl_query tool through the MCP interface.
+Exposes two tools: nl_query and gql_query.
 """
 
 import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Coroutine, Dict, List, Optional
-from uuid import UUID
 
 from domains.auth.service import AuthService, User
-from domains.mcp.progress import MCPProgressHandler, ProgressTracker
+from domains.mcp.progress import MCPProgressHandler
 from domains.query.service import QueryService
 from shared.exceptions import (
     AuthenticationException,
@@ -77,11 +76,10 @@ class MCPServer:
     """
     MCP Server for Glyphh Runtime.
     
-    Exposes one tool: nl_query.
-    Delegates all NL query logic to NLQueryService which handles:
-    - Auto-schema matching (when available)
-    - Direct similarity search via model encoder
-    - LLM fallback when encoding fails
+    Exposes two tools: nl_query and gql_query.
+    - nl_query: NL text → NLQueryService → stored procedure match → QueryService → HDC Engine
+    - gql_query: raw GQL → QueryService → HDC Engine
+    Both tools return the same output shape: {state, fact_tree, confidence, match_method}
     """
     
     def __init__(
@@ -94,11 +92,11 @@ class MCPServer:
         self._tools = self._build_tool_schemas()
 
     def _build_tool_schemas(self) -> Dict[str, MCPToolSchema]:
-        """Build MCP tool schemas."""
+        """Build MCP tool schemas. Only nl_query and gql_query are registered."""
         return {
             "nl_query": MCPToolSchema(
                 name="nl_query",
-                description="Execute a natural language query. Uses rules-based intent matching first, falls back to LLM if needed.",
+                description="Execute a natural language query. Matches stored procedures first, falls back to similarity search.",
                 input_schema={
                     "type": "object",
                     "properties": {
@@ -148,46 +146,6 @@ class MCPServer:
                         }
                     },
                     "required": ["org_id", "model_id", "query"]
-                }
-            ),
-            "gql_translate": MCPToolSchema(
-                name="gql_translate",
-                description="Translate a natural language query to GQL without executing it. Useful for debugging and understanding query translation.",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "org_id": {
-                            "type": "string",
-                            "description": "Organization ID"
-                        },
-                        "model_id": {
-                            "type": "string",
-                            "description": "Model ID"
-                        },
-                        "query": {
-                            "type": "string",
-                            "description": "Natural language query to translate"
-                        }
-                    },
-                    "required": ["org_id", "model_id", "query"]
-                }
-            ),
-            "list_procedures": MCPToolSchema(
-                name="list_procedures",
-                description="List all stored procedures for a model. Returns name, description, and lexicons for each procedure.",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "org_id": {
-                            "type": "string",
-                            "description": "Organization ID"
-                        },
-                        "model_id": {
-                            "type": "string",
-                            "description": "Model ID"
-                        }
-                    },
-                    "required": ["org_id", "model_id"]
                 }
             ),
         }
@@ -305,71 +263,6 @@ class MCPServer:
             error=message,
         )
     
-    def _flatten_fact_tree(self, fact_tree: Any, query: str) -> Dict[str, Any]:
-        """
-        Flatten a FactTree into a simpler response format.
-        
-        Transforms the nested FactTree structure into a flat response with:
-        - query: The original query
-        - result: The actual query results (singular to match MCPResponse)
-        - citations: Any citations from the results
-        - execution_time_ms: Query execution time
-        """
-        response = {
-            "query": query,
-            "query_type": "gql",
-            "match_method": "direct",
-            "confidence": 1.0,
-            "result": None,
-            "citations": [],
-            "execution_time_ms": None,
-        }
-        
-        # Get the JSON representation
-        tree_json = fact_tree.to_json() if hasattr(fact_tree, 'to_json') else {}
-        
-        # Extract data from children
-        children = tree_json.get("children", [])
-        for child in children:
-            desc = child.get("description", "").lower()
-            value = child.get("value")
-            data_context = child.get("data_context", {})
-            
-            # Extract results (the main query output)
-            if "listed" in desc or "found" in desc or "results" in desc.lower():
-                response["result"] = value
-                # Include filter/limit info if present
-                if data_context.get("limit"):
-                    response["limit"] = data_context["limit"]
-                if data_context.get("filter"):
-                    response["filter"] = data_context["filter"]
-                if data_context.get("threshold"):
-                    response["threshold"] = data_context["threshold"]
-            
-            # Extract comparison results
-            elif "compar" in desc:
-                response["result"] = value
-            
-            # Extract drift results
-            elif "drift" in desc:
-                response["result"] = value
-            
-            # Extract execution metadata
-            elif "execution" in desc or "metadata" in desc:
-                if data_context.get("execution_time_ms"):
-                    response["execution_time_ms"] = data_context["execution_time_ms"]
-            
-            # Collect citations
-            citations = child.get("citations", [])
-            if citations:
-                response["citations"].extend(citations)
-        
-        # Also check root-level citations
-        root_citations = tree_json.get("citations", [])
-        if root_citations:
-            response["citations"].extend(root_citations)
-        
-        return response
 
     # =========================================================================
     # Tool Handlers
@@ -383,26 +276,18 @@ class MCPServer:
         progress_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Handle nl_query tool. Delegates entirely to NLQueryService.
-        
+        Handle nl_query tool. Routes: NLQueryService → stored procedure match → QueryService → HDC Engine.
+
         Requires the model to be loaded in the runtime — no fallbacks.
         Sends progress notifications if progress_token is provided.
-        
-        Now supports stored procedure matching (Requirements 7.1, 7.2):
-        - Passes procedure_service to IntentMatcher
-        - Includes procedure_name in response when matched
         """
         from domains.nl_query.service import NLQueryService
-        from domains.procedures.service import StoredProcedureService
-        from infrastructure.config import get_settings
-        from infrastructure.database import async_session_maker
-        
-        settings = get_settings()
+
         org_id = arguments["org_id"]
         model_id = arguments["model_id"]
         query = arguments["query"]
         debug = arguments.get("debug", False)
-        
+
         # Send initial progress if token provided
         if progress_handler and progress_token:
             await progress_handler.notify(
@@ -410,68 +295,56 @@ class MCPServer:
                 progress=10, 
                 message="Analyzing query..."
             )
-        
+
         # Verify model is loaded — fail early with clear error
         loaded_model = await self._query_service._model_manager.get_model(org_id, model_id)
         if loaded_model is None:
             raise ModelNotFoundException(org_id, model_id)
-        
+
         if progress_handler and progress_token:
             await progress_handler.notify(
                 progress_token, 
                 progress=30, 
                 message="Processing query..."
             )
-        
-        # Create NL service — no intent matcher needed, model's encoder
-        # handles NL→embedding translation directly
-        llm_fallback = None
-        try:
-            from domains.nl_query.llm_fallback import LLMFallback
-            llm_fallback = LLMFallback(model_name=settings.nl_model)
-            if not llm_fallback.is_available():
-                llm_fallback = None
-        except ImportError:
-            pass
-        
+
+        # Create NL service — deterministic, no LLM fallback
         nl_service = NLQueryService(
             query_service=self._query_service,
-            llm_fallback=llm_fallback,
             confidence_threshold=0.85,
         )
-        
+
         if progress_handler and progress_token:
             await progress_handler.notify(
                 progress_token, 
                 progress=50, 
                 message="Executing query..."
             )
-        
+
         result = await nl_service.execute_nl_query(
             org_id=org_id,
             model_id=model_id,
             query=query,
             debug=debug,
         )
-        
+
         if progress_handler and progress_token:
             await progress_handler.notify(
                 progress_token, 
                 progress=100, 
                 message="Complete"
             )
-        
-        # Build response with FactTree (Validates: Requirements 8.1, 8.2, 11.1)
-        # Use to_dict() which serializes FactTree via to_json() and includes legacy fields
+
+        # Build response with consistent output shape: {state, fact_tree, confidence, match_method}
         response = result.to_dict()
-        
-        # Include procedure_name if matched via stored procedure (Requirement 7.2)
+
+        # Include procedure_name if matched via stored procedure
         if result.match_method == "stored_procedure" and hasattr(result, 'procedure_name'):
             response["procedure_name"] = result.procedure_name
-        
+
         if result.match_method == "none":
             response["error"] = "No intent match found for query"
-        
+
         return response
 
 
@@ -483,25 +356,16 @@ class MCPServer:
         progress_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Handle gql_query tool. Executes a GQL query directly.
-        
+        Handle gql_query tool. Routes: QueryService → HDC Engine.
+
         Parses the GQL query, creates an execution plan, and returns
-        results as a Fact Tree. Sends progress notifications if token provided.
-        
-        Uses DatabaseGlyphStorage to provide glyphs and embeddings to the
-        GQL executor, replacing the previous GlyphWrapper hack.
-        
-        Requirements:
-            - 6.1: Uses DatabaseGlyphStorage instead of GlyphWrapper
-            - 6.2: Creates ExecutionContext with storage parameter
-            - 6.3: GlyphWrapper class removed
-            - 6.4: Passes org_id and model_id to DatabaseGlyphStorage
+        results with the same output shape as nl_query: {state, fact_tree, confidence, match_method}.
         """
         org_id = arguments["org_id"]
         model_id = arguments["model_id"]
         query = arguments["query"]
         enable_cache = arguments.get("enable_cache", True)
-        
+
         # Send initial progress
         if progress_handler and progress_token:
             await progress_handler.notify(
@@ -509,19 +373,19 @@ class MCPServer:
                 progress=10, 
                 message="Parsing query..."
             )
-        
+
         # Verify model is loaded
         loaded_model = await self._query_service._model_manager.get_model(org_id, model_id)
         if loaded_model is None:
             raise ModelNotFoundException(org_id, model_id)
-        
+
         if progress_handler and progress_token:
             await progress_handler.notify(
                 progress_token, 
                 progress=30, 
                 message="Building execution context..."
             )
-        
+
         try:
             # Import GQL components
             from glyphh.gql import (
@@ -532,23 +396,22 @@ class MCPServer:
             )
             from domains.gql.storage import DatabaseGlyphStorage
             from shared.similarity_service import SimilarityService
-            
+
             # Fetch glyphs with embeddings from database
-            # Requirements 6.1, 6.4: Use DatabaseGlyphStorage with org_id and model_id
             db_glyphs, embeddings = await self._query_service.list_glyphs_with_embeddings(
                 org_id=org_id,
                 model_id=model_id,
-                limit=10000,  # Get all glyphs for GQL execution
+                limit=10000,
             )
-            
+
             logger.info(f"Fetched {len(db_glyphs)} glyphs with {len(embeddings)} embeddings from database")
-            
+
             # Create SimilarityService for similarity computations
             similarity_service = SimilarityService(
                 similarity_calculator=getattr(loaded_model, 'similarity_calculator', None)
             )
-            
-            # Requirement 6.1, 6.4: Create DatabaseGlyphStorage with org_id, model_id, glyphs, embeddings
+
+            # Create DatabaseGlyphStorage
             storage = DatabaseGlyphStorage(
                 org_id=org_id,
                 model_id=model_id,
@@ -556,171 +419,60 @@ class MCPServer:
                 embeddings=embeddings,
                 similarity_service=similarity_service,
             )
-            
+
             logger.info(f"GQL context built with {len(db_glyphs)} glyphs from database using DatabaseGlyphStorage")
-            
-            # Requirement 6.2: Create ExecutionContext with storage parameter
+
+            # Create ExecutionContext with storage parameter
             context = ExecutionContext(
                 model=loaded_model.sdk_model,
                 storage=storage,
                 encoder=getattr(loaded_model, 'encoder', None),
             )
-            
+
             if progress_handler and progress_token:
                 await progress_handler.notify(
                     progress_token, 
                     progress=50, 
                     message="Executing query..."
                 )
-            
+
             # Create executor and run query
             executor = GQLExecutor(
                 context=context,
                 enable_cache=enable_cache,
             )
-            
+
             fact_tree = executor.execute(query)
-            
+
             if progress_handler and progress_token:
                 await progress_handler.notify(
                     progress_token, 
                     progress=100, 
                     message="Complete"
                 )
-            
-            # Flatten FactTree to a simpler response format
-            result = self._flatten_fact_tree(fact_tree, query)
-            result["cache_stats"] = executor.get_cache_stats() if enable_cache else None
-            
-            return result
-            
+
+            # Return consistent output shape: {state, fact_tree, confidence, match_method}
+            fact_tree_json = fact_tree.to_json() if hasattr(fact_tree, 'to_json') else {}
+
+            return {
+                "state": "DONE",
+                "fact_tree": fact_tree_json,
+                "confidence": 1.0,
+                "match_method": "direct",
+                "query_type": "gql",
+                "query_time_ms": 0.0,
+                "cache_stats": executor.get_cache_stats() if enable_cache else None,
+            }
+
         except Exception as e:
             logger.error(f"GQL query error: {e}", exc_info=True)
             return {
-                "result": None,
-                "error": str(e),
-                "query_type": "gql",
+                "state": "ERROR",
+                "fact_tree": None,
+                "confidence": 0.0,
                 "match_method": "direct",
-                "confidence": 0.0,
-            }
-    
-    async def _handle_gql_translate(
-        self,
-        arguments: Dict[str, Any],
-        user: User,
-        progress_handler: Optional[MCPProgressHandler] = None,
-        progress_token: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        Handle gql_translate tool. Translates NL to GQL without executing.
-        
-        Uses the model's GQL patterns to translate natural language
-        queries to GQL syntax.
-        """
-        org_id = arguments["org_id"]
-        model_id = arguments["model_id"]
-        query = arguments["query"]
-        
-        # Verify model is loaded
-        loaded_model = await self._query_service._model_manager.get_model(org_id, model_id)
-        if loaded_model is None:
-            raise ModelNotFoundException(org_id, model_id)
-        
-        try:
-            # Get GQL patterns from model config
-            from glyphh.gql import NLTranslator, DEFAULT_GQL_PATTERNS
-            from shared.encoder_config_factory import EncoderConfigFactory
-            
-            # Try to get custom patterns from model
-            patterns = DEFAULT_GQL_PATTERNS
-            encoder_config = EncoderConfigFactory.extract_encoder_config(loaded_model.sdk_model)
-            
-            if encoder_config and hasattr(encoder_config, 'gql_patterns') and encoder_config.gql_patterns:
-                custom_patterns = encoder_config.gql_patterns.to_gql_patterns()
-                if custom_patterns:
-                    patterns = custom_patterns
-            
-            # Create translator
-            translator = NLTranslator(
-                patterns=patterns,
-                dimension=encoder_config.dimension if encoder_config else 10000,
-                seed=encoder_config.seed if encoder_config else 42,
-            )
-            
-            # Translate query
-            result = translator.translate(query)
-            
-            return {
-                "success": result.success,
-                "gql": result.gql,
-                "pattern_name": result.pattern_name,
-                "confidence": result.confidence,
-                "extracted_slots": result.extracted_slots,
-                "error": result.error,
-                "query_type": "gql_translate",
-                "match_method": "hdc_intent" if result.success else "none",
-            }
-            
-        except Exception as e:
-            logger.error(f"GQL translate error: {e}", exc_info=True)
-            return {
-                "success": False,
-                "gql": None,
-                "error": str(e),
-                "query_type": "gql_translate",
-                "match_method": "none",
-                "confidence": 0.0,
-            }
-    
-    async def _handle_list_procedures(
-        self,
-        arguments: Dict[str, Any],
-        user: User,
-        progress_handler: Optional[MCPProgressHandler] = None,
-        progress_token: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        Handle list_procedures tool. Lists all stored procedures for a model.
-        
-        Returns name, description, and lexicons for each procedure.
-        
-        Requirements:
-            - 7.3: Define tool schema in _build_tool_schemas()
-            - 7.4: Return name, description, lexicons for each procedure
-        """
-        from domains.procedures.service import StoredProcedureService
-        from infrastructure.database import async_session_maker
-        
-        org_id = arguments["org_id"]
-        model_id = arguments["model_id"]
-        
-        try:
-            async with async_session_maker() as session:
-                procedure_service = StoredProcedureService(session)
-                procedures = await procedure_service.list(org_id, model_id)
-                
-                # Format procedures for response (Requirement 7.4)
-                procedure_list = [
-                    {
-                        "name": p.name,
-                        "description": p.description,
-                        "lexicons": p.lexicons,
-                        "gql_query": p.gql_query,
-                    }
-                    for p in procedures
-                ]
-                
-                return {
-                    "procedures": procedure_list,
-                    "total": len(procedure_list),
-                    "org_id": org_id,
-                    "model_id": model_id,
-                }
-                
-        except Exception as e:
-            logger.error(f"List procedures error: {e}", exc_info=True)
-            return {
-                "procedures": [],
-                "total": 0,
+                "query_type": "gql",
                 "error": str(e),
             }
+    
+    
