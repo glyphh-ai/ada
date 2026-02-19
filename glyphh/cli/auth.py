@@ -195,11 +195,7 @@ def register_runtime() -> bool:
         with httpx.Client(timeout=15) as client:
             res = client.post(
                 f"{api_url}/runtimes",
-                json={
-                    "name": name,
-                    "runtime_type": "self_hosted",
-                    "region": None,
-                },
+                json={"name": name},
                 headers={"Authorization": f"Bearer {token}"},
             )
             if res.status_code in (200, 201):
