@@ -220,14 +220,12 @@ from api.routes import (
     health_router,
     org_scoped_router,
     listeners_router,
-    catalog_router,
 )
 
 app.include_router(health_router)
 # listeners_router must come before org_scoped_router (more specific prefix)
 app.include_router(listeners_router)
 app.include_router(org_scoped_router)
-app.include_router(catalog_router)
 
 
 if __name__ == "__main__":
