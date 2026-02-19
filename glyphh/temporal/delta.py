@@ -8,7 +8,7 @@ between vector versions and applying deltas to update vectors.
 import numpy as np
 from typing import List, Dict
 from glyphh.core.types import Vector
-from glyphh.core.rust_ops import bind, bundle
+from glyphh.core.ops import bind, bundle
 
 
 class TemporalEncoder:
@@ -154,7 +154,7 @@ class TemporalEncoder:
         """
         # This is a placeholder - in practice, use full Encoder
         # For now, just create a simple vector
-        from glyphh.core.rust_ops import generate_symbol
+        from glyphh.core.ops import generate_symbol
         
         # Generate a symbol based on segment data
         segment_key = str(sorted(segment_data.items()))

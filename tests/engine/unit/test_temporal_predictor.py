@@ -794,7 +794,7 @@ class TestDriftReduction:
         
         # Compute similarity to initial state
         # (higher similarity = more drift reduction)
-        from glyphh.core.rust_ops import cosine_similarity
+        from glyphh.core.ops import cosine_similarity
         
         sim_t1 = cosine_similarity(corrected_t1.data, initial_state.data)
         sim_t5 = cosine_similarity(corrected_t5.data, initial_state.data)
@@ -874,7 +874,7 @@ class TestDriftReduction:
         time_steps = [1, 2, 3, 5, 10]
         similarities = []
         
-        from glyphh.core.rust_ops import cosine_similarity
+        from glyphh.core.ops import cosine_similarity
         
         for t in time_steps:
             corrected = predictor._reduce_drift(predicted_state, initial_state, t)

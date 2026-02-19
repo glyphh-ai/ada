@@ -38,9 +38,9 @@ from glyphh import (
     BipolarConstraintException, EncodingException,
     ModelValidationException, ValidationException, OperationException,
     log_encoding_failure, log_validation_failure,
-    # Rust operations
+    # HDC operations
     bind, bundle, cosine_similarity, hamming_similarity,
-    generate_symbol, is_rust_available, get_backend_info
+    generate_symbol,
 )
 
 
@@ -108,14 +108,12 @@ class TestCompleteIntegration:
         assert log_encoding_failure is not None
         assert log_validation_failure is not None
         
-        # Rust operations
+        # HDC operations
         assert bind is not None
         assert bundle is not None
         assert cosine_similarity is not None
         assert hamming_similarity is not None
         assert generate_symbol is not None
-        assert is_rust_available is not None
-        assert get_backend_info is not None
     
     def test_complete_workflow_encode_to_similarity(self):
         """Test complete workflow: encode → edges → similarity → fact tree"""
@@ -293,46 +291,37 @@ class TestCompleteIntegration:
             assert fact_tree_text is not None
             assert len(fact_tree_text) > 0
     
-    def test_rust_backend_integration(self):
-        """Test Rust backend integration"""
-        # Check if Rust is available
-        rust_available = is_rust_available()
-        backend_info = get_backend_info()
-        
-        assert isinstance(rust_available, bool)
-        assert isinstance(backend_info, dict)
-        assert "backend" in backend_info
-        
-        # Test Rust operations
+    def test_hdc_operations_integration(self):
+        """Test HDC vector operations integration"""
         dim = 1000
         seed = 42
-        
+
         # Generate symbols
         v1 = generate_symbol(seed, "test1", dim)
         v2 = generate_symbol(seed, "test2", dim)
-        
+
         assert len(v1) == dim
         assert len(v2) == dim
         assert np.all(np.isin(v1, [-1, 1]))
         assert np.all(np.isin(v2, [-1, 1]))
-        
+
         # Test bind
         bound = bind(v1, v2)
         assert len(bound) == dim
         assert np.all(np.isin(bound, [-1, 1]))
-        
+
         # Test bundle
         bundled = bundle([v1, v2])
         assert len(bundled) == dim
         assert np.all(np.isin(bundled, [-1, 1]))
-        
+
         # Test similarity
         cos_sim = cosine_similarity(v1, v2)
         ham_sim = hamming_similarity(v1, v2)
-        
+
         assert -1.0 <= cos_sim <= 1.0
         assert 0.0 <= ham_sim <= 1.0
-        
+
         # Verify relationship between cosine and hamming
         expected_ham = (cos_sim + 1.0) / 2.0
         assert abs(ham_sim - expected_ham) < 0.01

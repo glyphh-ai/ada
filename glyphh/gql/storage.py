@@ -281,7 +281,7 @@ class InMemoryGlyphStorage:
         
         # Fallback to cosine similarity
         try:
-            from glyphh.core.rust_ops import cosine_similarity
+            from glyphh.core.ops import cosine_similarity
             
             # Handle SDK Vector objects
             data1 = v1.data if hasattr(v1, 'data') else v1

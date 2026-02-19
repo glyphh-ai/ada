@@ -57,14 +57,12 @@ from .exceptions import (
     log_validation_failure,
 )
 
-from .core.rust_ops import (
+from .core.ops import (
     bind,
     bundle,
     cosine_similarity,
     hamming_similarity,
     generate_symbol,
-    is_rust_available,
-    get_backend_info
 )
 
 from .encoder import Encoder
@@ -166,14 +164,12 @@ __all__ = [
     "OperationException",
     "log_encoding_failure",
     "log_validation_failure",
-    # Rust operations
+    # HDC operations
     "bind",
     "bundle",
     "cosine_similarity",
     "hamming_similarity",
     "generate_symbol",
-    "is_rust_available",
-    "get_backend_info",
     # GQL Exceptions
     "GQLError",
     "LexerError",

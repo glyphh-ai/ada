@@ -199,7 +199,7 @@ from glyphh.exceptions import (
     EncodingException,
     log_encoding_failure,
 )
-from glyphh.core.rust_ops import generate_symbol
+from glyphh.core.ops import generate_symbol
 
 
 class Encoder:
@@ -499,7 +499,7 @@ class Encoder:
         self._validate_vector(value)
         
         # Import bind operation
-        from glyphh.core.rust_ops import bind as bind_op
+        from glyphh.core.ops import bind as bind_op
         
         # Perform bind operation
         bound_data = bind_op(role.data, value.data)
@@ -554,7 +554,7 @@ class Encoder:
             self._validate_vector(vector)
         
         # Import bundle operation
-        from glyphh.core.rust_ops import bundle as bundle_op
+        from glyphh.core.ops import bundle as bundle_op
         
         # If weights provided, use weighted_bundle instead
         if weights is not None:

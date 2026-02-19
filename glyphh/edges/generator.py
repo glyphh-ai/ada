@@ -11,7 +11,7 @@ Vector DBs, enabling multi-level verification and reasoning.
 
 from typing import List, Dict, Optional
 from glyphh.core.types import Edge, Glyph, Vector
-from glyphh.core.rust_ops import bind
+from glyphh.core.ops import bind
 
 
 class EdgeGenerator:

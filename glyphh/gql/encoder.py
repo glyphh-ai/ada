@@ -28,7 +28,7 @@ from glyphh.gql.ast import (
     AggregateNode,
 )
 from glyphh.core import Vector
-from glyphh.core.rust_ops import bind, bundle, generate_symbol, cosine_similarity
+from glyphh.core.ops import bind, bundle, generate_symbol, cosine_similarity
 
 
 class QueryEncoder(ASTVisitor):

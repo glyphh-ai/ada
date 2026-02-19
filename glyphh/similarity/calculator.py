@@ -39,7 +39,7 @@ import numpy as np
 import hashlib
 
 from glyphh.core.types import Glyph, Edge, Vector
-from glyphh.core.rust_ops import cosine_similarity, hamming_similarity
+from glyphh.core.ops import cosine_similarity, hamming_similarity
 from glyphh.fact_tree import FactTree, Citation
 
 
