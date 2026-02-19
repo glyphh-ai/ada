@@ -517,132 +517,8 @@ class QueryService:
             steps_ahead=request.steps_ahead,
         )
     
-    # =========================================================================
-    # Helper Methods
-    # =========================================================================
     
-    def _extract_role_lexicons(self, encoder: Any) -> Dict[str, List[str]]:
-        """
-        Extract role names and their lexicons from encoder config.
-        
-        Returns:
-            Dict mapping role name to list of lexicons (including role name itself)
-        """
-        role_lexicons = {}
-        try:
-            if hasattr(encoder, 'config') and hasattr(encoder.config, 'layers'):
-                for layer in encoder.config.layers:
-                    for segment in layer.segments:
-                        for role in segment.roles:
-                            # Include role name as implicit lexicon
-                            lexicons = [role.name.lower()]
-                            # Add configured lexicons if present
-                            if hasattr(role, 'lexicons') and role.lexicons:
-                                lexicons.extend([l.lower() for l in role.lexicons])
-                            role_lexicons[role.name] = lexicons
-        except Exception as e:
-            logger.debug(f"Could not extract role lexicons from encoder: {e}")
-        return role_lexicons
     
-    def _match_query_to_roles(
-        self,
-        query: str,
-        role_lexicons: Dict[str, List[str]],
-    ) -> List[str]:
-        """
-        Match query text against role lexicons to identify relevant roles.
-        
-        Args:
-            query: Natural language query
-            role_lexicons: Dict mapping role name to list of lexicons
-        
-        Returns:
-            List of role names that match lexicons in the query
-        """
-        query_lower = query.lower()
-        matched_roles = []
-        
-        for role_name, lexicons in role_lexicons.items():
-            for lexicon in lexicons:
-                if lexicon in query_lower:
-                    matched_roles.append(role_name)
-                    logger.debug(f"Lexicon '{lexicon}' matched role '{role_name}'")
-                    break
-        
-        return matched_roles
-    
-    async def _find_reference_glyph(
-        self,
-        org_id: str,
-        model_id: str,
-        query: str,
-        matched_roles: List[str],
-    ) -> Optional[Tuple[GlyphResponse, List[float]]]:
-        """
-        Find a reference glyph from existing data that matches the query.
-        
-        Searches glyph metadata for values mentioned in the query.
-        
-        Args:
-            org_id: Organization ID
-            model_id: Model ID
-            query: Natural language query
-            matched_roles: Roles identified from lexicon matching
-        
-        Returns:
-            Tuple of (glyph, embedding) if found, None otherwise
-        """
-        try:
-            async with self._session_factory() as session:
-                storage = GlyphStorage(session)
-                
-                # Get glyphs with embeddings
-                glyphs, embeddings_dict = await storage.list_glyphs_with_embeddings(
-                    org_id=org_id,
-                    model_id=model_id,
-                    limit=1000,  # Get enough glyphs for search
-                )
-                
-                if not glyphs:
-                    return None
-                
-                query_lower = query.lower()
-                best_match = None
-                best_score = 0
-                
-                for glyph_response in glyphs:
-                    glyph_id_str = str(glyph_response.id)
-                    if glyph_id_str not in embeddings_dict:
-                        continue
-                    embedding = embeddings_dict[glyph_id_str]
-                    score = 0
-                    metadata = glyph_response.metadata or {}
-                    
-                    # Check each metadata field for matches in query
-                    for key, value in metadata.items():
-                        if value is not None:
-                            value_str = str(value).lower()
-                            if value_str in query_lower:
-                                score += 2  # Direct value match
-                            elif any(word in query_lower for word in value_str.split()):
-                                score += 1  # Partial word match
-                    
-                    if score > best_score:
-                        best_score = score
-                        best_match = (glyph_response, embedding)
-                
-                if best_match and best_score >= 2:
-                    logger.info(
-                        f"Found reference glyph with score {best_score}: "
-                        f"{best_match[0].concept_text[:50] if best_match[0].concept_text else 'N/A'}..."
-                    )
-                    return best_match
-                
-                return None
-                
-        except Exception as e:
-            logger.warning(f"Error finding reference glyph: {e}")
-            return None
     
     async def _encode_query(
         self,
@@ -652,63 +528,35 @@ class QueryService:
         model_id: str = None,
     ) -> List[float]:
         """
-        Encode query text using SDK encoder.
-        
-        Flow:
-        1. If model has a custom encode_query_fn, use it to create a Concept
-        2. Encode the Concept with the model's Encoder
-        3. Fall back to generic lexicon-based encoding if no custom fn
-        4. If custom fn raises, fall back to generic encoding
+        Encode query text using the model's custom encode_query_fn.
+
+        Every model that serves queries must have an encode_query_fn
+        defined in its encoder.py. There is no generic fallback — models
+        without a custom encoder will fail cleanly rather than produce
+        garbage results from heuristic encoding.
         """
         try:
-            from glyphh import Concept
-            
-            # Try custom encode_query_fn first
+            loaded_model = None
             if org_id and model_id:
                 loaded_model = await self._model_manager.get_model(org_id, model_id)
-                if loaded_model and getattr(loaded_model, 'encode_query_fn', None):
-                    try:
-                        concept = loaded_model.encode_query_fn(query)
-                        glyph = encoder.encode(concept)
-                        return glyph.global_cortex.data.astype(float).tolist()
-                    except Exception as e:
-                        logger.warning(
-                            f"Custom encode_query_fn failed for {model_id}: {e}, "
-                            f"falling back to generic encoding"
-                        )
-                        # fall through to generic encoding
-            
-            # Generic encoding: lexicon matching + reference glyph lookup
-            role_lexicons = self._extract_role_lexicons(encoder)
-            
-            if role_lexicons:
-                # Match query against lexicons
-                matched_roles = self._match_query_to_roles(query, role_lexicons)
-                
-                if matched_roles:
-                    logger.info(f"Query matched roles via lexicons: {matched_roles}")
-                    
-                    # Try to find a reference glyph from existing data
-                    if org_id and model_id:
-                        reference = await self._find_reference_glyph(
-                            org_id, model_id, query, matched_roles
-                        )
-                        if reference:
-                            glyph_response, embedding = reference
-                            logger.info(
-                                f"Using reference glyph for similarity search: "
-                                f"{glyph_response.metadata}"
-                            )
-                            return embedding
-            
-            # Fall back to direct encoding (may fail if schema is strict)
-            concept = Concept(
-                name=query,
-                attributes={"text": query},
+
+            if loaded_model and getattr(loaded_model, 'encode_query_fn', None):
+                concept = loaded_model.encode_query_fn(query)
+                glyph = encoder.encode(concept)
+                return glyph.global_cortex.data.astype(float).tolist()
+
+            # No custom encoder — fail clean
+            model_label = f"{org_id}/{model_id}" if org_id else "unknown"
+            raise ValidationException(
+                field="query",
+                reason=(
+                    f"Model '{model_label}' has no encode_query_fn. "
+                    f"Add an encode_query() function to the model's encoder.py."
+                ),
             )
-            glyph = encoder.encode(concept)
-            return glyph.global_cortex.data.astype(float).tolist()
-            
+
+        except ValidationException:
+            raise
         except Exception as e:
             logger.error(f"Failed to encode query: {e}")
             raise ValidationException(
