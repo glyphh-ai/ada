@@ -30,11 +30,11 @@ def _print_status():
         name = user.get("first_name", user.get("email", ""))
         dot = click.style("●", fg=theme.SUCCESS)
         label = click.style(f" logged in as {name}" if name else " logged in", fg=theme.MUTED)
-        hint = click.style("  auth logout", fg=theme.TEXT_DIM) + click.style(" to exit", fg=theme.TEXT_DIM)
+        hint = click.style("  auth logout", fg=theme.PRIMARY) + click.style(" to exit", fg=theme.TEXT_DIM)
         click.echo(f"  {dot}{label}  {hint}")
     else:
         dot = click.style("●", fg=theme.ERROR)
         label = click.style(" not logged in", fg=theme.MUTED)
-        hint = click.style("  auth login", fg=theme.TEXT_DIM) + click.style(" to connect", fg=theme.TEXT_DIM)
+        hint = click.style("  auth login", fg=theme.PRIMARY) + click.style(" to connect", fg=theme.TEXT_DIM)
         click.echo(f"  {dot}{label}  {hint}")
     click.echo()
