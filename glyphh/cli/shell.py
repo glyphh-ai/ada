@@ -7,6 +7,7 @@ from typing import Optional
 from pathlib import Path
 
 from .banner import print_banner
+from .auth import is_logged_in, device_login, get_user
 from . import theme
 
 # Try to import readline for history/completion
@@ -61,6 +62,21 @@ def shell(ctx):
     setup_readline()
     print_banner()
 
+    # Check if logged in — if not, run device auth flow
+    if not is_logged_in():
+        click.secho("  Not logged in.", fg=theme.WARNING)
+        success = device_login()
+        if not success:
+            click.echo()
+            click.secho("  Run 'glyphh' again after logging in.", fg=theme.MUTED)
+            return
+    else:
+        user = get_user() or {}
+        name = user.get("first_name", user.get("email", ""))
+        if name:
+            click.secho(f"  Logged in as {name}", fg=theme.MUTED)
+            click.echo()
+
     try:
         while True:
             try:
@@ -80,9 +96,15 @@ def shell(ctx):
                     click.echo()
                     click.secho("  exit, quit, q   Exit the shell", fg=theme.MUTED)
                     click.secho("  clear, home     Clear screen and show banner", fg=theme.MUTED)
+                    click.secho("  logout          Log out and clear session", fg=theme.MUTED)
                     click.secho("  help            Show this message", fg=theme.MUTED)
                     click.echo()
                     continue
+                elif line.lower() == "logout":
+                    from .auth import clear_session
+                    clear_session()
+                    click.secho("  Logged out.", fg=theme.MUTED)
+                    break
 
                 # Unrecognized input
                 click.secho(f"  unknown command: {line}", fg=theme.MUTED)
