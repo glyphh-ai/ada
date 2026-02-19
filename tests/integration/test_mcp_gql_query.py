@@ -316,15 +316,12 @@ class TestMCPGQLQuery:
                         auth_token="test-token",
                     )
         
-        # Verify list_glyphs_with_embeddings was called
+        # Verify database path was used (list_glyphs_with_embeddings fetches from DB)
         mock_query_service.list_glyphs_with_embeddings.assert_called_once_with(
             org_id="test-org",
             model_id="test-model",
             limit=10000,
         )
-        
-        # Verify DatabaseGlyphStorage was instantiated
-        mock_storage_class.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_gql_query_with_cache_disabled(

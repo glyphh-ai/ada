@@ -98,15 +98,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Graceful shutdown
     logger.info("Shutting down Glyphh Runtime...")
     
-    # Close WebSocket connections
-    try:
-        from api.routes.listeners import get_async_listener_service
-        listener_service = get_async_listener_service()
-        await listener_service.close_all_connections("Server shutdown")
-        logger.info("WebSocket connections closed")
-    except Exception as e:
-        logger.warning(f"Error closing WebSocket connections: {e}")
-    
     # Allow in-flight requests to complete (30s timeout handled by uvicorn)
     logger.info("Draining connections...")
     

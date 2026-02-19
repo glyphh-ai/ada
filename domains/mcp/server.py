@@ -222,7 +222,7 @@ class MCPServer:
             return MCPResponse(
                 content=[{"type": "json", "data": result}],
                 is_error=False,
-                result=result.get("result"),
+                result=result.get("fact_tree") or result.get("result"),
                 query_type=result.get("query_type"),
                 match_method=result.get("match_method"),
                 confidence=result.get("confidence", 0.0),
