@@ -5,6 +5,7 @@ Banner for the Glyphh CLI shell.
 import click
 from . import theme
 from .streaming import stream_text
+from .auth import is_logged_in, get_user
 
 
 def print_banner():
@@ -18,4 +19,22 @@ def print_banner():
     stream_text("  |___/   |___/|_|", fg="bright_cyan")
     click.echo()
     stream_text("  when your llm can't afford to be wrong", fg="bright_cyan")
+    click.echo()
+    _print_status()
+
+
+def _print_status():
+    """Print auth status line below the banner."""
+    if is_logged_in():
+        user = get_user() or {}
+        name = user.get("first_name", user.get("email", ""))
+        dot = click.style("●", fg=theme.SUCCESS)
+        label = click.style(f" logged in as {name}" if name else " logged in", fg=theme.MUTED)
+        hint = click.style("  auth logout", fg=theme.TEXT_DIM) + click.style(" to exit", fg=theme.TEXT_DIM)
+        click.echo(f"  {dot}{label}  {hint}")
+    else:
+        dot = click.style("●", fg=theme.ERROR)
+        label = click.style(" not logged in", fg=theme.MUTED)
+        hint = click.style("  auth login", fg=theme.TEXT_DIM) + click.style(" to connect", fg=theme.TEXT_DIM)
+        click.echo(f"  {dot}{label}  {hint}")
     click.echo()

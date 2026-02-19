@@ -62,11 +62,8 @@ def shell(ctx):
     setup_readline()
     print_banner()
 
-    # Check if logged in — if not, prompt to login
+    # If not logged in, prompt once
     if not is_logged_in():
-        click.echo()
-        click.secho("  Not logged in.", fg=theme.WARNING)
-        click.echo()
         click.secho("  Press Enter to open the browser and log in, or type 'q' to quit.", fg=theme.MUTED)
         try:
             resp = input("  ")
@@ -80,12 +77,8 @@ def shell(ctx):
             click.echo()
             click.secho("  Run 'glyphh' again after logging in.", fg=theme.MUTED)
             return
+        click.echo()
     else:
-        user = get_user() or {}
-        name = user.get("first_name", user.get("email", ""))
-        if name:
-            click.secho(f"  Logged in as {name}", fg=theme.MUTED)
-            click.echo()
         register_runtime()
 
     try:
@@ -103,22 +96,25 @@ def shell(ctx):
                     click.clear()
                     print_banner()
                     continue
-                elif line.lower() == "help":
-                    click.echo()
-                    click.secho("  exit, quit, q   Exit the shell", fg=theme.MUTED)
-                    click.secho("  clear, home     Clear screen and show banner", fg=theme.MUTED)
-                    click.secho("  logout          Log out and clear session", fg=theme.MUTED)
-                    click.secho("  help            Show this message", fg=theme.MUTED)
-                    click.echo()
-                    continue
-                elif line.lower() == "logout":
-                    from .auth import clear_session
-                    clear_session()
-                    click.secho("  Logged out.", fg=theme.MUTED)
-                    break
 
-                # Unrecognized input
+                # Parse <category> <function> format
+                parts = line.lower().split(None, 1)
+                category = parts[0]
+                func = parts[1] if len(parts) > 1 else None
+
+                if category == "help":
+                    _print_help()
+                    continue
+
+                if category == "auth":
+                    _handle_auth(func)
+                    if func == "logout":
+                        break
+                    continue
+
+                # Unrecognized
                 click.secho(f"  unknown command: {line}", fg=theme.MUTED)
+                click.secho("  type 'help' for available commands", fg=theme.TEXT_DIM)
 
             except KeyboardInterrupt:
                 click.echo()
@@ -130,3 +126,36 @@ def shell(ctx):
         save_history()
         click.echo()
         click.secho("Goodbye!", fg="cyan")
+
+
+def _print_help():
+    """Print available commands grouped by category."""
+    click.echo()
+    click.secho("  auth", fg=theme.ACCENT)
+    click.secho("    auth login       Log in via browser", fg=theme.MUTED)
+    click.secho("    auth logout      Log out and clear session", fg=theme.MUTED)
+    click.echo()
+    click.secho("  general", fg=theme.ACCENT)
+    click.secho("    clear, home      Clear screen and show banner", fg=theme.MUTED)
+    click.secho("    exit, quit, q    Exit the shell", fg=theme.MUTED)
+    click.secho("    help             Show this message", fg=theme.MUTED)
+    click.echo()
+
+
+def _handle_auth(func: str | None):
+    """Handle auth category commands."""
+    if func == "login":
+        if is_logged_in():
+            user = get_user() or {}
+            name = user.get("first_name", user.get("email", ""))
+            click.secho(f"  Already logged in as {name}.", fg=theme.MUTED)
+        else:
+            success = device_login()
+            if success:
+                register_runtime()
+    elif func == "logout":
+        from .auth import clear_session
+        clear_session()
+        click.secho("  Logged out.", fg=theme.MUTED)
+    else:
+        click.secho("  usage: auth login | auth logout", fg=theme.MUTED)
