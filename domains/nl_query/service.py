@@ -20,7 +20,6 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from glyphh.fact_tree.builder import FactTree
 
-from domains.nl_query.intent_matcher import IntentMatch
 from domains.query.service import QueryService
 from domains.query.fact_tree_builder import FactTreeBuilder
 
@@ -29,6 +28,21 @@ if TYPE_CHECKING:
     from glyphh.nl.auto_schema_matcher import AutoSchemaMatcher, AutoMatchResult
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# IntentMatch (lightweight result for translate_query)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class IntentMatch:
+    """Result of matching a query against intent patterns."""
+    intent: str
+    confidence: float
+    parameters: Dict[str, str]
+    pattern_matched: Optional[str]
+    structured_query: Dict[str, Any]
+    match_method: str = "default"
 
 
 # ---------------------------------------------------------------------------
