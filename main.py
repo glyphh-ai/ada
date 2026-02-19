@@ -5,7 +5,7 @@ This runtime serves deployed models through REST and MCP APIs,
 handling persistent storage, multi-model management, licensing,
 authentication, and real-time data ingestion.
 
-Models are directories under models/ and custom_models/ containing
+Models are deployed from .glyphh packages or custom_models/ directories containing
 manifest.yaml, encoder.py, and data/*.jsonl files. On startup, the
 runtime discovers and deploys eligible models to PostgreSQL.
 """

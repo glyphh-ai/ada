@@ -470,7 +470,7 @@ class Assistant:
         if self._encoder is None:
             return AssistantResponse(
                 state="ERROR",
-                content="Assistant model not found. Run `python models/assistant/build.py` to build it.",
+                content="Assistant model not found. Deploy the assistant model from glyphh-models.",
             )
 
         query_concept = self._extract_query_concept(query)
@@ -753,7 +753,7 @@ class Assistant:
             # Default: look in models/ at the repo/package root
             # Walk up from glyphh/assistant/core.py → repo root
             _repo_root = Path(__file__).parent.parent.parent
-            model_path = _repo_root / "models" / "assistant" / "assistant.glyphh"
+            model_path = _repo_root / "assistant.glyphh"
             if not model_path.exists():
                 # Fallback: legacy path (SDK layout)
                 model_path = Path(__file__).parent / "model" / "assistant.glyphh"

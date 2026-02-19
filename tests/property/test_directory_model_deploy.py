@@ -366,8 +366,7 @@ class TestDeploymentEligibilityFiltering:
             mock_manager = MagicMock()
             mock_session_factory = AsyncMock()
 
-            with patch("scripts.deploy_models.CORE_MODELS_DIR", core_dir), \
-                 patch("scripts.deploy_models.CUSTOM_MODELS_DIR", custom_dir), \
+            with patch("scripts.deploy_models.CUSTOM_MODELS_DIR", custom_dir), \
                  patch("scripts.deploy_models.deploy_model_to_db", side_effect=fake_deploy):
 
                 from scripts.deploy_models import deploy_all_models
@@ -437,7 +436,7 @@ class TestPartialFailureResilience:
         import asyncio
         import json
         from unittest.mock import AsyncMock, MagicMock, patch
-        from models.assistant.encoder import entry_to_record
+        from glyphh.assistant.encoder_config import entry_to_record
 
         # Determine which entries will fail encoding
         num_failures = max(1, int(len(entries) * fail_ratio))
@@ -601,7 +600,7 @@ class TestDeploymentDataPreservation:
         import asyncio
         import json
         from unittest.mock import AsyncMock, MagicMock, patch
-        from models.assistant.encoder import entry_to_record
+        from glyphh.assistant.encoder_config import entry_to_record
 
         # Compute expected metadata for each entry
         expected_metadata = []
@@ -751,7 +750,7 @@ class TestDeploymentIdempotence:
         import asyncio
         import json
         from unittest.mock import AsyncMock, MagicMock, patch
-        from models.assistant.encoder import entry_to_record
+        from glyphh.assistant.encoder_config import entry_to_record
 
         entries = [
             {"question": f"q{i}", "response": f"r{i}", "content_type": "concept",
@@ -880,7 +879,7 @@ class TestDeploymentIdempotence:
         import asyncio
         import json
         from unittest.mock import AsyncMock, MagicMock, patch
-        from models.assistant.encoder import entry_to_record
+        from glyphh.assistant.encoder_config import entry_to_record
 
         entries = [
             {"question": f"q{i}", "response": f"r{i}", "content_type": "concept",
@@ -1017,7 +1016,7 @@ class TestQueryEncodingDispatch:
     @pytest.fixture(autouse=True)
     def _setup_encoders(self):
         """Create shared encoders once for all tests in this class."""
-        from models.assistant.encoder import encode_query, ENCODER_CONFIG
+        from glyphh.assistant.encoder_config import encode_query, ENCODER_CONFIG
         from glyphh.encoder import Encoder
         from glyphh.core.config import EncoderConfig
 

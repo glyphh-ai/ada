@@ -1,7 +1,7 @@
 """
 Deploy models from directory to PostgreSQL on runtime startup.
 
-Discovers all model directories in models/ and custom_models/,
+Discovers model directories in custom_models/,
 reads their JSONL data, encodes with the model's encoder, and
 stores as glyphs in the runtime database.
 
@@ -19,7 +19,6 @@ from sqlalchemy import select
 logger = logging.getLogger(__name__)
 
 RUNTIME_ROOT = Path(__file__).parent.parent
-CORE_MODELS_DIR = RUNTIME_ROOT / "models"
 CUSTOM_MODELS_DIR = RUNTIME_ROOT / "custom_models"
 
 
@@ -203,9 +202,7 @@ async def deploy_all_models(
 ) -> dict[str, int]:
     """Deploy eligible models to the database on startup.
 
-    Scans models/ (org_id="glyphh") and custom_models/ (org_id="custom").
-    For models/:  deploy only where manifest.load_on_startup is True.
-    For custom_models/:  deploy all.
+    Scans custom_models/ (org_id="custom") and deploys all found models.
     Returns dict of model_id -> glyph count.
     """
     from domains.models.loader import load_model as load_model_def
@@ -213,7 +210,6 @@ async def deploy_all_models(
     results = {}
 
     for base_dir, default_org, always_deploy in [
-        (CORE_MODELS_DIR, "glyphh", False),
         (CUSTOM_MODELS_DIR, "custom", True),
     ]:
         if not base_dir.exists():
@@ -263,7 +259,7 @@ async def register_model_encoders(
     from shared.sdk_adapter import get_sdk_adapter
 
     adapter = get_sdk_adapter()
-    all_models = discover_models(CORE_MODELS_DIR, CUSTOM_MODELS_DIR)
+    all_models = discover_models(CUSTOM_MODELS_DIR, None)
 
     for loaded in all_models:
         if not loaded.has_custom_encoder or loaded.encoder_config is None:
