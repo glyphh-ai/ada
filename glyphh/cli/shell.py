@@ -7,7 +7,7 @@ from typing import Optional
 from pathlib import Path
 
 from .banner import print_banner
-from .auth import is_logged_in, device_login, get_user
+from .auth import is_logged_in, device_login, get_user, register_runtime
 from . import theme
 
 # Try to import readline for history/completion
@@ -86,6 +86,7 @@ def shell(ctx):
         if name:
             click.secho(f"  Logged in as {name}", fg=theme.MUTED)
             click.echo()
+        register_runtime()
 
     try:
         while True:

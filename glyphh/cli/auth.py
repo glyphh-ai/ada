@@ -10,7 +10,9 @@ On first run (no stored token), the CLI:
 
 import json
 import os
+import platform
 import time
+import uuid
 import webbrowser
 from pathlib import Path
 
@@ -136,6 +138,7 @@ def device_login() -> bool:
                     click.echo()
                     click.secho(f"  Welcome, {name}!", fg="bright_cyan")
                     click.echo()
+                    register_runtime()
                     return True
 
                 if status == "expired":
@@ -155,4 +158,60 @@ def device_login() -> bool:
         return False
     except Exception as e:
         click.secho(f"  Login failed: {e}", fg=theme.ERROR)
+        return False
+
+
+def _get_machine_id() -> str:
+    """Generate a stable machine identifier."""
+    config = _load_config()
+    if mid := config.get("machine_id"):
+        return mid
+    mid = str(uuid.uuid4())
+    config["machine_id"] = mid
+    _save_config(config)
+    return mid
+
+
+def register_runtime() -> bool:
+    """Register this CLI instance as a runtime on the platform.
+
+    Each runtime counts toward the org's license.
+    """
+    api_url = get_api_url()
+    token = get_token()
+    if not token:
+        return False
+
+    machine_id = _get_machine_id()
+    hostname = platform.node() or "unknown"
+    name = f"{hostname}-{machine_id[:8]}"
+
+    # Check if already registered
+    config = _load_config()
+    if config.get("runtime_id"):
+        return True
+
+    try:
+        with httpx.Client(timeout=15) as client:
+            res = client.post(
+                f"{api_url}/runtimes",
+                json={
+                    "name": name,
+                    "runtime_type": "self_hosted",
+                    "region": None,
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if res.status_code in (200, 201):
+                data = res.json()
+                config["runtime_id"] = data.get("id")
+                config["runtime_name"] = name
+                _save_config(config)
+                click.secho(f"  Runtime registered: {name}", fg=theme.MUTED)
+                return True
+            else:
+                click.secho(f"  Runtime registration failed: {res.text}", fg=theme.WARNING)
+                return False
+    except Exception as e:
+        click.secho(f"  Could not register runtime: {e}", fg=theme.WARNING)
         return False
