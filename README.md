@@ -36,9 +36,59 @@ pip install glyphh[runtime]
 
 The runtime requires PostgreSQL with pgvector. Pick whichever option fits your setup:
 
-### Option 1 — Docker (recommended)
+### Option 1 — Docker Compose (recommended)
 
-Pull the runtime image and run it with a bundled database:
+Create a `docker-compose.yml` in your project directory:
+
+```yaml
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: glyphh_runtime
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  runtime:
+    image: ghcr.io/glyphh-ai/glyphh-runtime:latest
+    ports:
+      - "8002:8002"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/glyphh_runtime
+      - DEPLOYMENT_MODE=local
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+```
+
+Then run:
+
+```bash
+docker compose up -d
+```
+
+Verify it's running:
+
+```bash
+curl http://localhost:8002/health
+```
+
+### Option 2 — Docker (manual)
+
+Run the database and runtime as individual containers:
 
 ```bash
 docker run -d --name glyphh-db \
@@ -63,7 +113,7 @@ docker run -p 8002:8002 \
   ghcr.io/glyphh-ai/glyphh-runtime:latest
 ```
 
-### Option 2 — pip install
+### Option 3 — pip install
 
 If you already have PostgreSQL with pgvector:
 
