@@ -20,7 +20,7 @@ python3 -m venv venv
 source venv/bin/activate
 ```
 
-Install the package
+Install the package:
 
 ```bash
 pip install glyphh
@@ -32,20 +32,50 @@ With runtime dependencies (PostgreSQL + pgvector):
 pip install glyphh[runtime]
 ```
 
+## Quick Start
+
+The runtime requires PostgreSQL with pgvector. Pick whichever option fits your setup:
+
+### Option 1 — Docker Compose (recommended)
+
+Spins up PostgreSQL + pgvector and the runtime together:
+
+```bash
+git clone https://github.com/glyphh-ai/glyphh-runtime.git
+cd glyphh-runtime
+docker compose up
+```
+
+### Option 2 — pip install + existing Postgres
+
+If you already have PostgreSQL with pgvector running:
+
+```bash
+pip install glyphh[runtime]
+export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/glyphh_runtime
+glyphh serve
+```
+
+If you don't have PostgreSQL locally, start just the database with Docker:
+
+```bash
+docker compose up -d db
+export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/glyphh_runtime
+glyphh serve
+```
+
+### Query a deployed model
+
+```bash
+glyphh query "What is the refund policy?"
+```
+
 ## Docker
+
+Pull the image directly:
 
 ```bash
 docker pull ghcr.io/glyphh-ai/glyphh-runtime:latest
-```
-
-## Quick Start
-
-```bash
-# Start the runtime
-glyphh serve
-
-# Query a deployed model
-glyphh query "What is the refund policy?"
 ```
 
 ## How It Works
