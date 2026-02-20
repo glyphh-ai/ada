@@ -15,7 +15,7 @@ from .commands.serve import serve_command
 
 
 @click.group(invoke_without_command=True)
-@click.version_option(version="0.3.8", prog_name="glyphh")
+@click.version_option(version="0.3.9", prog_name="glyphh")
 @click.pass_context
 def cli(ctx):
     """

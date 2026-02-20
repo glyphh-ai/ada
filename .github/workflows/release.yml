@@ -34,6 +34,8 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RUNTIME_RELEASES_TOKEN }}
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -64,6 +66,8 @@ jobs:
       id-token: write  # Required for Trusted Publisher OIDC
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RUNTIME_RELEASES_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -88,6 +92,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RUNTIME_RELEASES_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
