@@ -36,7 +36,36 @@ pip install glyphh[runtime]
 
 The runtime requires PostgreSQL with pgvector. Pick whichever option fits your setup:
 
-### Option 1 — You already have PostgreSQL with pgvector
+### Option 1 — Docker (recommended)
+
+Pull the runtime image and run it with a bundled database:
+
+```bash
+docker run -d --name glyphh-db \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=glyphh_runtime \
+  -p 5432:5432 \
+  pgvector/pgvector:pg16
+
+docker pull ghcr.io/glyphh-ai/glyphh-runtime:latest
+
+docker run -p 8002:8002 \
+  -e DATABASE_URL=postgresql+asyncpg://postgres:postgres@host.docker.internal:5432/glyphh_runtime \
+  ghcr.io/glyphh-ai/glyphh-runtime:latest
+```
+
+Or with an existing database:
+
+```bash
+docker run -p 8002:8002 \
+  -e DATABASE_URL=postgresql+asyncpg://user:pass@your-db-host:5432/glyphh \
+  ghcr.io/glyphh-ai/glyphh-runtime:latest
+```
+
+### Option 2 — pip install
+
+If you already have PostgreSQL with pgvector:
 
 ```bash
 pip install glyphh[runtime]
@@ -44,9 +73,7 @@ export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/glyphh
 glyphh serve
 ```
 
-### Option 2 — Use Docker for the database
-
-If you don't have PostgreSQL locally, start it with Docker:
+If you don't have PostgreSQL locally, start it with Docker first:
 
 ```bash
 docker run -d --name glyphh-db \
@@ -57,7 +84,7 @@ docker run -d --name glyphh-db \
   pgvector/pgvector:pg16
 ```
 
-Then run the runtime:
+Then:
 
 ```bash
 pip install glyphh[runtime]
