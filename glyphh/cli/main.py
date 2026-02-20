@@ -16,8 +16,10 @@ from .commands.docker import docker_group
 from .commands.token import token_group
 
 
+from importlib.metadata import version as _pkg_version
+
 @click.group(invoke_without_command=True)
-@click.version_option(version="0.4.0", prog_name="glyphh")
+@click.version_option(version=_pkg_version("glyphh"), prog_name="glyphh")
 @click.pass_context
 def cli(ctx):
     """
