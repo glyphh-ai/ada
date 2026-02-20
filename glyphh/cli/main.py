@@ -13,6 +13,7 @@ from .commands.model import model_group
 from .commands.catalog import catalog_group
 from .commands.serve import serve_command
 from .commands.docker import docker_group
+from .commands.token import token_group
 
 
 @click.group(invoke_without_command=True)
@@ -36,6 +37,7 @@ cli.add_command(model_group)
 cli.add_command(catalog_group)
 cli.add_command(serve_command)
 cli.add_command(docker_group)
+cli.add_command(token_group)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from .auth import is_logged_in, device_login, register_runtime
 from .commands.auth import handle_auth
 from .commands.model import handle_model
 from .commands.catalog import handle_catalog
+from .commands.token import handle_token
 from . import theme
 
 # Try to import readline for history/completion
@@ -28,6 +29,7 @@ COMMAND_HANDLERS = {
     "auth": handle_auth,
     "model": handle_model,
     "catalog": handle_catalog,
+    "token": handle_token,
 }
 
 
@@ -159,6 +161,12 @@ def _print_help():
     click.secho("    catalog search <query>   Search by name/category", fg=theme.MUTED)
     click.secho("    catalog download <name>  Download .glyphh model", fg=theme.MUTED)
     click.secho("    catalog info <name>      Show model details", fg=theme.MUTED)
+    click.echo()
+    click.secho("  token", fg=theme.ACCENT)
+    click.secho("    token create             Generate a JWT token", fg=theme.MUTED)
+    click.secho("    token list               List active tokens", fg=theme.MUTED)
+    click.secho("    token revoke <id>        Revoke a token", fg=theme.MUTED)
+    click.secho("    token refresh <id>       Refresh expiring token", fg=theme.MUTED)
     click.echo()
     click.secho("  general", fg=theme.ACCENT)
     click.secho("    clear, home             Clear screen and show banner", fg=theme.MUTED)

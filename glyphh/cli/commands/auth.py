@@ -50,8 +50,10 @@ def auth_status():
     if is_logged_in():
         user = get_user() or {}
         name = user.get("first_name", user.get("email", ""))
+        org_id = user.get("org_id", "—")
         click.echo()
         click.secho(f"  ● Logged in as {name}", fg=theme.SUCCESS)
+        click.secho(f"    Org: {org_id}", fg=theme.MUTED)
         click.echo()
     else:
         click.echo()
