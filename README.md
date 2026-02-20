@@ -13,6 +13,15 @@ Glyphh encodes natural language into high-dimensional vector representations usi
 
 ## Install
 
+Setup your python environment:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+Install the package
+
 ```bash
 pip install glyphh
 ```
