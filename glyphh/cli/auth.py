@@ -156,6 +156,19 @@ def device_login() -> bool:
         click.secho("  Is the platform running?", fg=theme.MUTED)
         click.echo()
         return False
+    except httpx.HTTPStatusError as e:
+        detail = ""
+        try:
+            detail = e.response.json().get("detail", "")
+        except Exception:
+            pass
+        click.echo()
+        if detail:
+            click.secho(f"  {detail}", fg=theme.WARNING)
+        else:
+            click.secho(f"  Login failed: HTTP {e.response.status_code}", fg=theme.ERROR)
+        click.echo()
+        return False
     except Exception as e:
         click.secho(f"  Login failed: {e}", fg=theme.ERROR)
         return False
