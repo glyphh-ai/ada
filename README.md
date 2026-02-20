@@ -36,11 +36,14 @@ The runtime requires PostgreSQL with pgvector. Pick whichever option fits your s
 
 ### Option 1 — Docker Compose (recommended)
 
+Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine + Compose plugin).
+
 The CLI can scaffold the Docker files for you:
 
 ```bash
 pip install glyphh[runtime]
 glyphh docker init
+docker pull ghcr.io/glyphh-ai/glyphh-runtime:latest
 docker compose up -d
 ```
 

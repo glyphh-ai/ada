@@ -288,6 +288,81 @@ def model_package(path, output):
     click.secho(f"  ✓ {result.name} ({result.stat().st_size / 1024:.1f} KB)", fg=theme.SUCCESS)
 
 
+@model_group.command("test")
+@click.argument("path", default=".", type=click.Path(exists=True))
+@click.option("-v", "--verbose", is_flag=True, help="Verbose output")
+@click.option("-k", "--keyword", type=str, default=None, help="Filter tests by keyword")
+def model_test(path, verbose, keyword):
+    """Run a model's test suite.
+
+    PATH can be a model directory or a .glyphh file.
+    Defaults to current directory.
+
+    Looks for tests.py or tests/ directory in the model.
+    """
+    import subprocess
+    import sys
+
+    target = Path(path).resolve()
+
+    # If it's a .glyphh file, unpack it first
+    if target.is_file() and target.suffix == ".glyphh":
+        click.secho(f"  Unpacking {target.name}...", fg=theme.MUTED)
+        try:
+            target = unpack_model(target)
+        except Exception as e:
+            click.secho(f"  Failed to unpack: {e}", fg=theme.ERROR)
+            return
+
+    if not target.is_dir():
+        click.secho("  Not a model directory.", fg=theme.ERROR)
+        return
+
+    # Find test entry point
+    tests_py = target / "tests.py"
+    tests_dir = target / "tests"
+
+    if tests_py.exists():
+        click.secho(f"  Running tests for {target.name}...", fg=theme.MUTED)
+        click.echo()
+
+        cmd = [sys.executable, str(tests_py)]
+        if verbose:
+            cmd.append("-v")
+        if keyword:
+            cmd.extend(["-k", keyword])
+
+        result = subprocess.run(cmd, cwd=str(target))
+
+        click.echo()
+        if result.returncode == 0:
+            click.secho("  ✓ All tests passed", fg=theme.SUCCESS)
+        else:
+            click.secho(f"  ✗ Tests failed (exit code {result.returncode})", fg=theme.ERROR)
+
+    elif tests_dir.exists() and tests_dir.is_dir():
+        click.secho(f"  Running tests for {target.name}...", fg=theme.MUTED)
+        click.echo()
+
+        cmd = [sys.executable, "-m", "pytest", str(tests_dir)]
+        if verbose:
+            cmd.append("-v")
+        if keyword:
+            cmd.extend(["-k", keyword])
+
+        result = subprocess.run(cmd, cwd=str(target))
+
+        click.echo()
+        if result.returncode == 0:
+            click.secho("  ✓ All tests passed", fg=theme.SUCCESS)
+        else:
+            click.secho(f"  ✗ Tests failed (exit code {result.returncode})", fg=theme.ERROR)
+
+    else:
+        click.secho("  No tests found (expected tests.py or tests/ directory).", fg=theme.WARNING)
+        click.secho("  See: https://docs.glyphh.ai/models/testing", fg=theme.MUTED)
+
+
 # ── Handler for interactive shell ──
 
 def handle_model(func: str | None, args: str = ""):
@@ -309,6 +384,9 @@ def handle_model(func: str | None, args: str = ""):
     elif func == "package":
         ctx = click.Context(model_package)
         model_package.invoke(ctx, path=args.strip() or ".", output=None)
+    elif func == "test":
+        ctx = click.Context(model_test)
+        model_test.invoke(ctx, path=args.strip() or ".", verbose=True, keyword=None)
     else:
         click.echo()
         click.secho("  usage:", fg=theme.MUTED)
@@ -318,4 +396,5 @@ def handle_model(func: str | None, args: str = ""):
         click.secho("    model undeploy [model_id]  Remove from runtime", fg=theme.MUTED)
         click.secho("    model init [name]          Scaffold new model", fg=theme.MUTED)
         click.secho("    model package [path]       Create .glyphh file", fg=theme.MUTED)
+        click.secho("    model test [path]          Run model test suite", fg=theme.MUTED)
         click.echo()
