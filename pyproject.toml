@@ -72,3 +72,6 @@ Documentation = "https://docs.glyphh.ai"
 
 [tool.setuptools.packages.find]
 include = ["glyphh*"]
+
+[tool.setuptools.package-data]
+"glyphh.docker" = ["docker-compose.yml", "init.sql"]

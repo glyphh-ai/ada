@@ -20,17 +20,15 @@ python3 -m venv venv
 source venv/bin/activate
 ```
 
-Install the package:
+Glyphh ships as a single package with different install profiles:
 
-```bash
-pip install glyphh
-```
+| Profile | Command | What you get |
+|---------|---------|-------------|
+| SDK | `pip install glyphh` | Encoder, similarity, CLI, model packaging. Lightweight — just numpy, pyyaml, click, httpx. |
+| Runtime | `pip install glyphh[runtime]` | Everything in SDK + FastAPI server, SQLAlchemy, pgvector, Alembic, Pydantic. For running the runtime locally. |
+| Dev | `pip install glyphh[dev]` | Everything in SDK + pytest, hypothesis, black, ruff, mypy. For contributing to Glyphh. |
 
-With runtime dependencies (PostgreSQL + pgvector):
-
-```bash
-pip install glyphh[runtime]
-```
+Most users want either SDK (build and package models) or Runtime (deploy and serve them).
 
 ## Quick Start
 
@@ -38,47 +36,15 @@ The runtime requires PostgreSQL with pgvector. Pick whichever option fits your s
 
 ### Option 1 — Docker Compose (recommended)
 
-Create a `docker-compose.yml` in your project directory:
-
-```yaml
-services:
-  db:
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: glyphh_runtime
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  runtime:
-    image: ghcr.io/glyphh-ai/glyphh-runtime:latest
-    ports:
-      - "8002:8002"
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/glyphh_runtime
-      - DEPLOYMENT_MODE=local
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
-
-volumes:
-  pgdata:
-```
-
-Then run:
+The CLI can scaffold the Docker files for you:
 
 ```bash
+pip install glyphh[runtime]
+glyphh docker init
 docker compose up -d
 ```
+
+`glyphh docker init` writes a `docker-compose.yml` and `init.sql` into your current directory. The compose file runs PostgreSQL with pgvector and the published runtime image — no build step needed.
 
 Verify it's running:
 
@@ -113,28 +79,9 @@ docker run -p 8002:8002 \
   ghcr.io/glyphh-ai/glyphh-runtime:latest
 ```
 
-### Option 3 — pip install
+### Option 3 — pip install (bring your own Postgres)
 
-If you already have PostgreSQL with pgvector:
-
-```bash
-pip install glyphh[runtime]
-export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/glyphh_runtime
-glyphh serve
-```
-
-If you don't have PostgreSQL locally, start it with Docker first:
-
-```bash
-docker run -d --name glyphh-db \
-  -e POSTGRES_USER=postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=glyphh_runtime \
-  -p 5432:5432 \
-  pgvector/pgvector:pg16
-```
-
-Then:
+If you already have PostgreSQL with pgvector running:
 
 ```bash
 pip install glyphh[runtime]
