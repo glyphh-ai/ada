@@ -36,19 +36,7 @@ pip install glyphh[runtime]
 
 The runtime requires PostgreSQL with pgvector. Pick whichever option fits your setup:
 
-### Option 1 — Docker Compose (recommended)
-
-Spins up PostgreSQL + pgvector and the runtime together:
-
-```bash
-git clone https://github.com/glyphh-ai/glyphh-runtime.git
-cd glyphh-runtime
-docker compose up
-```
-
-### Option 2 — pip install + existing Postgres
-
-If you already have PostgreSQL with pgvector running:
+### Option 1 — You already have PostgreSQL with pgvector
 
 ```bash
 pip install glyphh[runtime]
@@ -56,10 +44,23 @@ export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/glyphh
 glyphh serve
 ```
 
-If you don't have PostgreSQL locally, start just the database with Docker:
+### Option 2 — Use Docker for the database
+
+If you don't have PostgreSQL locally, start it with Docker:
 
 ```bash
-docker compose up -d db
+docker run -d --name glyphh-db \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=glyphh_runtime \
+  -p 5432:5432 \
+  pgvector/pgvector:pg16
+```
+
+Then run the runtime:
+
+```bash
+pip install glyphh[runtime]
 export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/glyphh_runtime
 glyphh serve
 ```
@@ -68,14 +69,6 @@ glyphh serve
 
 ```bash
 glyphh query "What is the refund policy?"
-```
-
-## Docker
-
-Pull the image directly:
-
-```bash
-docker pull ghcr.io/glyphh-ai/glyphh-runtime:latest
 ```
 
 ## How It Works
