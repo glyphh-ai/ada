@@ -24,7 +24,7 @@ from . import theme
 GLYPHH_DIR = Path.home() / ".glyphh"
 CONFIG_FILE = GLYPHH_DIR / "config.json"
 
-DEFAULT_PLATFORM_URL = os.getenv("GLYPHH_PLATFORM_URL", "http://localhost:8001/api/v1")
+PLATFORM_URL = "https://api.glyphh.ai/api/v1"
 
 
 def _load_config() -> dict:
@@ -47,8 +47,11 @@ def get_token() -> str | None:
 
 
 def get_api_url() -> str:
-    """Return the platform API URL."""
-    return _load_config().get("platform_url", DEFAULT_PLATFORM_URL)
+    """Return the platform API URL (production, unless internal override)."""
+    override = os.environ.get("_GLYPHH_INTERNAL_DEV_OVERRIDE")
+    if override:
+        return override
+    return PLATFORM_URL
 
 
 def is_logged_in() -> bool:
