@@ -107,16 +107,6 @@ async def get_current_user(
     
     # Local mode: skip auth for development convenience on lifecycle endpoints
     if settings.deployment_mode == "local":
-        # If a token is provided, validate it (licensing enforcement)
-        if credentials is not None:
-            try:
-                return _validate_jwt(credentials)
-            except HTTPException:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Session expired or invalid. Run: glyphh auth login",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
         return AuthenticatedUser(
             user_id="local-dev-user",
             org_id="local-dev-org",
