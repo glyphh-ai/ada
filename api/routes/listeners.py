@@ -9,16 +9,34 @@ import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from domains.jobs.manager import get_job_manager
 from domains.listeners.async_service import AsyncListenerService
 from infrastructure.config import get_settings
+from shared.auth import AuthenticatedUser, require_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/{org_id}/{model_id}/listener", tags=["listeners"])
 settings = get_settings()
+
+
+async def validate_listener_access(
+    org_id: str,
+    model_id: str,
+    current_user: AuthenticatedUser = Depends(require_token),
+) -> AuthenticatedUser:
+    """Validate that the user has access to load data into this org/model."""
+    from fastapi import HTTPException
+
+    if current_user.org_id != org_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Organization mismatch — you don't have access to this organization",
+        )
+
+    return current_user
 
 _async_listener_service: Optional[AsyncListenerService] = None
 
@@ -65,6 +83,7 @@ async def async_data_load(
     org_id: str,
     model_id: str,
     request: AsyncDataLoadRequest,
+    current_user: AuthenticatedUser = Depends(validate_listener_access),
 ) -> AsyncDataLoadResponse:
     """
     Start async data load. Returns immediately with job_id.
@@ -79,6 +98,7 @@ async def async_data_load(
         model_id=model_id,
         records=request.records,
         batch_size=request.batch_size or 50,
+        plan_slug=current_user.plan,
     )
 
     return AsyncDataLoadResponse(

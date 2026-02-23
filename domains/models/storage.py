@@ -55,6 +55,7 @@ class GlyphStorage:
         embedding: List[float],
         metadata: Optional[Dict[str, Any]] = None,
         glyph_id: Optional[UUID] = None,
+        plan_slug: str = "free",
     ) -> CreateGlyphResponse:
         """
         Store a new glyph in the database.
@@ -66,19 +67,22 @@ class GlyphStorage:
             embedding: Vector embedding (768-dim)
             metadata: Optional metadata dict
             glyph_id: Optional UUID (generated if not provided)
+            plan_slug: User's plan slug for limit enforcement
         """
-        # Check local mode glyph limit
-        if settings.deployment_mode == "local":
+        # Check plan-based glyph limit
+        from shared.plan_limits import get_max_glyphs_per_model
+        max_glyphs = get_max_glyphs_per_model(plan_slug)
+        if max_glyphs >= 0:
             current_count = await self.count_glyphs(org_id, model_id)
-            if current_count >= settings.local_mode_max_glyphs:
+            if current_count >= max_glyphs:
                 raise QuotaExceededException(
                     org_id=org_id,
                     model_id=model_id,
                     resource="glyphs",
-                    limit=settings.local_mode_max_glyphs,
+                    limit=max_glyphs,
                     current=current_count,
-                    message=f"Local mode limit: maximum {settings.local_mode_max_glyphs} glyphs. "
-                            f"Upgrade to a production license for unlimited glyphs."
+                    message=f"Plan limit reached: {plan_slug} allows {max_glyphs} glyphs per model. "
+                            f"Upgrade your plan for more capacity."
                 )
 
         # Validate embedding dimension against runtime max

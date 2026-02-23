@@ -19,7 +19,7 @@ from domains.auth.service import AuthService
 from domains.mcp.server import MCPServer
 from domains.query.service import QueryService
 from infrastructure.config import get_settings
-from shared.auth import AuthenticatedUser, get_current_user
+from shared.auth import AuthenticatedUser, get_current_user, require_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/{org_id}/{model_id}", tags=["org-scoped"])
@@ -37,18 +37,34 @@ async def validate_org_access(
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> AuthenticatedUser:
     """
-    Validate that the authenticated user has access to the org and model.
+    Validate org access with local mode bypass.
 
-    Uses JWT authentication from shared/auth.py which handles:
-    - Local mode bypass (returns mock user)
-    - JWT token validation and claim extraction
-    - Token expiry and signature verification
-
-    Additionally validates that the JWT org_id matches the URL org_id.
+    Used for model lifecycle endpoints (deploy, undeploy, status, re-encode)
+    where the user is operating their own CLI.
     """
     if current_user.org_id == "local-dev-org":
         return current_user
 
+    if current_user.org_id != org_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Organization mismatch - you don't have access to this organization"
+        )
+
+    return current_user
+
+
+async def validate_token_access(
+    org_id: str,
+    model_id: str,
+    current_user: AuthenticatedUser = Depends(require_token),
+) -> AuthenticatedUser:
+    """
+    Always require a valid JWT token — no local mode bypass.
+
+    Used for data and query endpoints (listener, MCP) that external
+    services like Boomi, Make.com, or agents call with API tokens.
+    """
     if current_user.org_id != org_id:
         raise HTTPException(
             status_code=403,
@@ -98,13 +114,13 @@ async def mcp_endpoint(
     model_id: str,
     request: Dict[str, Any],
     mcp_server: MCPServer = Depends(get_mcp_server),
-    current_user: AuthenticatedUser = Depends(validate_org_access),
+    current_user: AuthenticatedUser = Depends(validate_token_access),
 ) -> Dict[str, Any]:
     """
     MCP endpoint for org-scoped model access.
 
-    Accepts JWT authentication from Studio for direct queries.
-    Validates org_id in URL matches org_id in JWT token.
+    Requires a valid JWT token (even in local mode). External services
+    like Boomi, Make.com, and agents use API tokens to query models.
     """
     tool_name = request.get("tool")
     arguments = request.get("arguments", {})
@@ -129,6 +145,7 @@ async def list_mcp_tools(
     org_id: str,
     model_id: str,
     mcp_server: MCPServer = Depends(get_mcp_server),
+    current_user: AuthenticatedUser = Depends(validate_token_access),
 ) -> Dict[str, Any]:
     return {"tools": mcp_server.get_tools_list()}
 
@@ -322,4 +339,84 @@ async def delete_model(
         return {"status": "deleted", "model_id": model_id}
     except ModelNotFoundException:
         raise HTTPException(status_code=404, detail=f"Model not found: {org_id}/{model_id}")
+
+
+# ── Data Management Endpoints ──
+
+@router.get("/data")
+async def list_data(
+    org_id: str,
+    model_id: str,
+    limit: int = 20,
+    offset: int = 0,
+    current_user: AuthenticatedUser = Depends(validate_org_access),
+) -> Dict[str, Any]:
+    """List glyphs stored for this model with pagination."""
+    from infrastructure.database import async_session_maker
+    from domains.models.storage import GlyphStorage
+
+    async with async_session_maker() as session:
+        storage = GlyphStorage(session)
+        count = await storage.count_glyphs(org_id, model_id)
+        glyphs = await storage.list_glyphs(org_id, model_id, limit=limit, offset=offset)
+
+    return {
+        "total": count,
+        "limit": limit,
+        "offset": offset,
+        "glyphs": [
+            {
+                "id": str(g.id),
+                "concept_text": g.concept_text[:200] if g.concept_text else "",
+                "metadata": g.metadata,
+                "created_at": g.created_at.isoformat() + "Z" if g.created_at else None,
+            }
+            for g in glyphs
+        ],
+    }
+
+
+@router.get("/data/count")
+async def count_data(
+    org_id: str,
+    model_id: str,
+    current_user: AuthenticatedUser = Depends(validate_org_access),
+) -> Dict[str, Any]:
+    """Count glyphs and edges for this model."""
+    from infrastructure.database import async_session_maker
+    from domains.models.storage import GlyphStorage
+
+    async with async_session_maker() as session:
+        storage = GlyphStorage(session)
+        glyph_count = await storage.count_glyphs(org_id, model_id)
+        vector_count = await storage.count_glyph_vectors(org_id, model_id)
+
+    return {
+        "glyphs": glyph_count,
+        "vectors": vector_count,
+        "model_id": model_id,
+    }
+
+
+@router.delete("/data")
+async def clear_data(
+    org_id: str,
+    model_id: str,
+    current_user: AuthenticatedUser = Depends(validate_org_access),
+) -> Dict[str, Any]:
+    """Clear all glyphs and edges for this model without unloading it."""
+    from infrastructure.database import async_session_maker
+    from domains.models.storage import GlyphStorage
+
+    async with async_session_maker() as session:
+        storage = GlyphStorage(session)
+        glyphs_deleted, edges_deleted = await storage.delete_model_data(org_id, model_id)
+        await session.commit()
+
+    return {
+        "status": "cleared",
+        "model_id": model_id,
+        "glyphs_deleted": glyphs_deleted,
+        "edges_deleted": edges_deleted,
+    }
 

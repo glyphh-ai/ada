@@ -320,18 +320,21 @@ class ModelConfig(Base):
 
 class Token(Base):
     """
-    Token model - webhook/consumer tokens for API access.
+    Token model - API tokens for runtime access.
     
     Tokens are scoped to org_id (required) and optionally model_id.
     A token with model_id=None grants access to all models in the org.
+    Stored as SHA-256 hashes — the raw token is shown once at creation.
     """
     __tablename__ = "tokens"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    name = Column(String(255), nullable=False)
     token_hash = Column(String(255), nullable=False, unique=True)
+    token_prefix = Column(String(12), nullable=True)  # first 8 chars for identification
     org_id = Column(String(255), nullable=False, index=True)
     model_id = Column(String(255), nullable=True, index=True)  # nullable for org-wide tokens
-    permissions = Column(JSONType, default=lambda: ["read"])
+    permissions = Column(JSONType, default=lambda: ["read", "write"])
     status = Column(String(50), default="active")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     revoked_at = Column(DateTime, nullable=True)

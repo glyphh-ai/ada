@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     
     # Server
     host: str = Field(default="0.0.0.0", description="Server host")
-    port: int = Field(default=8000, description="Server port")
+    port: int = Field(default=8002, description="Server port")
     
     # Deployment mode
     deployment_mode: Literal["local", "self-hosted", "cloud"] = Field(
@@ -77,10 +77,6 @@ class Settings(BaseSettings):
     local_mode_max_models: int = Field(
         default=10,
         description="Maximum models in local mode (development limit)"
-    )
-    local_mode_max_glyphs: int = Field(
-        default=1000,
-        description="Maximum glyphs per model in local mode (development limit)"
     )
     
     # Vector dimension limit

@@ -196,9 +196,14 @@ class ModelsListResponse(BaseModel):
 class TokenInfoResponse(BaseModel):
     """Information about a token"""
     id: str
-    model: Optional[str] = None
+    name: str
+    org_id: str
+    model_id: Optional[str] = None
+    permissions: list = ["read", "write"]
     created_at: Optional[datetime] = None
-    status: str = "Active"
+    expires_at: Optional[datetime] = None
+    status: str = "active"
+    token_prefix: Optional[str] = None
 
 
 class TokensListResponse(BaseModel):

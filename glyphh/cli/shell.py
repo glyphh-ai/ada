@@ -13,6 +13,7 @@ from .commands.auth import handle_auth
 from .commands.model import handle_model
 from .commands.catalog import handle_catalog
 from .commands.token import handle_token
+from .commands.query import handle_query
 from . import theme
 
 # Try to import readline for history/completion
@@ -30,6 +31,7 @@ COMMAND_HANDLERS = {
     "model": handle_model,
     "catalog": handle_catalog,
     "token": handle_token,
+    "query": handle_query,
 }
 
 
@@ -151,6 +153,11 @@ def _print_help():
     click.secho("  model", fg=theme.ACCENT)
     click.secho("    model list              List local models", fg=theme.MUTED)
     click.secho("    model deploy [path]     Deploy model to runtime", fg=theme.MUTED)
+    click.secho("    model load <file>       Load data from concepts.json", fg=theme.MUTED)
+    click.secho("    model data              View stored glyphs", fg=theme.MUTED)
+    click.secho("    model count             Show glyph/vector counts", fg=theme.MUTED)
+    click.secho("    model clear             Clear all data (keep model)", fg=theme.MUTED)
+    click.secho("    model re-encode         Re-encode all glyphs", fg=theme.MUTED)
     click.secho("    model status [id]       Check deployed status", fg=theme.MUTED)
     click.secho("    model undeploy [id]     Remove from runtime", fg=theme.MUTED)
     click.secho("    model init [name]       Scaffold new model", fg=theme.MUTED)
@@ -163,10 +170,12 @@ def _print_help():
     click.secho("    catalog info <name>      Show model details", fg=theme.MUTED)
     click.echo()
     click.secho("  token", fg=theme.ACCENT)
-    click.secho("    token create             Generate a JWT token", fg=theme.MUTED)
+    click.secho("    token create             Create an API token", fg=theme.MUTED)
     click.secho("    token list               List active tokens", fg=theme.MUTED)
     click.secho("    token revoke <id>        Revoke a token", fg=theme.MUTED)
-    click.secho("    token refresh <id>       Refresh expiring token", fg=theme.MUTED)
+    click.echo()
+    click.secho("  query", fg=theme.ACCENT)
+    click.secho("    query <question>         Query the model", fg=theme.MUTED)
     click.echo()
     click.secho("  general", fg=theme.ACCENT)
     click.secho("    clear, home             Clear screen and show banner", fg=theme.MUTED)

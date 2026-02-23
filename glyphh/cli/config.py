@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 
 
 # Default values for local development
-DEFAULT_RUNTIME_URL = "http://localhost:8000"
+DEFAULT_RUNTIME_URL = "http://localhost:8002"
 DEFAULT_TIMEOUT = 30
 
 
@@ -193,7 +193,7 @@ def generate_env_template(output_path: str = ".env", scenario: str = "local") ->
 # This configuration is for local development on your machine.
 
 # Runtime API URL (local development server)
-RUNTIME_URL=http://localhost:8000
+RUNTIME_URL=http://localhost:8002
 
 # JWT Token (optional for local development)
 # JWT_TOKEN=
