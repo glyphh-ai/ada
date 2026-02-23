@@ -294,6 +294,155 @@ class ModelManager:
         
         return loaded_model
 
+    async def load_model_from_directory(
+        self,
+        model_dir: Path,
+        org_id: str,
+        model_id: str,
+    ) -> LoadedModel:
+        """
+        Load a model from an unpacked directory (ZIP-based .glyphh format).
+
+        Uses the directory-based loader (encoder.py / config.yaml / manifest.yaml)
+        rather than GlyphhModel.from_file (gzip JSON).
+
+        Args:
+            model_dir: Path to unpacked model directory
+            org_id: Organization ID
+            model_id: Model ID
+        """
+        from domains.models.loader import load_model as load_model_def
+
+        adapter = get_sdk_adapter()
+        if not adapter.is_available:
+            raise ModelLoadException("SDK not available")
+
+        if not model_dir.is_dir():
+            raise ModelLoadException(f"Model directory not found: {model_dir}")
+
+        loaded = load_model_def(model_dir)
+
+        if loaded.encoder_config is None:
+            raise ModelLoadException(
+                f"No encoder config found in model directory. "
+                f"Ensure encoder.py with ENCODER_CONFIG or config.yaml exists."
+            )
+
+        key = (org_id, model_id)
+        is_redeploy = key in self._models
+
+        # Check local mode model limit (only for new deploys)
+        if not is_redeploy and settings.deployment_mode == "local":
+            if len(self._models) >= settings.local_mode_max_models:
+                raise ModelLoadException(
+                    f"Local mode limit: maximum {settings.local_mode_max_models} model(s). "
+                    f"Upgrade to a production license for unlimited models."
+                )
+
+        # Validate and create encoder
+        try:
+            # encoder_config from loader is already an EncoderConfig object
+            # (imported from encoder.py's ENCODER_CONFIG)
+            encoder_config = loaded.encoder_config
+            validator = get_config_validator()
+            validator.validate_encoder_config_or_raise(encoder_config)
+            encoder_config = validator.apply_defaults(encoder_config)
+        except ConfigurationError as e:
+            raise ModelLoadException(f"Invalid model configuration: {e}")
+
+        try:
+            encoder = adapter.create_encoder(encoder_config)
+        except Exception as e:
+            raise ModelLoadException(f"Failed to create encoder: {e}")
+
+        similarity_calculator = adapter.create_similarity_calculator()
+
+        meta_name = loaded.manifest.name or model_id
+        short_description = loaded.manifest.description or ""
+        manifest_version = loaded.manifest.version or "0.1.0"
+
+        # Build a proxy SDK model object
+        class DirectoryModel:
+            def __init__(self, name, version, config):
+                self.name = name
+                self.version = version
+                self.encoder_config = config
+                self.meta_name = name
+
+            def has_stored_procedures(self):
+                return False
+
+        sdk_model_proxy = DirectoryModel(meta_name, manifest_version, encoder_config)
+
+        loaded_model = LoadedModel(
+            org_id=org_id,
+            model_id=model_id,
+            model_path=str(model_dir),
+            sdk_model=sdk_model_proxy,
+            encoder=encoder,
+            similarity_calculator=similarity_calculator,
+            loaded_at=datetime.utcnow(),
+            meta_name=meta_name,
+            short_description=short_description,
+            long_description="",
+            encode_query_fn=loaded.encode_query_fn,
+        )
+
+        # Serialize encoder config for DB storage
+        encoder_config_dict = None
+        if hasattr(encoder_config, 'to_dict'):
+            encoder_config_dict = encoder_config.to_dict()
+
+        # DB upsert
+        async with self._db_session_factory() as session:
+            result = await session.execute(
+                select(ModelConfig).where(
+                    ModelConfig.org_id == org_id,
+                    ModelConfig.model_id == model_id,
+                )
+            )
+            existing = result.scalar_one_or_none()
+
+            if existing:
+                existing.model_path = str(model_dir)
+                existing.model_version = manifest_version
+                existing.sdk_version = await self._get_sdk_version()
+                existing.meta_name = meta_name
+                existing.short_description = short_description
+                existing.long_description = ""
+                existing.encoder_config = encoder_config_dict
+                existing.updated_at = datetime.utcnow()
+            else:
+                config = ModelConfig(
+                    org_id=org_id,
+                    model_id=model_id,
+                    model_path=str(model_dir),
+                    model_version=manifest_version,
+                    sdk_version=await self._get_sdk_version(),
+                    meta_name=meta_name,
+                    short_description=short_description,
+                    long_description="",
+                    encoder_config=encoder_config_dict,
+                )
+                session.add(config)
+            await session.commit()
+
+        # Swap in-memory model
+        old_model = self._models.get(key)
+        if old_model is not None:
+            logger.info(f"Re-deploying: replacing model org={org_id}, model={model_id}")
+            if hasattr(old_model.encoder, 'clear_cache'):
+                old_model.encoder.clear_cache()
+
+        self._models[key] = loaded_model
+
+        logger.info(
+            f"Loaded model '{meta_name}' v{manifest_version} "
+            f"from directory into org={org_id}, model={model_id}"
+        )
+
+        return loaded_model
+
     
 
     async def unload_model(

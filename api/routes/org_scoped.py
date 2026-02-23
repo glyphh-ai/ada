@@ -8,8 +8,10 @@ No namespace concept — org_id and model_id are passed directly to services.
 """
 
 import logging
+import shutil
 import tempfile
 import os
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -195,11 +197,16 @@ async def deploy_model(
     Accepts either:
     - A multipart file upload of a .glyphh file (field name: file)
     - A form field model_path pointing to a filesystem path
+
+    Supports two .glyphh formats:
+    - ZIP archive (from CLI packaging): unpacked and loaded via directory path
+    - Gzip JSON (from SDK GlyphhModel.to_file): loaded via GlyphhModel.from_file
     """
     from shared.exceptions import ModelLoadException, ModelIncompatibleException
 
     resolved_path: Optional[str] = None
     tmp_path: Optional[str] = None
+    tmp_dir: Optional[str] = None
 
     try:
         if file is not None:
@@ -220,16 +227,40 @@ async def deploy_model(
                 detail="Provide either a .glyphh file upload or a model_path.",
             )
 
-        loaded_model = await model_manager.load_model(
-            model_path=resolved_path,
-            org_id=org_id,
-            model_id=model_id,
-        )
+        # Detect file format by magic bytes
+        with open(resolved_path, "rb") as f:
+            magic = f.read(2)
+
+        if magic == b"PK":
+            # ZIP format (CLI packaging) — unpack and load from directory
+            from glyphh.cli.packaging import unpack_model
+
+            tmp_dir = tempfile.mkdtemp(prefix="glyphh_deploy_")
+            model_dir = unpack_model(Path(resolved_path), dest=Path(tmp_dir) / model_id)
+
+            loaded_model = await model_manager.load_model_from_directory(
+                model_dir=model_dir,
+                org_id=org_id,
+                model_id=model_id,
+            )
+        elif magic == b"\x1f\x8b":
+            # Gzip JSON format (SDK GlyphhModel.to_file)
+            loaded_model = await model_manager.load_model(
+                model_path=resolved_path,
+                org_id=org_id,
+                model_id=model_id,
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unrecognized .glyphh file format (magic bytes: {magic!r}). "
+                       f"Expected ZIP (CLI package) or gzip (SDK model).",
+            )
 
         return {
             "status": "deployed",
             "model_id": model_id,
-            "version": loaded_model.sdk_model.version,
+            "version": getattr(loaded_model.sdk_model, "version", "unknown"),
             "meta_name": loaded_model.meta_name,
         }
 
@@ -241,6 +272,8 @@ async def deploy_model(
         # Clean up temp file if we created one
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
+        if tmp_dir and os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 
