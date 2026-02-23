@@ -107,4 +107,6 @@ glyphh query "What is the refund policy?"
 
 ## License
 
-MIT
+Glyphh AI Community License — Copyright (c) 2026 Glyphh AI LLC. All rights reserved.
+
+See [LICENSE](https://github.com/glyphh-ai/glyphh-runtime/blob/main/LICENSE) for full terms. Patent pending (Application No. 63/969,729).
