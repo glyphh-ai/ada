@@ -216,6 +216,11 @@ class Role:
         key_part: If True, this role contributes to the composite primary key
         numeric_config: Optional configuration for numeric binning
         lexicons: Optional list of alternative names/synonyms for NL query matching
+        text_encoding: Optional text encoding strategy for string values.
+            - None (default): Treat entire string as one symbol via generate_symbol()
+            - "bag_of_words": Split value into words, encode each word as a symbol,
+              and bundle them. Shared words between two values produce shared signal
+              in cosine similarity. Ideal for matching NL queries against descriptions.
     
     Note:
         Temporal signals are now always encoded on a dedicated `_temporal` layer.
@@ -239,6 +244,12 @@ class Role:
         ...     name="tire_tread_depth_mm",
         ...     lexicons=["tire wear", "tread depth", "tire condition"]
         ... )
+        >>> # Role with bag-of-words text encoding
+        >>> role = Role(
+        ...     name="description",
+        ...     text_encoding="bag_of_words",
+        ...     similarity_weight=0.8,
+        ... )
     """
     name: str
     similarity_weight: float = 1.0
@@ -246,6 +257,7 @@ class Role:
     key_part: bool = False
     numeric_config: Optional['NumericConfig'] = None
     lexicons: Optional[List[str]] = None
+    text_encoding: Optional[str] = None
     
     def __post_init__(self):
         """Validate role on initialization."""
@@ -283,6 +295,13 @@ class Role:
                 "security_weight",
                 f"Must be between 0.0 and 1.0, got {self.security_weight}"
             )
+        # Validate text_encoding
+        valid_text_encodings = {None, "bag_of_words"}
+        if self.text_encoding not in valid_text_encodings:
+            raise ConfigurationException(
+                "text_encoding",
+                f"Must be one of {valid_text_encodings}, got '{self.text_encoding}'"
+            )
     
     def to_dict(self) -> dict:
         """Serialize role to dictionary."""
@@ -296,6 +315,8 @@ class Role:
             result["numeric_config"] = self.numeric_config.to_dict()
         if self.lexicons is not None and len(self.lexicons) > 0:
             result["lexicons"] = self.lexicons
+        if self.text_encoding is not None:
+            result["text_encoding"] = self.text_encoding
         return result
     
     @classmethod
@@ -323,6 +344,7 @@ class Role:
             key_part=key_part,
             numeric_config=numeric_config,
             lexicons=lexicons,
+            text_encoding=data.get("text_encoding"),
         )
 
 
@@ -1104,6 +1126,8 @@ class EncoderConfig:
         similarity_weight: Cortex-level similarity weight (0.0-1.0, default: 1.0)
         security_weight: Cortex-level security weight (0.0-1.0, default: 1.0)
         apply_weights_during_encoding: Whether to apply weights during encoding (default: False)
+        include_temporal: Whether to include the automatic _temporal layer (default: True).
+            Set to False for models where temporal signal is irrelevant (e.g., function routing).
         layers: List of Layer definitions (default: empty list)
         nl_encoder_config: NL encoder configuration for intent patterns (default: None)
         gql_patterns: GQL patterns configuration for NL-to-GQL translation (default: None)
@@ -1155,6 +1179,7 @@ class EncoderConfig:
     similarity_weight: float = 1.0
     security_weight: float = 1.0
     apply_weights_during_encoding: bool = False
+    include_temporal: bool = True
     layers: List[Layer] = field(default_factory=list)
     nl_encoder_config: Optional[NLEncoderConfig] = field(default=None)
     gql_patterns: Optional[GQLPatternsConfig] = field(default=None)
@@ -1227,6 +1252,13 @@ class EncoderConfig:
                 f"Must be a boolean, got {type(self.apply_weights_during_encoding).__name__}"
             )
         
+        # Validate include_temporal
+        if not isinstance(self.include_temporal, bool):
+            raise ConfigurationException(
+                "include_temporal",
+                f"Must be a boolean, got {type(self.include_temporal).__name__}"
+            )
+        
         # Validate layers is a list
         if not isinstance(self.layers, list):
             raise ConfigurationException(
@@ -1291,6 +1323,7 @@ class EncoderConfig:
             "similarity_weight": self.similarity_weight,
             "security_weight": self.security_weight,
             "apply_weights_during_encoding": self.apply_weights_during_encoding,
+            "include_temporal": self.include_temporal,
             "layers": [layer.to_dict() for layer in self.layers],
             "temporal_source": self.temporal_source,
         }
@@ -1386,6 +1419,7 @@ class EncoderConfig:
             similarity_weight=data.get("similarity_weight", 1.0),
             security_weight=data.get("security_weight", 1.0),
             apply_weights_during_encoding=data.get("apply_weights_during_encoding", False),
+            include_temporal=data.get("include_temporal", True),
             layers=layers,
             nl_encoder_config=nl_encoder_config,
             gql_patterns=gql_patterns,

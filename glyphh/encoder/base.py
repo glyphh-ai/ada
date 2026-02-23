@@ -714,6 +714,46 @@ class Encoder:
         
         return base_vector
     
+    def _encode_bag_of_words(self, text: str) -> Vector:
+        """
+        Encode a text value using bag-of-words bundling.
+        
+        Splits the text into individual words, encodes each word as a
+        deterministic symbol via generate_symbol(), and bundles them.
+        Shared words between two bag-of-words vectors produce shared
+        signal in cosine similarity.
+        
+        Args:
+            text: The text value to encode
+        
+        Returns:
+            Bundled bipolar Vector representing the bag of words
+        
+        Example:
+            >>> encoder = Encoder(EncoderConfig(dimension=10000, seed=42))
+            >>> v1 = encoder._encode_bag_of_words("calculate area of circle")
+            >>> v2 = encoder._encode_bag_of_words("calculate circumference of circle")
+            >>> # v1 and v2 share "calculate", "circle" → high cosine similarity
+        """
+        import re
+        # Split on non-alphanumeric, lowercase, filter empty
+        words = re.sub(r"[^a-z0-9\s]", "", text.lower()).split()
+        words = [w for w in words if len(w) > 1]
+        
+        if not words:
+            return self.generate_symbol("__empty__")
+        
+        # Deduplicate preserving order
+        seen = set()
+        unique_words = []
+        for w in words:
+            if w not in seen:
+                seen.add(w)
+                unique_words.append(w)
+        
+        word_vecs = [self.generate_symbol(w) for w in unique_words]
+        return self.bundle(word_vecs)
+    
     def encode_segment(
         self,
         segment_name: str,
@@ -1103,6 +1143,8 @@ class Encoder:
                         # Check if role has numeric_config for numeric binning
                         if role_def.numeric_config is not None:
                             value_vector = self._encode_numeric_value(value, role_def.numeric_config)
+                        elif role_def.text_encoding == "bag_of_words":
+                            value_vector = self._encode_bag_of_words(str(value))
                         else:
                             value_vector = self.generate_symbol(str(value))
                         
@@ -1185,11 +1227,14 @@ class Encoder:
                 stage="layer_bundling"
             )
         
-        # Create the _temporal layer (always present)
-        temporal_layer, temporal_value = self._create_temporal_layer(concept, timestamp)
-        layers[temporal_layer.name] = temporal_layer
-        layer_cortices.append(temporal_layer.cortex)
-        layer_weights.append(1.0)  # Temporal layer has weight 1.0
+        # Create the _temporal layer (if enabled)
+        if self.config.include_temporal:
+            temporal_layer, temporal_value = self._create_temporal_layer(concept, timestamp)
+            layers[temporal_layer.name] = temporal_layer
+            layer_cortices.append(temporal_layer.cortex)
+            layer_weights.append(1.0)  # Temporal layer has weight 1.0
+        else:
+            temporal_value = timestamp.isoformat()
         
         # Bundle layer cortices into global cortex
         if use_weighted and layer_weights:
@@ -1325,11 +1370,14 @@ class Encoder:
                 stage="layer_bundling"
             )
         
-        # Create the _temporal layer (always present)
+        # Create the _temporal layer (if enabled)
         timestamp = datetime.now()
-        temporal_layer, temporal_value = self._create_temporal_layer(concept, timestamp)
-        layers[temporal_layer.name] = temporal_layer
-        layer_cortices.append(temporal_layer.cortex)
+        if self.config.include_temporal:
+            temporal_layer, temporal_value = self._create_temporal_layer(concept, timestamp)
+            layers[temporal_layer.name] = temporal_layer
+            layer_cortices.append(temporal_layer.cortex)
+        else:
+            temporal_value = timestamp.isoformat()
         
         global_cortex = self.bundle(layer_cortices)
         

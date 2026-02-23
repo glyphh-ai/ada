@@ -59,28 +59,49 @@ async def init_db() -> None:
     # Run Alembic migrations automatically using subprocess
     # to avoid async context issues with Alembic's asyncio.run()
     import os
+    import shutil
     
     # Find alembic.ini relative to the app root
     app_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     alembic_ini = os.path.join(app_root, "alembic.ini")
     
+    migrations_applied = False
+    
     if os.path.exists(alembic_ini):
+        # Find the alembic binary — try .venv first, then system PATH
+        alembic_bin = os.path.join(app_root, ".venv", "bin", "alembic")
+        if not os.path.exists(alembic_bin):
+            alembic_bin = shutil.which("alembic") or "alembic"
+        
         try:
-            # Run alembic as subprocess to avoid async context issues
             result = subprocess.run(
-                [".venv/bin/alembic", "upgrade", "head"],
+                [alembic_bin, "upgrade", "head"],
                 cwd=app_root,
                 capture_output=True,
                 text=True,
             )
             if result.returncode == 0:
                 logger.info("Database migrations applied successfully")
+                migrations_applied = True
             else:
-                logger.error(f"Migration failed: {result.stderr}")
+                logger.error(f"Migration failed (rc={result.returncode}): {result.stderr}")
         except Exception as e:
             logger.error(f"Failed to run migrations: {e}")
     else:
-        logger.warning(f"alembic.ini not found at {alembic_ini}, skipping migrations")
+        logger.warning(f"alembic.ini not found at {alembic_ini}")
+    
+    # Fallback: create tables directly if migrations didn't run
+    if not migrations_applied:
+        logger.info("Falling back to Base.metadata.create_all()")
+        # Import all models so they're registered with Base.metadata
+        from domains.models.db_models import Glyph, GlyphVector, Edge, ModelConfig, Token  # noqa: F401
+        try:
+            from domains.procedures.models import StoredProcedureModel  # noqa: F401
+        except ImportError:
+            pass
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables created via metadata.create_all()")
 
 
 async def close_db() -> None:
