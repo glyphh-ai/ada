@@ -1,0 +1,69 @@
+{
+  "pack": "trading",
+  "description": "Financial markets: stocks, options, crypto, portfolio operations",
+  "actions": [
+    {"canonical": "buy", "synonyms": ["buy", "purchase", "acquire", "long", "go long", "enter long", "open long"], "phrases": ["buy shares of", "purchase stock", "go long on", "open long position", "buy the dip on", "acquire shares of"]},
+    {"canonical": "sell", "synonyms": ["sell", "liquidate", "exit", "short", "go short", "close long", "dump", "offload"], "phrases": ["sell shares of", "liquidate position", "go short on", "close the position", "sell my shares in", "exit my position"]},
+    {"canonical": "place_order", "synonyms": ["place order", "submit order", "set order", "place limit order", "place market order", "place stop order", "place stop loss"], "phrases": ["place a limit order", "place a market order", "submit the order", "set a stop loss at", "place stop at", "put in an order"]},
+    {"canonical": "cancel_order", "synonyms": ["cancel order", "revoke order", "withdraw order", "kill order", "pull order", "cancel trade"], "phrases": ["cancel the order", "withdraw the limit order", "kill the trade", "pull the order", "cancel my order"]},
+    {"canonical": "get_quote", "synonyms": ["get quote", "check price", "look up price", "fetch price", "get tick", "current price", "last price", "spot price"], "phrases": ["get the current price of", "what is the price of", "check the quote for", "current price of", "quote for"]},
+    {"canonical": "get_portfolio", "synonyms": ["get portfolio", "check portfolio", "view positions", "view holdings", "show portfolio", "my positions"], "phrases": ["show my portfolio", "view my positions", "what am i holding", "check my holdings", "portfolio summary"]},
+    {"canonical": "get_balance", "synonyms": ["get balance", "check balance", "account balance", "available funds", "buying power", "cash balance", "account value"], "phrases": ["what is my balance", "check my account balance", "how much buying power", "available cash", "net portfolio value"]},
+    {"canonical": "transfer", "synonyms": ["transfer", "move funds", "withdraw", "deposit", "fund account", "wire transfer", "move money"], "phrases": ["transfer funds to", "move money to", "withdraw from account", "deposit into account", "wire to", "fund the account"]},
+    {"canonical": "get_history", "synonyms": ["get trade history", "transaction history", "order history", "account history", "trade log", "past trades"], "phrases": ["show my trade history", "view order history", "list all trades", "past transactions", "recent trades"]},
+    {"canonical": "set_alert", "synonyms": ["set price alert", "price alert", "set alarm at price", "notify when price", "trigger when price"], "phrases": ["set an alert when", "notify me when price hits", "alert me if price drops to", "set price notification", "watch for price"]},
+    {"canonical": "analyze_market", "synonyms": ["analyze market", "backtest", "technical analysis", "fundamental analysis", "chart analysis", "market analysis"], "phrases": ["run technical analysis on", "backtest the strategy", "analyze the chart for", "fundamental analysis of", "technical indicators for"]}
+  ],
+  "targets": [
+    {"canonical": "stock", "synonyms": ["stock", "share", "equity", "ticker", "symbol", "common stock", "shares"], "phrases": ["stock price", "stock ticker", "equity position", "shares of"]},
+    {"canonical": "option", "synonyms": ["option", "call option", "put option", "call", "put", "contract", "options contract"], "phrases": ["call option", "put option", "options contract", "options chain"]},
+    {"canonical": "crypto", "synonyms": ["crypto", "cryptocurrency", "bitcoin", "btc", "eth", "coin", "token", "digital asset"], "phrases": ["crypto coin", "cryptocurrency price", "bitcoin price", "crypto portfolio"]},
+    {"canonical": "portfolio", "synonyms": ["portfolio", "holdings", "positions", "investments", "assets", "book"], "phrases": ["investment portfolio", "current positions", "my holdings", "portfolio allocation"]},
+    {"canonical": "trade_order", "synonyms": ["order", "trade order", "limit order", "market order", "stop order", "stop loss", "take profit", "trailing stop"], "phrases": ["limit order", "market order", "stop loss order", "take profit order", "trailing stop order"]},
+    {"canonical": "price", "synonyms": ["price", "quote", "last price", "ask", "bid", "spread", "mark"], "phrases": ["current price", "ask price", "bid price", "mid price", "spot price"]},
+    {"canonical": "balance", "synonyms": ["balance", "cash", "funds", "buying power", "available cash", "net worth", "account value"], "phrases": ["account balance", "available funds", "buying power", "cash on hand"]},
+    {"canonical": "position", "synonyms": ["position", "long position", "short position", "open position", "closed position", "trade"], "phrases": ["open position", "long position", "short position", "current position"]},
+    {"canonical": "market_index", "synonyms": ["index", "S&P500", "nasdaq", "dow", "market index", "benchmark", "indices"], "phrases": ["market index", "S&P 500", "NASDAQ index", "dow jones"]}
+  ],
+  "phrases": [
+    {"phrase": "buy shares of", "action": "buy"},
+    {"phrase": "purchase stock", "action": "buy"},
+    {"phrase": "go long on", "action": "buy"},
+    {"phrase": "buy the dip on", "action": "buy"},
+    {"phrase": "sell shares of", "action": "sell"},
+    {"phrase": "liquidate position", "action": "sell"},
+    {"phrase": "go short on", "action": "sell"},
+    {"phrase": "close the position", "action": "sell"},
+    {"phrase": "place a limit order", "action": "place_order"},
+    {"phrase": "place a market order", "action": "place_order"},
+    {"phrase": "set a stop loss", "action": "place_order"},
+    {"phrase": "put in an order", "action": "place_order"},
+    {"phrase": "cancel the order", "action": "cancel_order"},
+    {"phrase": "withdraw the limit order", "action": "cancel_order"},
+    {"phrase": "what is my balance", "action": "get_balance"},
+    {"phrase": "how much buying power", "action": "get_balance"},
+    {"phrase": "show my portfolio", "action": "get_portfolio"},
+    {"phrase": "check my holdings", "action": "get_portfolio"},
+    {"phrase": "view my positions", "action": "get_portfolio"},
+    {"phrase": "what is the price of", "action": "get_quote"},
+    {"phrase": "current price of", "action": "get_quote"},
+    {"phrase": "set an alert when", "action": "set_alert"},
+    {"phrase": "notify me when price", "action": "set_alert"},
+    {"phrase": "transfer funds to", "action": "transfer"},
+    {"phrase": "withdraw from account", "action": "transfer"},
+    {"phrase": "deposit into account", "action": "transfer"},
+    {"phrase": "show my trade history", "action": "get_history"},
+    {"phrase": "list all trades", "action": "get_history"},
+    {"phrase": "run technical analysis", "action": "analyze_market"},
+    {"phrase": "backtest the strategy", "action": "analyze_market"}
+  ],
+  "domain_signals": {
+    "trading": {
+      "stock": 3, "ticker": 3, "portfolio": 3, "trade": 3, "equity": 3,
+      "option": 2, "nasdaq": 3, "s&p": 3, "market order": 3, "limit order": 3,
+      "shares": 3, "bid": 3, "ask": 3, "short position": 3, "long position": 3,
+      "broker": 3, "crypto": 3, "bitcoin": 3, "btc": 3, "eth": 3,
+      "options chain": 3, "stop loss": 3, "take profit": 3, "backtest": 3
+    }
+  }
+}

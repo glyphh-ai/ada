@@ -68,6 +68,18 @@ from .core.ops import (
 from .encoder import Encoder
 from .encoder.intent import IntentEncoder, IntentPattern, IntentMatch
 from .encoder.default_intents import DEFAULT_INTENT_PATTERNS
+
+# Intent extraction — rule-based NL parsing with HDC fallback
+from .intent import (
+    IntentExtractor,
+    VERB_CONFIG as INTENT_VERB_CONFIG,
+    NOUN_CONFIG as INTENT_NOUN_CONFIG,
+    get_extractor,
+    extract_intent,
+    extract_action,
+    extract_target,
+    infer_domain,
+)
 from .edges import EdgeGenerator
 from .similarity import SimilarityCalculator, SimilarityResult
 from .fact_tree import FactTree, FactNode, Citation
@@ -122,11 +134,20 @@ __all__ = [
     "migrate_legacy_config",
     # Encoder
     "Encoder",
-    # Intent Encoder (NL Query Matching)
+    # Intent Encoder (HDC pattern matching)
     "IntentEncoder",
     "IntentPattern",
     "IntentMatch",
     "DEFAULT_INTENT_PATTERNS",
+    # Intent Extractor (rule-based NL parsing + HDC fallback)
+    "IntentExtractor",
+    "INTENT_VERB_CONFIG",
+    "INTENT_NOUN_CONFIG",
+    "get_extractor",
+    "extract_intent",
+    "extract_action",
+    "extract_target",
+    "infer_domain",
     # Edge Generator
     "EdgeGenerator",
     # Similarity
