@@ -13,22 +13,58 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     """Runtime configuration settings"""
-    
+
     # Server
     host: str = Field(default="0.0.0.0", description="Server host")
     port: int = Field(default=8002, description="Server port")
-    
+
     # Deployment mode
     deployment_mode: Literal["local", "self-hosted", "cloud"] = Field(
         default="local",
         description="Deployment mode: local (no auth), self-hosted, or cloud"
     )
-    
-    # Database
-    database_url: str = Field(
-        default="postgresql+asyncpg://localhost:5432/glyphh_runtime",
-        description="PostgreSQL connection URL"
+
+    # Database — optional; auto-defaults to SQLite in local mode
+    database_url: Optional[str] = Field(
+        default=None,
+        description="Database connection URL. Auto-defaults to SQLite in local mode if not set."
     )
+
+    # Storage backend
+    storage_backend: Literal["auto", "pgvector", "sqlite", "memory"] = Field(
+        default="auto",
+        description=(
+            "Storage backend for glyph persistence. "
+            "'auto' detects from database_url (sqlite:// → sqlite, postgresql:// → pgvector). "
+            "'pgvector' requires DATABASE_URL pointing to PostgreSQL + pgvector. "
+            "'sqlite' uses SQLite with Python cosine similarity (dev/small datasets). "
+            "'memory' reserved for future in-process backends (Pinecone, Qdrant, etc.)."
+        ),
+    )
+
+    @property
+    def resolved_database_url(self) -> str:
+        """Return the effective database URL, auto-defaulting to SQLite in local mode."""
+        if self.database_url:
+            return self.database_url
+        if self.deployment_mode == "local":
+            return "sqlite+aiosqlite:///./glyphh_dev.db"
+        raise ValueError(
+            "DATABASE_URL is required for non-local deployment modes. "
+            "Set it with: export DATABASE_URL=postgresql+asyncpg://..."
+        )
+
+    @property
+    def resolved_storage_backend(self) -> str:
+        """Return the effective storage backend, auto-detecting from URL if 'auto'."""
+        if self.storage_backend != "auto":
+            return self.storage_backend
+        url = self.resolved_database_url
+        if "sqlite" in url:
+            return "sqlite"
+        if "postgresql" in url or "postgres" in url:
+            return "pgvector"
+        return "sqlite"  # safe fallback
     
     # JWT Authentication
     jwt_secret_key: Optional[str] = Field(
@@ -85,6 +121,19 @@ class Settings(BaseSettings):
         description="Maximum vector dimension for models. Cloud default is 2000 (pgvector HNSW index limit). "
                     "Local installs can increase this but will lose index-based similarity search."
     )
+
+    @property
+    def resolved_max_vector_dimension(self) -> int:
+        """Return effective dimension limit based on storage backend.
+
+        SQLite stores vectors as JSON text — no size constraint applies.
+        pgvector HNSW index supports up to 2000 dims; brute-force up to 16384.
+        Use max_vector_dimension (env: MAX_VECTOR_DIMENSION) to override for
+        pgvector deployments that don't need the HNSW index.
+        """
+        if self.resolved_storage_backend == "sqlite":
+            return 65536  # No practical limit for SQLite JSON storage
+        return self.max_vector_dimension
     
     # Model storage
     model_storage_path: str = Field(

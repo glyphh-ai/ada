@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "glyphh"
-version = "0.6.0"
+version = "0.6.1"
 description = "Hyperdimensional Computing SDK and Runtime"
 readme = "README.md"
 license = {text = "Proprietary"}
@@ -43,6 +43,7 @@ runtime = [
     "asyncpg>=0.28.0",
     "pgvector>=0.2.0",
     "alembic>=1.12.0",
+    "aiosqlite>=0.19.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "email-validator>=2.0.0",
@@ -55,7 +56,6 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.1.0",
     "hypothesis>=6.82.0",
-    "aiosqlite>=0.19.0",
     "black>=23.7.0",
     "isort>=5.12.0",
     "mypy>=1.5.0",

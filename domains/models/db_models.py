@@ -16,7 +16,13 @@ from uuid import uuid4
 import json as _json
 import struct as _struct
 
-from pgvector.sqlalchemy import Vector
+try:
+    from pgvector.sqlalchemy import Vector as _PgVector
+    _HAS_PGVECTOR = True
+except ImportError:
+    _PgVector = None
+    _HAS_PGVECTOR = False
+
 from sqlalchemy import (
     Column,
     DateTime,
@@ -55,8 +61,8 @@ class VectorType(TypeDecorator):
         super().__init__()
 
     def load_dialect_impl(self, dialect):
-        if dialect.name == "postgresql":
-            return dialect.type_descriptor(Vector(self.dim))
+        if dialect.name == "postgresql" and _HAS_PGVECTOR:
+            return dialect.type_descriptor(_PgVector(self.dim))
         return dialect.type_descriptor(Text())
 
     def process_bind_param(self, value, dialect):

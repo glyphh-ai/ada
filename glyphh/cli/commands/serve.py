@@ -35,11 +35,15 @@ def serve_command(host, port, reload, workers):
 
     # Check database connectivity
     db_url = os.environ.get("DATABASE_URL", "")
+    deployment_mode = os.environ.get("DEPLOYMENT_MODE", "local")
     if not db_url:
-        click.secho("  No DATABASE_URL set.", fg=theme.WARNING)
-        click.secho("  Set DATABASE_URL or run: docker compose up -d db", fg=theme.MUTED)
-        click.secho("  Example: export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/glyphh_runtime", fg=theme.TEXT_DIM)
-        sys.exit(1)
+        if deployment_mode == "local":
+            click.secho("  No DATABASE_URL set — using SQLite (glyphh_dev.db)", fg=theme.MUTED)
+        else:
+            click.secho("  No DATABASE_URL set.", fg=theme.WARNING)
+            click.secho("  Set DATABASE_URL or run: docker compose up -d db", fg=theme.MUTED)
+            click.secho("  Example: export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/glyphh_runtime", fg=theme.TEXT_DIM)
+            sys.exit(1)
 
     click.echo()
     click.secho(f"  Starting Glyphh Runtime on {host}:{port}", fg=theme.TEXT)

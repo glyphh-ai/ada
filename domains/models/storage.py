@@ -86,17 +86,17 @@ class GlyphStorage:
                 )
 
         # Validate embedding dimension against runtime max
-        max_dim = settings.max_vector_dimension
+        max_dim = settings.resolved_max_vector_dimension
         if len(embedding) > max_dim:
             raise ValidationException(
                 field="embedding",
                 reason=f"Embedding dimension {len(embedding)} exceeds runtime limit of {max_dim}"
             )
         
-        # Pad embedding to max_dim if smaller (pgvector requires fixed-size vectors)
-        if len(embedding) < max_dim:
+        # Pad embedding to max_dim only for pgvector (SQLite stores any dimension)
+        if settings.resolved_storage_backend == "pgvector" and len(embedding) < max_dim:
             embedding = list(embedding) + [0.0] * (max_dim - len(embedding))
-        
+
         if glyph_id is None:
             glyph_id = uuid4()
         
@@ -166,14 +166,14 @@ class GlyphStorage:
             values["concept_text"] = concept_text
         
         if embedding is not None:
-            max_dim = settings.max_vector_dimension
+            max_dim = settings.resolved_max_vector_dimension
             if len(embedding) > max_dim:
                 raise ValidationException(
                     field="embedding",
                     reason=f"Embedding dimension {len(embedding)} exceeds runtime limit of {max_dim}"
                 )
-            # Pad embedding to max_dim if smaller (pgvector requires fixed-size vectors)
-            if len(embedding) < max_dim:
+            # Pad embedding to max_dim only for pgvector (SQLite stores any dimension)
+            if settings.resolved_storage_backend == "pgvector" and len(embedding) < max_dim:
                 embedding = embedding + [0.0] * (max_dim - len(embedding))
             values["embedding"] = embedding
         
@@ -232,18 +232,29 @@ class GlyphStorage:
         top_k: int = 10,
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[Tuple[GlyphResponse, float]]:
-        """Find top-k most similar glyphs using pgvector, scoped to org and model."""
-        max_dim = settings.max_vector_dimension
+        """Find top-k most similar glyphs, scoped to org and model.
+
+        Uses pgvector cosine distance for PostgreSQL backends.
+        Falls back to Python cosine similarity for SQLite/non-pgvector backends.
+        """
+        max_dim = settings.resolved_max_vector_dimension
         if len(query_embedding) > max_dim:
             raise ValidationException(
                 field="query_embedding",
                 reason=f"Query embedding dimension {len(query_embedding)} exceeds runtime limit of {max_dim}"
             )
-        
-        # Pad query embedding to max_dim if smaller (pgvector requires fixed-size vectors)
-        if len(query_embedding) < max_dim:
+
+        # Pad query embedding to max_dim only for pgvector (SQLite stores any dimension)
+        if settings.resolved_storage_backend == "pgvector" and len(query_embedding) < max_dim:
             query_embedding = query_embedding + [0.0] * (max_dim - len(query_embedding))
-        
+
+        # SQLite / non-pgvector: use Python cosine similarity
+        if settings.resolved_storage_backend != "pgvector":
+            return await self._similarity_search_python(
+                org_id, model_id, query_embedding, top_k, filters
+            )
+
+        # pgvector: native cosine distance via HNSW index
         query = (
             select(
                 Glyph,
@@ -256,14 +267,14 @@ class GlyphStorage:
             .order_by(Glyph.embedding.cosine_distance(query_embedding))
             .limit(top_k)
         )
-        
+
         if filters:
             for key, value in filters.items():
                 query = query.where(Glyph.glyph_metadata[key].astext == str(value))
-        
+
         result = await self._session.execute(query)
         rows = result.all()
-        
+
         return [
             (
                 GlyphResponse(
@@ -279,6 +290,68 @@ class GlyphStorage:
             )
             for row in rows
         ]
+
+    async def _similarity_search_python(
+        self,
+        org_id: str,
+        model_id: str,
+        query_embedding: List[float],
+        top_k: int,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Tuple[GlyphResponse, float]]:
+        """Python cosine similarity fallback for SQLite and non-pgvector backends.
+
+        Loads all glyphs for (org_id, model_id) into memory and computes cosine
+        similarity with numpy. Suitable for dev mode and small datasets (<100K glyphs).
+        """
+        stmt = (
+            select(Glyph)
+            .where(
+                Glyph.org_id == org_id,
+                Glyph.model_id == model_id,
+            )
+        )
+
+        if filters:
+            for key, value in filters.items():
+                stmt = stmt.where(Glyph.glyph_metadata[key].astext == str(value))
+
+        result = await self._session.execute(stmt)
+        glyphs = result.scalars().all()
+
+        if not glyphs:
+            return []
+
+        q = np.array(query_embedding, dtype=np.float32)
+        q_norm = np.linalg.norm(q)
+        if q_norm == 0:
+            return []
+
+        scored: List[Tuple[GlyphResponse, float]] = []
+        for glyph in glyphs:
+            emb = glyph.embedding
+            if emb is None:
+                continue
+            v = np.array(emb, dtype=np.float32)
+            v_norm = np.linalg.norm(v)
+            if v_norm == 0:
+                continue
+            similarity = float(np.dot(q, v) / (q_norm * v_norm))
+            scored.append((
+                GlyphResponse(
+                    id=glyph.id,
+                    org_id=glyph.org_id,
+                    model_id=glyph.model_id,
+                    concept_text=glyph.concept_text,
+                    metadata=glyph.glyph_metadata,
+                    created_at=glyph.created_at,
+                    updated_at=glyph.updated_at,
+                ),
+                similarity,
+            ))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:top_k]
     
     async def list_glyphs(
         self,
@@ -394,17 +467,17 @@ class GlyphStorage:
         Returns:
             UUID of the created vector record
         """
-        max_dim = settings.max_vector_dimension
+        max_dim = settings.resolved_max_vector_dimension
         if len(embedding) > max_dim:
             raise ValidationException(
                 field="embedding",
                 reason=f"Embedding dimension {len(embedding)} exceeds runtime limit of {max_dim}"
             )
         
-        # Pad embedding to max_dim if smaller
-        if len(embedding) < max_dim:
+        # Pad embedding to max_dim only for pgvector (SQLite stores any dimension)
+        if settings.resolved_storage_backend == "pgvector" and len(embedding) < max_dim:
             embedding = list(embedding) + [0.0] * (max_dim - len(embedding))
-        
+
         vector_id = uuid4()
         glyph_vector = GlyphVector(
             id=vector_id,
@@ -440,18 +513,18 @@ class GlyphStorage:
         Returns:
             Number of vectors created
         """
-        max_dim = settings.max_vector_dimension
+        max_dim = settings.resolved_max_vector_dimension
         count = 0
         
         for vec_data in vectors:
             embedding = vec_data["embedding"]
             
-            # Validate and pad embedding
+            # Validate and pad embedding (padding only for pgvector)
             if len(embedding) > max_dim:
                 logger.warning(f"Skipping vector with dimension {len(embedding)} > {max_dim}")
                 continue
-            
-            if len(embedding) < max_dim:
+
+            if settings.resolved_storage_backend == "pgvector" and len(embedding) < max_dim:
                 embedding = list(embedding) + [0.0] * (max_dim - len(embedding))
             
             glyph_vector = GlyphVector(
@@ -554,17 +627,17 @@ class GlyphStorage:
         Returns:
             List of (glyph_id, path, similarity_score) tuples
         """
-        max_dim = settings.max_vector_dimension
+        max_dim = settings.resolved_max_vector_dimension
         if len(query_embedding) > max_dim:
             raise ValidationException(
                 field="query_embedding",
                 reason=f"Query embedding dimension {len(query_embedding)} exceeds runtime limit of {max_dim}"
             )
         
-        # Pad query embedding
-        if len(query_embedding) < max_dim:
+        # Pad query embedding only for pgvector (SQLite stores any dimension)
+        if settings.resolved_storage_backend == "pgvector" and len(query_embedding) < max_dim:
             query_embedding = query_embedding + [0.0] * (max_dim - len(query_embedding))
-        
+
         query = (
             select(
                 GlyphVector.glyph_id,
@@ -860,15 +933,15 @@ class GlyphStorage:
                     reason=f"Unknown format: {embedding_format}"
                 )
             
-            max_dim = settings.max_vector_dimension
+            max_dim = settings.resolved_max_vector_dimension
             if len(embedding) > max_dim:
                 raise ValidationException(
                     field="embedding",
                     reason=f"Embedding dimension {len(embedding)} exceeds runtime limit of {max_dim}"
                 )
             
-            # Pad embedding to max_dim if smaller (pgvector requires fixed-size vectors)
-            if len(embedding) < max_dim:
+            # Pad embedding to max_dim only for pgvector (SQLite stores any dimension)
+            if settings.resolved_storage_backend == "pgvector" and len(embedding) < max_dim:
                 embedding = embedding + [0.0] * (max_dim - len(embedding))
-        
+
         return concept_text, embedding, metadata

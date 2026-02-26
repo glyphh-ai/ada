@@ -11,6 +11,8 @@ from .shell import shell
 from .commands.auth import auth_group
 from .commands.model import model_group
 from .commands.catalog import catalog_group
+from .commands.dev import dev_group
+from .commands.chat import chat_command
 from .commands.serve import serve_command
 from .commands.docker import docker_group
 from .commands.token import token_group
@@ -38,6 +40,8 @@ cli.add_command(shell)
 cli.add_command(auth_group)
 cli.add_command(model_group)
 cli.add_command(catalog_group)
+cli.add_command(dev_group)
+cli.add_command(chat_command)
 cli.add_command(serve_command)
 cli.add_command(docker_group)
 cli.add_command(token_group)

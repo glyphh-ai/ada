@@ -130,15 +130,23 @@ async def require_token(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> AuthenticatedUser:
     """
-    Always require a valid API token, even in local mode.
+    Require a valid API token for data and query endpoints (listener, MCP).
 
-    Used for data and query endpoints (listener, MCP) that external
-    services like Boomi, Make.com, or agents call with API tokens.
-
-    Validates tokens by SHA-256 hash lookup in the runtime database.
-    Falls back to JWT validation if the token isn't found in the DB
-    (supports platform-issued JWTs for Studio access).
+    In local mode, bypasses token validation for zero-friction development.
+    In cloud/self-hosted mode, validates tokens by SHA-256 hash lookup in the
+    runtime database, falling back to JWT for platform-issued Studio tokens.
     """
+    settings = get_settings()
+
+    # Local mode: skip token requirement for development convenience
+    if settings.deployment_mode == "local":
+        return AuthenticatedUser(
+            user_id="local-dev-user",
+            org_id="local-dev-org",
+            role="admin",
+            plan="free",
+        )
+
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

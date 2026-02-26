@@ -543,6 +543,15 @@ class QueryService:
 
             if loaded_model and getattr(loaded_model, 'encode_query_fn', None):
                 concept = loaded_model.encode_query_fn(query)
+                # encode_query_fn may return:
+                #   1. A Concept directly
+                #   2. {"name": "...", "attributes": {...}} — standard encode_query format
+                #   3. A flat attributes dict {"action": ..., "target": ...}
+                if isinstance(concept, dict):
+                    from glyphh.core.types import Concept as _Concept
+                    name = concept.get("name", "query")
+                    attrs = concept.get("attributes", concept)
+                    concept = _Concept(name=name, attributes=attrs)
                 glyph = encoder.encode(concept)
                 return glyph.global_cortex.data.astype(float).tolist()
 
