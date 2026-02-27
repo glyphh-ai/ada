@@ -239,42 +239,10 @@ def _do_query(ctx, query_text, tool="nl_query"):
             click.secho(f"  Request failed: {exc}", fg=theme.ERROR)
 
 
-# ── CLI command ──────────────────────────────────────────────────────────────
+# ── REPL loop (shared by CLI command and shell handler) ──────────────────────
 
-@click.command("chat")
-@click.argument("text", required=False)
-@click.option("--model-id", "-m", default=None, help="Model ID (default: from manifest.yaml)")
-@click.option("--gql", is_flag=True, help="Start in GQL mode")
-@click.option("--url", default=None, help=f"Runtime URL (default: {_DEFAULT_URL})")
-@click.option("--token", default=None, help="API token for non-local deployments")
-def chat_command(text, model_id, gql, url, token):
-    """Terminal chat REPL — same MCP endpoints as the web UI.
-
-    \b
-    Works without login in local dev mode (glyphh dev .):
-      glyphh chat                        # interactive REPL
-      glyphh chat "send a slack message" # single query
-
-    \b
-    For deployed models:
-      glyphh chat --token <tok>
-      GLYPHH_TOKEN=<tok> glyphh chat
-
-    \b
-    Slash commands inside the REPL:
-      /gql     switch to GQL mode
-      /nl      switch to natural language mode
-      /quit    exit
-    """
-    ctx = _resolve_context(model_id, url, token)
-    tool = "gql_query" if gql else "nl_query"
-
-    # Single-query mode
-    if text:
-        _do_query(ctx, text, tool=tool)
-        return
-
-    # Interactive REPL
+def _run_repl(ctx, tool="nl_query"):
+    """Run the interactive chat REPL. Returns when the user exits."""
     model_label = ctx["model_id"] or "unknown"
     mode_label  = "local" if ctx["local"] else ctx["org_id"]
 
@@ -314,3 +282,57 @@ def chat_command(text, model_id, gql, url, token):
             click.secho("  → NL mode", fg=theme.TEXT_DIM)
         else:
             _do_query(ctx, line, tool=current_tool)
+
+
+# ── CLI command ──────────────────────────────────────────────────────────────
+
+@click.command("chat")
+@click.argument("text", required=False)
+@click.option("--model-id", "-m", default=None, help="Model ID (default: from manifest.yaml)")
+@click.option("--gql", is_flag=True, help="Start in GQL mode")
+@click.option("--url", default=None, help=f"Runtime URL (default: {_DEFAULT_URL})")
+@click.option("--token", default=None, help="API token for non-local deployments")
+def chat_command(text, model_id, gql, url, token):
+    """Terminal chat REPL — same MCP endpoints as the web UI.
+
+    \b
+    Works without login in local dev mode (glyphh dev .):
+      glyphh chat                        # interactive REPL
+      glyphh chat "send a slack message" # single query
+
+    \b
+    For deployed models:
+      glyphh chat --token <tok>
+      GLYPHH_TOKEN=<tok> glyphh chat
+
+    \b
+    Slash commands inside the REPL:
+      /gql     switch to GQL mode
+      /nl      switch to natural language mode
+      /quit    exit (returns to glyphh shell if running inside it)
+    """
+    ctx = _resolve_context(model_id, url, token)
+    tool = "gql_query" if gql else "nl_query"
+
+    if text:
+        _do_query(ctx, text, tool=tool)
+        return
+
+    _run_repl(ctx, tool=tool)
+
+
+# ── Handler for glyphh interactive shell ─────────────────────────────────────
+
+def handle_chat(func: str | None, args: str = ""):
+    """Route chat subcommands from the interactive shell.
+
+    Inside the glyphh shell:
+      chat                     → launch the REPL (returns to glyphh> on /quit)
+      chat "send to slack"     → single query and return
+    """
+    full_text = " ".join(p for p in [func, args] if p).strip()
+    ctx = _resolve_context()
+    if full_text:
+        _do_query(ctx, full_text)
+    else:
+        _run_repl(ctx)

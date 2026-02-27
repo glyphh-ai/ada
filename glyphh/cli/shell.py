@@ -14,6 +14,7 @@ from .commands.model import handle_model
 from .commands.catalog import handle_catalog
 from .commands.token import handle_token
 from .commands.query import handle_query
+from .commands.chat import handle_chat
 from . import theme
 
 # Try to import readline for history/completion
@@ -32,6 +33,7 @@ COMMAND_HANDLERS = {
     "catalog": handle_catalog,
     "token": handle_token,
     "query": handle_query,
+    "chat": handle_chat,
 }
 
 
@@ -176,6 +178,10 @@ def _print_help():
     click.echo()
     click.secho("  query", fg=theme.ACCENT)
     click.secho("    query <question>         Query the model", fg=theme.MUTED)
+    click.echo()
+    click.secho("  chat", fg=theme.ACCENT)
+    click.secho("    chat                     Open interactive chat REPL", fg=theme.MUTED)
+    click.secho("    chat <question>          Single query and return", fg=theme.MUTED)
     click.echo()
     click.secho("  general", fg=theme.ACCENT)
     click.secho("    clear, home             Clear screen and show banner", fg=theme.MUTED)
