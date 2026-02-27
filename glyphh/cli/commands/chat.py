@@ -132,6 +132,24 @@ def _print_result(data):
         color = getattr(theme, color_attr, theme.INFO)
         click.secho(f"  {state}", fg=color, bold=True)
 
+    # ASK state — show the question and any disambiguation options / missing slots
+    if state == "ASK":
+        content_data = (data.get("content") or [{}])[0].get("data", {})
+        ask = content_data.get("ask", {})
+        if ask:
+            question = ask.get("question") or "Please clarify your request."
+            click.secho(f"  {question}", fg=theme.WARNING)
+            missing = ask.get("missing_slots") or []
+            if missing:
+                click.secho(f"  Missing: {', '.join(missing)}", fg=theme.TEXT_DIM)
+            for opt in (ask.get("disambiguation_options") or []):
+                label = opt.get("suggestion") or opt.get("intent") or str(opt)
+                click.secho(f"    •  {label}", fg=theme.TEXT)
+        else:
+            click.secho("  Please clarify your request.", fg=theme.WARNING)
+        click.echo()
+        return
+
     if not ft:
         click.secho("  No result.", fg=theme.TEXT_DIM)
         click.echo()

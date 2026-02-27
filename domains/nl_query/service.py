@@ -216,6 +216,50 @@ class NLQueryResult:
         return result
 
 
+# ---------------------------------------------------------------------------
+# FactTree score helpers
+# ---------------------------------------------------------------------------
+
+def _extract_top_scores(fact_tree) -> list[float]:
+    """Return similarity final_scores sorted descending from a FactTree."""
+    try:
+        ft_json = fact_tree.to_json() if hasattr(fact_tree, "to_json") else fact_tree
+        for child in ft_json.get("children", []):
+            if child.get("description") == "results":
+                scores = []
+                for match in child.get("children", []):
+                    v = match.get("value") or {}
+                    s = v.get("final_score")
+                    if s is not None:
+                        scores.append(float(s))
+                return sorted(scores, reverse=True)
+    except Exception:
+        pass
+    return []
+
+
+def _extract_top_matches(fact_tree, n: int = 3) -> list[dict]:
+    """Return top-n {concept_text, score} dicts from a FactTree."""
+    try:
+        ft_json = fact_tree.to_json() if hasattr(fact_tree, "to_json") else fact_tree
+        for child in ft_json.get("children", []):
+            if child.get("description") == "results":
+                matches = []
+                for match in child.get("children", []):
+                    v = match.get("value") or {}
+                    s = v.get("final_score")
+                    if s is not None:
+                        matches.append({
+                            "concept_text": v.get("concept_text", ""),
+                            "score": float(s),
+                        })
+                matches.sort(key=lambda x: x["score"], reverse=True)
+                return matches[:n]
+    except Exception:
+        pass
+    return []
+
+
 class NLQueryService:
     """
     Natural Language Query Service.
@@ -236,6 +280,8 @@ class NLQueryService:
         confidence_threshold: float = 0.85,
         schema_index: Optional['SchemaIndex'] = None,
         auto_schema_matcher: Optional['AutoSchemaMatcher'] = None,
+        assess_query_fn: Optional[Any] = None,
+        min_gap: float = 0.03,
     ):
         """
         Initialize the NL Query Service.
@@ -245,11 +291,20 @@ class NLQueryService:
             confidence_threshold: Minimum confidence threshold
             schema_index: Optional SchemaIndex for auto-schema matching
             auto_schema_matcher: Optional AutoSchemaMatcher for auto-schema matching
+            assess_query_fn: Optional callable(query: str) -> dict from the model's
+                             encoder.py.  Returns {complete, missing, reason, ...}.
+                             When provided, incomplete queries return ASK before
+                             the similarity search runs.
+            min_gap: Minimum score gap between top-1 and top-2 similarity results
+                     for a DONE response.  Queries where all top results cluster
+                     within this band return ASK for disambiguation.
         """
         self.query_service = query_service
         self.confidence_threshold = confidence_threshold
         self._schema_index = schema_index
         self._auto_schema_matcher = auto_schema_matcher
+        self._assess_query_fn = assess_query_fn
+        self._min_gap = min_gap
     
     def set_schema_index(self, schema_index: 'SchemaIndex') -> None:
         """
@@ -309,6 +364,34 @@ class NLQueryService:
             except Exception as e:
                 logger.warning(f"Auto-schema matching failed: {e}, falling back to similarity search")
 
+        # Step 0b: Semantic slot check — fast, runs before HDC encoding.
+        # The model's assess_query_fn returns {complete, missing, reason, ...}.
+        # An incomplete query (both action and domain unresolved) returns ASK
+        # immediately so the user can refine before we spend time on similarity.
+        if self._assess_query_fn is not None:
+            try:
+                assessment = self._assess_query_fn(query)
+                if not assessment.get("complete", True):
+                    elapsed_ms = (time.time() - start_time) * 1000
+                    missing = assessment.get("missing", [])
+                    reason  = assessment.get("reason", "Please clarify your request.")
+                    logger.info(
+                        f"Query incomplete — missing slots {missing}: '{query}'"
+                    )
+                    return NLQueryResult(
+                        state=ResponseState.ASK,
+                        query_type="similarity_search",
+                        match_method="direct",
+                        confidence=0.0,
+                        query_time_ms=elapsed_ms,
+                        ask=AskPayload(
+                            question=reason,
+                            missing_slots=missing,
+                        ),
+                    )
+            except Exception as e:
+                logger.warning(f"assess_query_fn failed: {e}, continuing")
+
         # Step 1: Direct similarity search — the model's encode_query_fn
         # handles NL→embedding translation
         try:
@@ -321,12 +404,40 @@ class NLQueryService:
 
             elapsed_ms = (time.time() - start_time) * 1000
 
+            # Step 1b: Gap analysis — if top results cluster within min_gap,
+            # the query is ambiguous.  Return ASK with the top candidates.
+            top_scores = _extract_top_scores(fact_tree)
+            if len(top_scores) >= 2 and (top_scores[0] - top_scores[1]) < self._min_gap:
+                top_matches = _extract_top_matches(fact_tree, n=3)
+                logger.info(
+                    f"Gap too small ({top_scores[0]:.3f} vs {top_scores[1]:.3f}) "
+                    f"for query: '{query}'"
+                )
+                return NLQueryResult(
+                    state=ResponseState.ASK,
+                    query_type="similarity_search",
+                    match_method="direct",
+                    confidence=top_scores[0],
+                    query_time_ms=elapsed_ms,
+                    ask=AskPayload(
+                        question="Your query matches multiple options. Did you mean one of these?",
+                        disambiguation_options=[
+                            {
+                                "intent": m["concept_text"],
+                                "confidence": m["score"],
+                                "suggestion": f"{m['concept_text']} ({m['score']:.0%} match)",
+                            }
+                            for m in top_matches
+                        ],
+                    ),
+                )
+
             return NLQueryResult(
                 state=ResponseState.DONE,
                 fact_tree=fact_tree,
                 query_type="similarity_search",
                 match_method="direct",
-                confidence=1.0,
+                confidence=top_scores[0] if top_scores else 1.0,
                 translated_query={"operation": "similarity_search", "query": query} if debug else None,
                 query_time_ms=elapsed_ms,
             )

@@ -308,10 +308,28 @@ class MCPServer:
                 message="Processing query..."
             )
 
-        # Create NL service — deterministic, no LLM fallback
+        # Create NL service — deterministic, no LLM fallback.
+        # Pass the model's assess_query_fn (if any) for semantic slot checking,
+        # and min_gap from config for gap-based disambiguation.
+        min_gap = 0.03  # default; overridden by model's disambiguation.min_gap
+        try:
+            import yaml
+            cfg_path = None
+            if loaded_model.model_path:
+                from pathlib import Path as _Path
+                mp = _Path(loaded_model.model_path)
+                cfg_path = (mp if mp.is_dir() else mp.parent) / "config.yaml"
+            if cfg_path and cfg_path.exists():
+                _cfg = yaml.safe_load(cfg_path.read_text()) or {}
+                min_gap = _cfg.get("disambiguation", {}).get("min_gap", min_gap)
+        except Exception:
+            pass
+
         nl_service = NLQueryService(
             query_service=self._query_service,
             confidence_threshold=0.85,
+            assess_query_fn=getattr(loaded_model, "assess_query_fn", None),
+            min_gap=min_gap,
         )
 
         if progress_handler and progress_token:

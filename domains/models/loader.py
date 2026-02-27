@@ -55,6 +55,7 @@ class LoadedModel:
     has_build_script: bool = False
     encode_query_fn: Any = None  # callable(query: str) -> Concept
     entry_to_record_fn: Any = None  # callable(entry: dict) -> dict
+    assess_query_fn: Any = None  # callable(query: str) -> dict (completeness check)
     source: str = "core"  # "core" or "custom"
     exemplar_count: int = 0
 
@@ -102,23 +103,23 @@ def load_manifest(model_dir: Path) -> ModelManifest:
         return ModelManifest(model_id=model_id, name=model_id)
 
 
-def load_encoder_config(model_dir: Path) -> tuple[Any, bool, Any, Any]:
+def load_encoder_config(model_dir: Path) -> tuple[Any, bool, Any, Any, Any]:
     """Load encoder config from a model directory.
 
-    Returns (encoder_config, is_custom, encode_query_fn, entry_to_record_fn).
+    Returns (encoder_config, is_custom, encode_query_fn, entry_to_record_fn, assess_query_fn).
     If encoder.py exists, imports ENCODER_CONFIG and optional functions.
     Otherwise returns (None, False, None, None).
     """
     encoder_path = model_dir / "encoder.py"
     if not encoder_path.exists():
-        return None, False, None, None
+        return None, False, None, None, None
 
     try:
         spec = importlib.util.spec_from_file_location(
             f"model_encoder_{model_dir.name}", encoder_path
         )
         if spec is None or spec.loader is None:
-            return None, False, None, None
+            return None, False, None, None, None
 
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -130,9 +131,10 @@ def load_encoder_config(model_dir: Path) -> tuple[Any, bool, Any, Any]:
 
         encode_query_fn = getattr(module, "encode_query", None)
         entry_to_record_fn = getattr(module, "entry_to_record", None)
+        assess_query_fn = getattr(module, "assess_query", None)
 
         logger.info(f"Loaded custom encoder for {model_dir.name}")
-        return encoder_config, True, encode_query_fn, entry_to_record_fn
+        return encoder_config, True, encode_query_fn, entry_to_record_fn, assess_query_fn
 
     except Exception as e:
         logger.warning(f"Failed to load encoder.py for {model_dir.name}: {e}")
@@ -156,7 +158,7 @@ def count_exemplars(model_dir: Path) -> int:
 def load_model(model_dir: Path, source: str = "core") -> LoadedModel:
     """Load a model from its directory."""
     manifest = load_manifest(model_dir)
-    encoder_config, has_custom, encode_query_fn, entry_to_record_fn = load_encoder_config(model_dir)
+    encoder_config, has_custom, encode_query_fn, entry_to_record_fn, assess_query_fn = load_encoder_config(model_dir)
     glyphh_files = list(model_dir.glob("*.glyphh"))
 
     return LoadedModel(
@@ -169,6 +171,7 @@ def load_model(model_dir: Path, source: str = "core") -> LoadedModel:
         has_build_script=(model_dir / "build.py").exists(),
         encode_query_fn=encode_query_fn,
         entry_to_record_fn=entry_to_record_fn,
+        assess_query_fn=assess_query_fn,
         source=source,
         exemplar_count=count_exemplars(model_dir),
     )

@@ -63,6 +63,7 @@ class LoadedModel:
         short_description: str,
         long_description: str,
         encode_query_fn: Optional[Any] = None,
+        assess_query_fn: Optional[Any] = None,
     ):
         self.org_id = org_id
         self.model_id = model_id
@@ -76,6 +77,7 @@ class LoadedModel:
         self.short_description = short_description
         self.long_description = long_description
         self.encode_query_fn = encode_query_fn
+        self.assess_query_fn = assess_query_fn
 
 
 class ReEncodeJob:
@@ -197,6 +199,7 @@ class ModelManager:
         short_description = getattr(sdk_model, 'short_description', '') or ''
         long_description = getattr(sdk_model, 'long_description', '') or ''
         
+        _enc_fn, _assess_fn = self._load_model_fns(str(path))
         loaded_model = LoadedModel(
             org_id=org_id,
             model_id=model_id,
@@ -208,7 +211,8 @@ class ModelManager:
             meta_name=meta_name,
             short_description=short_description,
             long_description=long_description,
-            encode_query_fn=self._load_encode_query_fn(str(path)),
+            encode_query_fn=_enc_fn,
+            assess_query_fn=_assess_fn,
         )
         
         # Serialize encoder config for DB storage
@@ -386,6 +390,7 @@ class ModelManager:
             short_description=short_description,
             long_description="",
             encode_query_fn=loaded.encode_query_fn,
+            assess_query_fn=loaded.assess_query_fn,
         )
 
         # Serialize encoder config for DB storage
@@ -562,10 +567,11 @@ class ModelManager:
             encoder = adapter.create_encoder(encoder_config)
             similarity_calculator = adapter.create_similarity_calculator()
             
-            # Try to load encode_query_fn from the model directory on disk
+            # Try to load model fns from the model directory on disk
             encode_query_fn = None
+            assess_query_fn = None
             if db_config.model_path:
-                encode_query_fn = self._load_encode_query_fn(db_config.model_path)
+                encode_query_fn, assess_query_fn = self._load_model_fns(db_config.model_path)
             
             class RestoredModel:
                 """Minimal model proxy for DB-restored models."""
@@ -592,6 +598,7 @@ class ModelManager:
                 short_description=db_config.short_description or "",
                 long_description=db_config.long_description or "",
                 encode_query_fn=encode_query_fn,
+                assess_query_fn=assess_query_fn,
             )
             
             self._models[(org_id, model_id)] = loaded_model
@@ -611,13 +618,12 @@ class ModelManager:
             return None
     
     @staticmethod
-    def _load_encode_query_fn(model_path: str) -> Optional[Any]:
-        """Load encode_query_fn from a model directory's encoder.py.
+    def _load_model_fns(model_path: str) -> tuple[Optional[Any], Optional[Any]]:
+        """Load encode_query_fn and assess_query_fn from a model directory's encoder.py.
 
-        Used by _load_from_db to restore the custom query encoder when
-        lazy-loading a model that was registered on a previous startup.
-        Returns None silently if the file doesn't exist or has no
-        encode_query function.
+        Used by load_model and _load_from_db to restore custom query functions when
+        lazy-loading a model. Returns (None, None) silently if the file doesn't exist
+        or has no matching functions.
         """
         try:
             from domains.models.loader import load_encoder_config
@@ -626,12 +632,18 @@ class ModelManager:
             if model_dir.is_file():
                 model_dir = model_dir.parent
             if not model_dir.is_dir():
-                return None
-            _, _, encode_query_fn, _ = load_encoder_config(model_dir)
-            return encode_query_fn
+                return None, None
+            _, _, encode_query_fn, _, assess_query_fn = load_encoder_config(model_dir)
+            return encode_query_fn, assess_query_fn
         except Exception as e:
-            logger.debug(f"Could not load encode_query_fn from {model_path}: {e}")
-            return None
+            logger.debug(f"Could not load model fns from {model_path}: {e}")
+            return None, None
+
+    @staticmethod
+    def _load_encode_query_fn(model_path: str) -> Optional[Any]:
+        """Backward-compat wrapper — returns only encode_query_fn."""
+        encode_query_fn, _ = ModelManager._load_model_fns(model_path)
+        return encode_query_fn
     
     async def list_models(self) -> List[ModelInfoResponse]:
         """List all currently loaded models."""
