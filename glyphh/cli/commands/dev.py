@@ -48,24 +48,6 @@ def _read_manifest(model_dir: Path) -> dict:
         return {}
 
 
-def _find_runtime_root() -> Path | None:
-    """Find the runtime server root — must contain both main.py and domains/.
-
-    Searching upward from __file__ (glyphh/cli/commands/dev.py) would find
-    glyphh/cli/main.py first, which is the CLI entry point, not the server.
-    Requiring domains/ as a co-marker uniquely identifies the server root.
-    """
-    current = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (current / "main.py").exists() and (current / "domains").is_dir():
-            return current
-        current = current.parent
-    cwd = Path.cwd()
-    if (cwd / "main.py").exists() and (cwd / "domains").is_dir():
-        return cwd
-    return None
-
-
 def _run_server(path: str, port: int, no_reload: bool, daemon: bool) -> None:
     """Core logic: locate model, set env vars, start uvicorn."""
     # ── Check runtime dependencies ─────────────────────────────────────────
@@ -75,7 +57,7 @@ def _run_server(path: str, port: int, no_reload: bool, daemon: bool) -> None:
         import sqlalchemy  # noqa: F401
     except ImportError:
         click.secho("  Runtime dependencies not installed.", fg=theme.ERROR)
-        click.secho("  Run: pip install glyphh[runtime]", fg=theme.ACCENT)
+        click.secho("  Run: pip install 'glyphh[runtime]'", fg=theme.ACCENT)
         sys.exit(1)
 
     # ── Find the model directory ───────────────────────────────────────────
@@ -178,19 +160,6 @@ def _run_server(path: str, port: int, no_reload: bool, daemon: bool) -> None:
             click.secho(f"    {line}", fg=theme.INFO)
         click.echo()
 
-    # ── Find the runtime root (where main.py lives) ────────────────────────
-    runtime_root = _find_runtime_root()
-    if runtime_root:
-        sys.path.insert(0, str(runtime_root))
-        existing = os.environ.get("PYTHONPATH", "")
-        os.environ["PYTHONPATH"] = f"{runtime_root}:{existing}" if existing else str(runtime_root)
-    else:
-        click.secho(
-            "  Warning: could not locate runtime root (main.py + domains/). "
-            "Server may fail to start.",
-            fg=theme.WARNING,
-        )
-
     # ── Daemon mode ────────────────────────────────────────────────────────
     if daemon:
         _start_daemon(port, no_reload)
@@ -200,7 +169,7 @@ def _run_server(path: str, port: int, no_reload: bool, daemon: bool) -> None:
     import uvicorn
 
     uvicorn.run(
-        "main:app",
+        "glyphh.server:app",
         host="0.0.0.0",
         port=port,
         reload=not no_reload,
@@ -232,7 +201,7 @@ def _start_daemon(port: int, no_reload: bool) -> None:
     # Build the uvicorn command using the same Python interpreter
     cmd = [
         sys.executable, "-m", "uvicorn",
-        "main:app",
+        "glyphh.server:app",
         "--host", "0.0.0.0",
         "--port", str(port),
         "--workers", "1",
