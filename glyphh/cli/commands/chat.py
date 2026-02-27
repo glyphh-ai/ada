@@ -156,11 +156,11 @@ def _print_result(data):
             concept = v.get("concept_text", "—")
             score   = v.get("final_score")
             if score is not None:
-                pct    = int(score * 100)
+                pct    = score * 100
                 filled = round(score * 12)
                 bar    = "█" * filled + "░" * (12 - filled)
                 click.echo(
-                    click.style(f"  {pct:>3}%  ", fg=theme.ACCENT, bold=True)
+                    click.style(f"  {pct:>5.1f}%  ", fg=theme.ACCENT, bold=True)
                     + click.style(f"[{bar}]  ", fg=theme.TEXT_DIM)
                     + click.style(concept, fg=theme.TEXT)
                 )

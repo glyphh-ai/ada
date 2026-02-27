@@ -323,7 +323,17 @@ class QueryService:
             scored_results.sort(
                 key=lambda x: (-x.final_score, str(x.glyph.id)),
             )
-            scored_results = scored_results[:request.top_k]
+
+            # Deduplicate by concept_text — keep only the highest-scoring
+            # exemplar per concept (tools/items can have multiple exemplars)
+            seen: set[str] = set()
+            deduped: list[ScoredGlyph] = []
+            for sr in scored_results:
+                key = sr.glyph.concept_text
+                if key not in seen:
+                    seen.add(key)
+                    deduped.append(sr)
+            scored_results = deduped[:request.top_k]
         
         query_time_ms = (time.time() - start_time) * 1000
         
