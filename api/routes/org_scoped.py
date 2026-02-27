@@ -82,7 +82,7 @@ async def get_mcp_server(
     model_id: str,
 ) -> MCPServer:
     """Get MCP server for org/model."""
-    from main import model_manager
+    from glyphh.server import model_manager
     from infrastructure.database import async_session_maker
 
     if model_manager is None:
@@ -100,8 +100,8 @@ class UndeployRequest(BaseModel):
 
 
 async def get_model_manager():
-    """Get the ModelManager instance from main."""
-    from main import model_manager
+    """Get the ModelManager instance from glyphh.server."""
+    from glyphh.server import model_manager
 
     if model_manager is None:
         raise HTTPException(status_code=503, detail="Model manager not initialized")
@@ -162,7 +162,7 @@ async def readiness_check(
     current_user: AuthenticatedUser = Depends(validate_org_access),
 ) -> Dict[str, Any]:
     """Check if a model is deployed and ready to serve queries."""
-    from main import model_manager
+    from glyphh.server import model_manager
 
     if model_manager is None:
         return {"ready": False, "status": "model_manager_not_initialized", "model_id": model_id}

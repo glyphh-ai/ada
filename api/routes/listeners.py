@@ -45,7 +45,7 @@ def get_async_listener_service() -> AsyncListenerService:
     """Get or create AsyncListenerService for async data loading."""
     global _async_listener_service
     if _async_listener_service is None:
-        from main import model_manager
+        from glyphh.server import model_manager
         from infrastructure.database import async_session_maker
 
         async def get_encoder(org_id: str, model_id: str):
