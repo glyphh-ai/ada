@@ -105,11 +105,32 @@ def _match_nodes(ft):
     return []
 
 
+_STATE_COLOR = {
+    "DONE":          "SUCCESS",
+    "ASK":           "WARNING",
+    "BLOCKED":       "WARNING",
+    "AUTH_REQUIRED": "ERROR",
+    "ERROR":         "ERROR",
+}
+
+
 def _print_result(data):
     """Render a MCP response to the terminal using the same logic as the web UI."""
     ft = data.get("result")  # fact_tree JSON
 
+    # State lives in content[0].data.state (NL responses)
+    state = (
+        (data.get("content") or [{}])[0].get("data", {}).get("state")
+        or ("DONE" if ft else None)
+    )
+
     click.echo()
+
+    # State badge
+    if state:
+        color_attr = _STATE_COLOR.get(state, "INFO")
+        color = getattr(theme, color_attr, theme.INFO)
+        click.secho(f"  {state}", fg=color, bold=True)
 
     if not ft:
         click.secho("  No result.", fg=theme.TEXT_DIM)

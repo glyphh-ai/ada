@@ -590,6 +590,12 @@ summary::-webkit-details-marker{{display:none}}
 details[open] .summary-arrow{{transform:rotate(90deg)}}
 .summary-label{{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 .summary-count{{font-size:10px;color:var(--text-muted);flex-shrink:0}}
+.state-badge{{font-size:9px;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:4px;flex-shrink:0;text-transform:uppercase}}
+.state-DONE{{background:rgba(34,197,94,.15);color:#4ade80;border:1px solid rgba(34,197,94,.25)}}
+.state-ASK{{background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.25)}}
+.state-BLOCKED{{background:rgba(249,115,22,.15);color:#fb923c;border:1px solid rgba(249,115,22,.25)}}
+.state-AUTH_REQUIRED{{background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.25)}}
+.state-ERROR{{background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.25)}}
 .result-pre{{margin:0;padding:10px 12px;font-size:11px;line-height:1.6;color:#c4b5fd;background:rgba(0,0,0,.3);border-top:1px solid var(--border);overflow-x:auto;white-space:pre-wrap;word-break:break-all}}
 .result-pre::-webkit-scrollbar{{height:3px}}
 .result-pre::-webkit-scrollbar-thumb{{background:var(--purple);border-radius:2px}}
@@ -807,7 +813,7 @@ function resultLabel(ft) {{
   return 'view';
 }}
 
-function addResult(query, ft, tab) {{
+function addResult(query, ft, tab, state) {{
   const body = document.getElementById('results-body');
   const empty = document.getElementById('results-empty');
   if (empty) empty.style.display = 'none';
@@ -816,10 +822,13 @@ function addResult(query, ft, tab) {{
   item.className = 'result-item';
   const count = resultLabel(ft);
   const jsonStr = JSON.stringify(ft, null, 2);
+  const stateClass = state ? 'state-badge state-' + state : '';
+  const stateBadge = state ? `<span class="${{stateClass}}">${{escHtml(state)}}</span>` : '';
   item.innerHTML = `
     <details>
       <summary>
         <span class="summary-arrow">▶</span>
+        ${{stateBadge}}
         <span class="summary-label">${{escHtml(query.substring(0,60))}}${{query.length>60?'…':''}}</span>
         <span class="summary-count">${{count}}</span>
       </summary>
@@ -869,6 +878,8 @@ async function submit() {{
 
     const ft = data.result;
     const isQueryError = ft?.description === 'Query Error';
+    // State lives in content[0].data.state for NL, or synthesized for GQL
+    const state = data.content?.[0]?.data?.state || (ft ? 'DONE' : null);
 
     if (data.isError || !res.ok) {{
       const errMsg = data.error || data.detail || 'Unknown error';
@@ -888,13 +899,14 @@ async function submit() {{
       const qtype = data.query_type;
 
       let metaParts = [];
+      if (state) metaParts.push(`<span class="pill state-badge state-${{state}}">${{escHtml(state)}}</span>`);
       if (conf) metaParts.push(`<span class="conf">↑ ${{conf}}</span>`);
       if (ms) metaParts.push(`<span>${{ms}}</span>`);
       if (method && method !== 'none') metaParts.push(`<span class="pill">${{escHtml(method)}}</span>`);
       if (qtype && qtype !== 'unknown') metaParts.push(`<span class="pill">${{escHtml(qtype)}}</span>`);
 
       addMessage('assistant', summary, metaParts.join(''));
-      addResult(query, ft, currentTab);
+      addResult(query, ft, currentTab, state);
     }}
   }} catch(err) {{
     removeEl(thinking);
