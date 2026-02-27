@@ -16,6 +16,31 @@ import sys
 
 import click
 
+# ── Readline history (optional — graceful fallback on Windows) ────────────────
+
+_HISTORY_FILE = os.path.expanduser("~/.glyphh/chat_history")
+
+try:
+    import readline as _readline
+
+    def _setup_history() -> None:
+        os.makedirs(os.path.dirname(_HISTORY_FILE), exist_ok=True)
+        try:
+            _readline.read_history_file(_HISTORY_FILE)
+        except FileNotFoundError:
+            pass
+        _readline.set_history_length(500)
+
+    def _save_history() -> None:
+        try:
+            _readline.write_history_file(_HISTORY_FILE)
+        except OSError:
+            pass
+
+except ImportError:
+    def _setup_history() -> None: pass   # noqa: E704
+    def _save_history() -> None: pass    # noqa: E704
+
 from .. import theme
 
 
@@ -276,21 +301,24 @@ def _run_repl(ctx, tool="nl_query"):
     click.echo()
 
     current_tool = tool
+    _setup_history()
 
     while True:
         mode_indicator = click.style("GQL" if current_tool == "gql_query" else " NL", fg=theme.ACCENT)
         prompt = click.style("  [", fg=theme.TEXT_DIM) + mode_indicator + click.style("] › ", fg=theme.TEXT_DIM)
 
         try:
-            line = click.prompt(prompt, prompt_suffix="", default="", show_default=False).strip()
+            line = input(prompt).strip()
         except (EOFError, KeyboardInterrupt):
             click.echo()
+            _save_history()
             break
 
         if not line:
             continue
 
         if line.lower() in ("/quit", "/exit", "/q"):
+            _save_history()
             break
         elif line.lower() == "/gql":
             current_tool = "gql_query"
