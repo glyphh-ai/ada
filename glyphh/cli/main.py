@@ -7,7 +7,7 @@ Supports both:
 """
 
 import click
-from .shell import shell
+from .banner import print_banner
 from .commands.auth import auth_group
 from .commands.model import model_group
 from .commands.catalog import catalog_group
@@ -25,18 +25,12 @@ from importlib.metadata import version as _pkg_version
 @click.version_option(version=_pkg_version("glyphh"), prog_name="glyphh")
 @click.pass_context
 def cli(ctx):
-    """
-    Glyphh CLI
-
-    \b
-    Run 'glyphh' to start an interactive shell.
-    Run 'glyphh <category> <command>' for direct execution.
-    """
+    """Glyphh — deterministic AI runtime. Run 'glyphh <command> --help' for details."""
     if ctx.invoked_subcommand is None:
-        ctx.invoke(shell)
+        print_banner()
+        click.echo(ctx.get_help())
 
 
-cli.add_command(shell)
 cli.add_command(auth_group)
 cli.add_command(model_group)
 cli.add_command(catalog_group)

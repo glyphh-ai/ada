@@ -4,11 +4,88 @@ Runtime configuration management using Pydantic settings.
 All configuration is read from environment variables with sensible defaults.
 """
 
+from dataclasses import dataclass
 from functools import lru_cache
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
+
+
+@dataclass
+class TierConfig:
+    """Resolved plan limits for the authenticated user/deployment."""
+
+    tier: str                   # "free" | "developer" | "team" | "enterprise"
+    max_models: int             # -1 = unlimited
+    max_glyphs_per_model: int   # -1 = unlimited
+    rate_limit_per_minute: int  # -1 = unlimited
+    allow_commercial: bool
+    allow_external_db: bool
+
+    @classmethod
+    def free(cls) -> "TierConfig":
+        return cls(
+            tier="free", max_models=3, max_glyphs_per_model=10_000,
+            rate_limit_per_minute=60, allow_commercial=False, allow_external_db=False,
+        )
+
+    @classmethod
+    def developer(cls) -> "TierConfig":
+        return cls(
+            tier="developer", max_models=10, max_glyphs_per_model=250_000,
+            rate_limit_per_minute=300, allow_commercial=True, allow_external_db=True,
+        )
+
+    @classmethod
+    def team(cls) -> "TierConfig":
+        return cls(
+            tier="team", max_models=-1, max_glyphs_per_model=-1,
+            rate_limit_per_minute=1_000, allow_commercial=True, allow_external_db=True,
+        )
+
+    @classmethod
+    def enterprise(cls) -> "TierConfig":
+        return cls(
+            tier="enterprise", max_models=-1, max_glyphs_per_model=-1,
+            rate_limit_per_minute=-1, allow_commercial=True, allow_external_db=True,
+        )
+
+    @classmethod
+    def from_jwt_claims(cls, payload: Dict[str, Any]) -> "TierConfig":
+        """Resolve tier from JWT claims. Named tier sets the baseline; individual
+        claim overrides allow custom plans without new tier names."""
+        tier = payload.get("tier", "free")
+        if tier == "developer":
+            base = cls.developer()
+        elif tier == "team":
+            base = cls.team()
+        elif tier == "enterprise":
+            base = cls.enterprise()
+        else:
+            base = cls.free()
+        return cls(
+            tier=base.tier,
+            max_models=payload.get("max_models", base.max_models),
+            max_glyphs_per_model=payload.get("max_glyphs_per_model", base.max_glyphs_per_model),
+            rate_limit_per_minute=payload.get("rate_limit_per_minute", base.rate_limit_per_minute),
+            allow_commercial=payload.get("allow_commercial", base.allow_commercial),
+            allow_external_db=payload.get("allow_external_db", base.allow_external_db),
+        )
+
+    def check_model_limit(self, current_count: int) -> bool:
+        """True if another model can be created."""
+        return self.max_models == -1 or current_count < self.max_models
+
+    def check_glyph_limit(self, current_count: int) -> bool:
+        """True if another glyph can be written."""
+        return self.max_glyphs_per_model == -1 or current_count < self.max_glyphs_per_model
+
+    def glyph_warning_threshold(self) -> Optional[int]:
+        """Return the 90% warning count, or None if unlimited."""
+        if self.max_glyphs_per_model == -1:
+            return None
+        return int(self.max_glyphs_per_model * 0.9)
 
 
 class Settings(BaseSettings):
@@ -72,20 +149,6 @@ class Settings(BaseSettings):
         description="JWT signing key (required for self-hosted/cloud)"
     )
     jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
-    
-    # Licensing
-    license_key: Optional[str] = Field(
-        default=None,
-        description="License key for self-hosted deployments"
-    )
-    platform_api_url: str = Field(
-        default="https://platform.glyphh.com/api",
-        description="Platform API URL for license validation"
-    )
-    license_grace_period_days: int = Field(
-        default=7,
-        description="Grace period in days when license validation fails"
-    )
     
     # NL Query (enabled by default for studio chat functionality)
     enable_nl_query: bool = Field(
@@ -223,7 +286,4 @@ def validate_settings() -> None:
                 f"JWT_SECRET_KEY is required for {settings.deployment_mode} deployment mode"
             )
         
-        if settings.deployment_mode == "self-hosted" and not settings.license_key:
-            raise ValueError(
-                "LICENSE_KEY is required for self-hosted deployment mode"
-            )
+        # self-hosted: tier enforced via JWT claims at request time, no license key needed

@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domains.models.db_models import Token
-from infrastructure.config import get_settings
+from infrastructure.config import TierConfig, get_settings
 from shared.exceptions import (
     AuthenticationException,
     AuthorizationException,
@@ -37,12 +37,13 @@ class Permission(str, Enum):
 
 @dataclass
 class User:
-    """Authenticated user with org-scoped permissions."""
+    """Authenticated user with org-scoped permissions and resolved tier."""
     user_id: str
     org_permissions: Dict[str, Set[Permission]] = field(default_factory=dict)  # org_id -> permissions
     org_id: Optional[str] = None
     email: Optional[str] = None
     token_type: str = "jwt"  # jwt or webhook
+    tier: TierConfig = field(default_factory=TierConfig.free)
     
     def has_permission(self, org_id: str, permission: Permission) -> bool:
         """Check if user has permission for org."""
@@ -131,6 +132,7 @@ class AuthService:
             org_id=payload.get("org_id"),
             email=payload.get("email"),
             token_type="jwt",
+            tier=TierConfig.from_jwt_claims(payload),
         )
     
     async def _validate_webhook_token(self, token: str) -> User:

@@ -309,7 +309,7 @@ def chat_command(text, model_id, gql, url, token):
     Slash commands inside the REPL:
       /gql     switch to GQL mode
       /nl      switch to natural language mode
-      /quit    exit (returns to glyphh shell if running inside it)
+      /quit    exit
     """
     ctx = _resolve_context(model_id, url, token)
     tool = "gql_query" if gql else "nl_query"
@@ -319,20 +319,3 @@ def chat_command(text, model_id, gql, url, token):
         return
 
     _run_repl(ctx, tool=tool)
-
-
-# ── Handler for glyphh interactive shell ─────────────────────────────────────
-
-def handle_chat(func: str | None, args: str = ""):
-    """Route chat subcommands from the interactive shell.
-
-    Inside the glyphh shell:
-      chat                     → launch the REPL (returns to glyphh> on /quit)
-      chat "send to slack"     → single query and return
-    """
-    full_text = " ".join(p for p in [func, args] if p).strip()
-    ctx = _resolve_context()
-    if full_text:
-        _do_query(ctx, full_text)
-    else:
-        _run_repl(ctx)
