@@ -93,6 +93,9 @@ from .temporal import (
 
 from .model import GlyphhModel
 
+# Conversation state — HDC pathway encoding for sequential decision-making
+from .state import ConversationState, Pathway, PathwayLibrary
+
 from .visualization import (
     visualize_similarity_graph,
     create_similarity_matrix,
@@ -114,7 +117,7 @@ from .gql import (
     PredictionError,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.7.0"
 
 __all__ = [
     # Core types (runtime)
@@ -165,6 +168,10 @@ __all__ = [
     "TrendStatistics",
     # Model Packaging
     "GlyphhModel",
+    # Conversation State (HDC pathway encoding)
+    "ConversationState",
+    "Pathway",
+    "PathwayLibrary",
     # Visualization
     "visualize_similarity_graph",
     "create_similarity_matrix",
