@@ -94,7 +94,7 @@ from .temporal import (
 from .model import GlyphhModel
 
 # Conversation state — HDC pathway encoding for sequential decision-making
-from .state import ConversationState, Pathway, PathwayLibrary
+from .state import Centroid, ConversationState, DeductiveLayer, InductiveLayer, Pathway, PathwayLibrary, Transition
 
 from .visualization import (
     visualize_similarity_graph,
@@ -168,10 +168,14 @@ __all__ = [
     "TrendStatistics",
     # Model Packaging
     "GlyphhModel",
-    # Conversation State (HDC pathway encoding)
+    # Conversation State (HDC pathway encoding + deductive/inductive reasoning)
+    "Centroid",
     "ConversationState",
+    "DeductiveLayer",
+    "InductiveLayer",
     "Pathway",
     "PathwayLibrary",
+    "Transition",
     # Visualization
     "visualize_similarity_graph",
     "create_similarity_matrix",

@@ -1,0 +1,87 @@
+{
+  "pack": "filesystem",
+  "description": "Filesystem domain knowledge — known prerequisite transitions (deductive) and cd-needed patterns (inductive) for Unix/Linux filesystem operations.",
+
+  "transitions": [
+    {
+      "name": "location_change",
+      "directing_actions": ["mv", "cp", "mkdir", "touch"],
+      "operating_actions": ["grep", "cat", "sort", "wc", "head", "tail", "diff", "echo", "find", "ls"],
+      "prerequisite": "cd",
+      "description": "File-moving/creating actions redirect context; operating actions need cd to reach that context"
+    }
+  ],
+
+  "patterns": [
+    {
+      "label": "cd_needed",
+      "features": {"query_tokens": "grep search find file directory folder location"},
+      "description": "Search/find operations typically need correct directory context"
+    },
+    {
+      "label": "cd_needed",
+      "features": {"query_tokens": "move copy files from to another directory different location"},
+      "description": "Cross-directory file operations need navigation first"
+    },
+    {
+      "label": "cd_needed",
+      "features": {"query_tokens": "find all csv files reports documents logs"},
+      "description": "Finding files by type needs correct directory scope"
+    },
+    {
+      "label": "cd_needed",
+      "features": {"query_tokens": "grep budget analysis report search text pattern"},
+      "description": "Text search in specific files needs directory context"
+    },
+    {
+      "label": "cd_needed",
+      "features": {"query_tokens": "cat read display show contents file in directory"},
+      "description": "Reading files in a different directory needs cd"
+    },
+    {
+      "label": "cd_needed",
+      "features": {"query_tokens": "diff compare files between directories two locations"},
+      "description": "Cross-directory diff operations need navigation"
+    },
+    {
+      "label": "cd_needed",
+      "features": {"query_tokens": "create touch make new file in directory folder"},
+      "description": "Creating files in a specific location needs cd"
+    },
+    {
+      "label": "cd_needed",
+      "features": {"query_tokens": "move rename file to different path location"},
+      "description": "Renaming/moving to different path needs navigation"
+    },
+    {
+      "label": "cd_not_needed",
+      "features": {"query_tokens": "sort output results file current here"},
+      "description": "Sorting operates on piped/current data"
+    },
+    {
+      "label": "cd_not_needed",
+      "features": {"query_tokens": "echo print output text string hello"},
+      "description": "Echo/print operations are location-independent"
+    },
+    {
+      "label": "cd_not_needed",
+      "features": {"query_tokens": "count lines words characters file wc"},
+      "description": "Word count operates on current/piped file"
+    },
+    {
+      "label": "cd_not_needed",
+      "features": {"query_tokens": "list show display current directory files here ls"},
+      "description": "Listing current directory doesn't need cd"
+    },
+    {
+      "label": "cd_not_needed",
+      "features": {"query_tokens": "head tail first last lines of file"},
+      "description": "Head/tail on a known file doesn't need cd"
+    },
+    {
+      "label": "cd_not_needed",
+      "features": {"query_tokens": "pwd working directory where am current path"},
+      "description": "Print working directory is location-independent"
+    }
+  ]
+}
