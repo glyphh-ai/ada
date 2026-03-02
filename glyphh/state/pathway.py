@@ -178,7 +178,7 @@ class PathwayLibrary:
         """Encode an action sequence and store it as a named pattern.
 
         Args:
-            name:           Unique pattern name, e.g. "navigate_then_grep".
+            name:           Unique pattern name, e.g. "setup_then_execute".
             action_vectors: Ordered list of bipolar action vectors.
             strength:       Initial strength (default 1.0).
         """

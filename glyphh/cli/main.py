@@ -17,6 +17,7 @@ from .commands.serve import serve_command
 from .commands.docker import docker_group
 from .commands.token import token_group
 from .commands.query import query_command
+from .commands.setup import setup_command
 
 
 from importlib.metadata import version as _pkg_version
@@ -40,6 +41,7 @@ cli.add_command(serve_command)
 cli.add_command(docker_group)
 cli.add_command(token_group)
 cli.add_command(query_command)
+cli.add_command(setup_command)
 
 
 if __name__ == "__main__":

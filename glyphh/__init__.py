@@ -69,17 +69,6 @@ from .encoder import Encoder
 from .encoder.intent import IntentEncoder, IntentPattern, IntentMatch
 from .encoder.default_intents import DEFAULT_INTENT_PATTERNS
 
-# Intent extraction — rule-based NL parsing with HDC fallback
-from .intent import (
-    IntentExtractor,
-    VERB_CONFIG as INTENT_VERB_CONFIG,
-    NOUN_CONFIG as INTENT_NOUN_CONFIG,
-    get_extractor,
-    extract_intent,
-    extract_action,
-    extract_target,
-    infer_domain,
-)
 from .edges import EdgeGenerator
 from .similarity import SimilarityCalculator, SimilarityResult
 from .fact_tree import FactTree, FactNode, Citation
@@ -95,6 +84,12 @@ from .model import GlyphhModel
 
 # Conversation state — HDC pathway encoding for sequential decision-making
 from .state import Centroid, ConversationState, DeductiveLayer, InductiveLayer, Pathway, PathwayLibrary, Transition
+
+# Cognitive loop — HDC + LLM domain-agnostic tool calling
+from .cognitive import CognitiveLoop, DomainConfig, IdeaSpace, StepResult
+
+# Local LLM — core structural component (Qwen3-4B default)
+from .llm import LLMEngine, LLMResult
 
 from .visualization import (
     visualize_similarity_graph,
@@ -142,15 +137,6 @@ __all__ = [
     "IntentPattern",
     "IntentMatch",
     "DEFAULT_INTENT_PATTERNS",
-    # Intent Extractor (rule-based NL parsing + HDC fallback)
-    "IntentExtractor",
-    "INTENT_VERB_CONFIG",
-    "INTENT_NOUN_CONFIG",
-    "get_extractor",
-    "extract_intent",
-    "extract_action",
-    "extract_target",
-    "infer_domain",
     # Edge Generator
     "EdgeGenerator",
     # Similarity
@@ -202,6 +188,14 @@ __all__ = [
     "cosine_similarity",
     "hamming_similarity",
     "generate_symbol",
+    # Cognitive Loop (HDC + LLM domain-agnostic tool calling)
+    "CognitiveLoop",
+    "DomainConfig",
+    "IdeaSpace",
+    "StepResult",
+    # Local LLM (core structural component)
+    "LLMEngine",
+    "LLMResult",
     # GQL Exceptions
     "GQLError",
     "LexerError",

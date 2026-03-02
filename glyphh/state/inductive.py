@@ -16,9 +16,9 @@ of all episode vectors with that label. Features are encoded as role-bound
 bag-of-words, following the same pattern the SDK Encoder uses.
 
 This is domain-agnostic — the same mechanism works for:
-  - Filesystem: learn when cd is needed from query + state patterns
   - Auth: learn when login is needed from session + action patterns
   - Shopping: learn when cart-add is needed from browse + intent patterns
+  - Navigation: learn when transition is needed from query + context patterns
   - Any domain where actions correlate with observable features
 
 Load domain knowledge via packs (like IntentExtractor):
@@ -26,24 +26,22 @@ Load domain knowledge via packs (like IntentExtractor):
     from glyphh.state import InductiveLayer
 
     # With domain packs — known patterns, no training data needed:
-    inductive = InductiveLayer(dimension=10000, seed=97, packs=["filesystem"])
+    inductive = InductiveLayer(dimension=10000, seed=97, packs=["my_domain"])
 
     # Predict immediately — packs provide the domain knowledge:
     result = inductive.predict(
-        features={"query_tokens": "grep budget analysis report"},
+        features={"query_tokens": "search budget analysis report"},
     )
-    # → {"label": "cd_needed", "confidence": 0.15, "scores": {...}}
+    # -> {"label": "transition_needed", "confidence": 0.15, "scores": {...}}
 
     # Hebbian reinforcement
-    inductive.confirm(was_correct=True, label="cd_needed")
+    inductive.confirm(was_correct=True, label="transition_needed")
 
     # Or learn additional patterns at runtime:
     inductive.learn(
-        features={"query_tokens": "sort the output file"},
-        label="cd_not_needed",
+        features={"query_tokens": "sort the output"},
+        label="transition_not_needed",
     )
-
-Available packs: filesystem
 """
 
 from __future__ import annotations
@@ -199,8 +197,8 @@ class InductiveLayer:
         more examples.
 
         Args:
-            features: Feature dict (e.g. {"query": "grep budget", "state": "/workspace"}).
-            label: The label for this episode (e.g. "cd_needed").
+            features: Feature dict (e.g. {"query": "search budget", "state": "state_x"}).
+            label: The label for this episode (e.g. "transition_needed").
         """
         episode_vec = self._encode_features(features)
 
@@ -227,9 +225,9 @@ class InductiveLayer:
 
         Returns:
             {
-                "label": "cd_needed",       # Best label or None
-                "confidence": 0.15,          # Cosine × strength
-                "scores": {"cd_needed": 0.15, "cd_not_needed": 0.08},
+                "label": "transition_needed",       # Best label or None
+                "confidence": 0.15,                  # Cosine x strength
+                "scores": {"transition_needed": 0.15, "transition_not_needed": 0.08},
             }
         """
         if not self._centroids:

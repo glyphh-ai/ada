@@ -23,9 +23,9 @@ Three mismatch detection levels (checked in order):
   3. **Beam divergence**: predicted state trajectory diverges from actual (beam search)
 
 This is domain-agnostic — the same mechanism works for:
-  - Filesystem: CWD ≠ working target → prerequisite cd
-  - Auth: unauthenticated ≠ requires auth → prerequisite authenticate
-  - Shopping: no cart ≠ wants to checkout → prerequisite add_to_cart
+  - Auth: unauthenticated != requires auth -> prerequisite authenticate
+  - Shopping: no cart != wants to checkout -> prerequisite add_to_cart
+  - Navigation: state_x != target state_y -> prerequisite transition
   - Any domain where actions have implicit prerequisites
 
 Load domain knowledge via packs (like IntentExtractor):
@@ -33,20 +33,20 @@ Load domain knowledge via packs (like IntentExtractor):
     from glyphh.state import DeductiveLayer
 
     # With domain packs — transitions pre-loaded:
-    deductive = DeductiveLayer(dimension=10000, seed=89, packs=["filesystem"])
+    deductive = DeductiveLayer(dimension=10000, seed=89, packs=["my_domain"])
 
     # Observe + deduce — transitions are already registered from pack:
-    deductive.observe(state="/home", actions=["mv"], targets=["/tmp"])
-    result = deductive.deduce(query="grep for the file", current_state="/home")
-    # → {"prerequisites": ["cd"], "confidence": 0.85, "target": "/tmp", ...}
+    deductive.observe(state="state_x", actions=["move"], targets=["state_y"])
+    result = deductive.deduce(query="search the items", current_state="state_x")
+    # -> {"prerequisites": ["transition"], "confidence": 0.85, "target": "state_y", ...}
 
     # Temporal stagnation: state hasn't changed despite directing actions:
-    deductive = DeductiveLayer(dimension=10000, seed=89, packs=["filesystem"])
-    deductive.observe(state="/home", actions=[])
-    deductive.observe(state="/home", actions=["mkdir"], targets=["/home/temp"])
-    deductive.observe(state="/home", actions=["mv"], targets=["/home/temp"])
-    result = deductive.deduce(query="grep for the file", current_state="/home")
-    # → stagnation detected → prerequisites: ["cd"]
+    deductive = DeductiveLayer(dimension=10000, seed=89, packs=["my_domain"])
+    deductive.observe(state="state_x", actions=[])
+    deductive.observe(state="state_x", actions=["create"], targets=["state_y"])
+    deductive.observe(state="state_x", actions=["move"], targets=["state_y"])
+    result = deductive.deduce(query="search the items", current_state="state_x")
+    # -> stagnation detected -> prerequisites: ["transition"]
 
     # Or register transitions manually:
     deductive = DeductiveLayer(dimension=10000, seed=89)
@@ -56,8 +56,6 @@ Load domain knowledge via packs (like IntentExtractor):
         operating_actions=["view", "post", "edit"],
         prerequisite="authenticate",
     )
-
-Available packs: filesystem
 """
 
 from __future__ import annotations
@@ -98,7 +96,7 @@ class Transition:
 
     name: str
     vector: np.ndarray              # HDC signature of the directing→operating pattern
-    prerequisite: str               # action to inject (e.g. "cd", "authenticate")
+    prerequisite: str               # action to inject (e.g. "navigate", "authenticate")
     strength: float = 1.0           # Hebbian weight
     fire_count: int = 0             # times confirmed correct
 
@@ -158,7 +156,7 @@ class DeductiveLayer:
         # Registered action sets for pattern matching
         self._directing_actions: set[str] = set()
         self._operating_verbs: set[str] = set()
-        self._resolving_actions: set[str] = set()  # actions that resolve mismatch (e.g. cd)
+        self._resolving_actions: set[str] = set()  # actions that resolve mismatch
 
         # Temporal stagnation detection — tracks how much state changes per turn.
         # When state is unchanged despite directing actions, stagnation is high.
@@ -177,7 +175,7 @@ class DeductiveLayer:
             )
 
         # Operating action NL mapping — loaded from intent packs (same domain).
-        # Maps query words/phrases back to canonical filesystem function names
+        # Maps query words/phrases back to canonical function names
         # so the deductive layer can detect operating intent from NL queries.
         self._operating_phrases: list[tuple[str, str]] = []  # (phrase, canonical)
         self._operating_synonyms: dict[str, str] = {}  # word → canonical
@@ -193,9 +191,9 @@ class DeductiveLayer:
           1. State pack (glyphh/state/data/packs/{name}.json) — transitions
           2. Intent pack (glyphh/intent/data/packs/{name}.json) — NL synonyms
 
-        The intent pack provides the NL→function mapping: synonyms and phrases
-        for operating actions (e.g. "search in file" → grep, "show last lines"
-        → tail) so the deductive layer can detect operating intent from NL.
+        The intent pack provides the NL-to-function mapping: synonyms and phrases
+        for operating actions so the deductive layer can detect operating intent
+        from NL queries.
         """
         packs_dir = _DATA_DIR / "packs"
         available = [p.stem for p in packs_dir.glob("*.json")] if packs_dir.exists() else []
@@ -230,8 +228,8 @@ class DeductiveLayer:
 
         Maps the intent pack's synonym/phrase definitions back to the
         operating action function names registered via transitions. This
-        lets the deductive layer recognise NL queries like "investigate
-        within log.txt" as implying an operating action (grep).
+        lets the deductive layer recognise NL queries as implying an
+        operating action from the registered vocabulary.
 
         Phrase matching (multi-word) is checked first; single-word
         synonyms serve as fallback.
@@ -295,9 +293,9 @@ class DeductiveLayer:
 
         Args:
             name: Unique name for this transition.
-            directing_actions: Actions that redirect state (e.g. mv, cp, mkdir).
-            operating_actions: Actions that follow and need the new state (e.g. grep, cat).
-            prerequisite: Function to inject when mismatch detected (e.g. cd).
+            directing_actions: Actions that redirect state (e.g. move, copy, create).
+            operating_actions: Actions that follow and need the new state (e.g. read, search).
+            prerequisite: Function to inject when mismatch detected (e.g. navigate, authenticate).
             strength: Initial Hebbian weight.
         """
         directing_vecs = [self._action_vec(a) for a in sorted(directing_actions)]
@@ -328,18 +326,18 @@ class DeductiveLayer:
     ):
         """ACCUMULATE: Record what happened this turn.
 
-        When a resolving action (the prerequisite itself, e.g. cd) is among
-        the observed actions, the target history is updated to the current state —
-        the mismatch has been resolved, we arrived at the destination.
+        When a resolving action (the prerequisite itself) is among the observed
+        actions, the target history is updated to the current state — the
+        mismatch has been resolved, we arrived at the destination.
 
         Also tracks temporal state deltas (how much the state changed between
         consecutive turns) and stores state as minimal Glyphs for beam prediction.
 
         Args:
-            state: Current state label after this turn (e.g. CWD path, auth level).
+            state: Current state label after this turn (e.g. context identifier).
             actions: Action names called this turn.
-            targets: States that actions were directed toward (e.g. subdirs that
-                     files were moved into, resources that were created).
+            targets: States that actions were directed toward (e.g. destination
+                     contexts, resources that were created).
         """
         new_state_vec = self._state_vec(state)
 
@@ -356,7 +354,7 @@ class DeductiveLayer:
         if self._enable_beam:
             self._store_state_glyph(new_state_vec)
 
-        # If a resolving action was taken (e.g. cd), we've arrived at the
+        # If a resolving action was taken, we've arrived at the
         # destination — reset target history to current state so mismatch clears.
         # Old targets are wiped because the transition is complete; new targets
         # from the same turn (below) will still be appended.
@@ -411,12 +409,12 @@ class DeductiveLayer:
         Uses NL synonyms loaded from intent packs (same domain) to map
         query words back to canonical function names. Three-level check:
 
-          1. Phrase matching — multi-word patterns ("search for text in" → grep)
-          2. Single-word synonyms — pack-defined mappings ("search" → grep)
-          3. Literal function names — exact match ("grep", "cat", "sort")
+          1. Phrase matching — multi-word patterns from pack definitions
+          2. Single-word synonyms — pack-defined mappings
+          3. Literal function names — exact match against registered operating verbs
 
         This resolves NL synonyms without the IntentExtractor's generic
-        vocabulary override problem (e.g. "investigate" → grep, not "analyze").
+        vocabulary override problem.
         """
         query_lower = query.lower()
 
@@ -544,13 +542,13 @@ class DeductiveLayer:
 
         Args:
             query: The user's natural language query for this turn.
-            current_state: Current state label (e.g. CWD path).
+            current_state: Current state label (e.g. context identifier).
 
         Returns:
             {
-                "prerequisites": ["cd"],
+                "prerequisites": ["navigate"],
                 "mismatch_score": 0.34,
-                "target": "temp",
+                "target": "state_y",
                 "confidence": 0.78,
             }
         """

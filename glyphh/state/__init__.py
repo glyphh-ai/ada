@@ -23,28 +23,28 @@ Usage:
     state = ConversationState(dimension=10000, seed=42, decay=0.75)
 
     # Optional: pre-seed known patterns as prior knowledge
-    state.add_pathway("navigate_then_operate", [cd_glyph, mv_glyph])
+    state.add_pathway("setup_then_execute", [action_a_glyph, action_b_glyph])
 
     # Each turn: update with what was called, predict what comes next
-    state.update(action_glyphs=[cd_glyph, mv_glyph])
+    state.update(action_glyphs=[action_a_glyph, action_b_glyph])
     scores = state.predict_next(query_glyph, candidates)
 
     # After ground truth — Hebbian reinforcement
-    state.confirm(confirmed_glyphs=[mv_glyph])
+    state.confirm(confirmed_glyphs=[action_b_glyph])
 
     # Deductive reasoning — detect implicit prerequisites
     deductive = DeductiveLayer(dimension=10000, seed=89)
     deductive.add_transition("context_switch", ["move", "copy"], ["read", "search"], "navigate")
-    deductive.observe(state="location_a", actions=["move"], targets=["location_b"])
-    result = deductive.deduce(query="search the items", current_state="location_a")
-    # → {"prerequisites": ["navigate"], "target": "location_b", ...}
+    deductive.observe(state="state_x", actions=["move"], targets=["state_y"])
+    result = deductive.deduce(query="search the items", current_state="state_x")
+    # → {"prerequisites": ["navigate"], "target": "state_y", ...}
 
     # Inductive reasoning — learn patterns from episodes
     inductive = InductiveLayer(dimension=10000, seed=97)
-    inductive.learn({"query": "grep budget", "state": "/workspace"}, "cd_needed")
-    inductive.learn({"query": "sort the file", "state": "/workspace/temp"}, "cd_not_needed")
-    result = inductive.predict({"query": "search for budget", "state": "/workspace"})
-    # → {"label": "cd_needed", "confidence": 0.15, ...}
+    inductive.learn({"query": "search budget report", "state": "state_x"}, "transition_needed")
+    inductive.learn({"query": "sort the output", "state": "state_y"}, "transition_not_needed")
+    result = inductive.predict({"query": "search for budget", "state": "state_x"})
+    # → {"label": "transition_needed", "confidence": 0.15, ...}
 
     # New conversation — reset encoder, library persists
     state.reset()

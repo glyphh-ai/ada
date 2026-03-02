@@ -20,19 +20,19 @@ Usage:
     state = ConversationState(dimension=10000, seed=42, decay=0.75)
 
     # Pre-seed known patterns (optional — acts as prior knowledge)
-    state.add_pathway("navigate_then_operate", action_glyphs=[cd_glyph, mv_glyph])
-    state.add_pathway("navigate_then_search",  action_glyphs=[cd_glyph, grep_glyph])
+    state.add_pathway("setup_then_execute", action_glyphs=[action_a_glyph, action_b_glyph])
+    state.add_pathway("setup_then_search",  action_glyphs=[action_a_glyph, action_c_glyph])
 
     # Each turn: update then predict
-    state.update(action_glyphs=[cd_glyph, mv_glyph])
+    state.update(action_glyphs=[action_a_glyph, action_b_glyph])
     scores = state.predict_next(
         query_glyph=query_glyph,
-        candidates={"cd": cd_glyph, "mv": mv_glyph, "grep": grep_glyph},
+        candidates={"action_a": action_a_glyph, "action_b": action_b_glyph, "action_c": action_c_glyph},
     )
-    # → {"mv": 0.78, "grep": 0.59, "cd": 0.22}  (sorted descending)
+    # -> {"action_b": 0.78, "action_c": 0.59, "action_a": 0.22}  (sorted descending)
 
     # After ground truth is known — Hebbian reinforcement
-    state.confirm(confirmed_glyphs=[mv_glyph])
+    state.confirm(confirmed_glyphs=[action_b_glyph])
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ class ConversationState:
              frequently follows the current trajectory will score higher.
 
           3. Library pattern boost — if the current state matches a known
-             pathway pattern (e.g. "navigate_then_operate"), candidates
+             pathway pattern (e.g. "setup_then_execute"), candidates
              that continue that pattern receive additional weight.
 
         Args:
@@ -225,7 +225,7 @@ class ConversationState:
         these patterns exist, and confirms/strengthens them through use.
 
         Args:
-            name:          Unique pattern name, e.g. "navigate_then_operate".
+            name:          Unique pattern name, e.g. "setup_then_execute".
             action_glyphs: Ordered Glyphs representing the pattern steps.
             strength:      Initial strength (default 1.0).
         """
