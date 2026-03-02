@@ -1,0 +1,295 @@
+{"phrase": "search for the invoice email", "action": "search"}
+{"phrase": "search for the email thread", "action": "search"}
+{"phrase": "look for the invoice email", "action": "search"}
+{"phrase": "push to production", "action": "deploy"}
+{"phrase": "push to prod", "action": "deploy"}
+{"phrase": "go to production", "action": "deploy"}
+{"phrase": "roll out to", "action": "deploy"}
+{"phrase": "ship the feature", "action": "deploy"}
+{"phrase": "go back to version", "action": "rollback"}
+{"phrase": "revert to version", "action": "rollback"}
+{"phrase": "roll back to", "action": "rollback"}
+{"phrase": "undo the deployment", "action": "rollback"}
+{"phrase": "mark as resolved", "action": "resolve"}
+{"phrase": "mark as closed", "action": "close"}
+{"phrase": "mark as done", "action": "close"}
+{"phrase": "mark complete", "action": "close"}
+{"phrase": "close out the", "action": "close"}
+{"phrase": "wrap up the", "action": "close"}
+{"phrase": "sign off on", "action": "approve"}
+{"phrase": "give approval for", "action": "approve"}
+{"phrase": "green light the", "action": "approve"}
+{"phrase": "approve the pr", "action": "approve"}
+{"phrase": "approve the request", "action": "approve"}
+{"phrase": "turn down the", "action": "reject"}
+{"phrase": "reject the request", "action": "reject"}
+{"phrase": "bump up the priority", "action": "escalate"}
+{"phrase": "raise the priority", "action": "escalate"}
+{"phrase": "escalate to the team", "action": "escalate"}
+{"phrase": "close the issue", "action": "resolve"}
+{"phrase": "fix the issue", "action": "resolve"}
+{"phrase": "resolve the bug", "action": "resolve"}
+{"phrase": "reopen the ticket", "action": "reopen"}
+{"phrase": "mark as reopened", "action": "reopen"}
+{"phrase": "turn on the", "action": "enable"}
+{"phrase": "switch on the", "action": "enable"}
+{"phrase": "flip on the", "action": "enable"}
+{"phrase": "turn off the", "action": "disable"}
+{"phrase": "switch off the", "action": "disable"}
+{"phrase": "flip off the", "action": "disable"}
+{"phrase": "add them to the team", "action": "invite"}
+{"phrase": "send invite to", "action": "invite"}
+{"phrase": "send invitation to", "action": "invite"}
+{"phrase": "onboard them to", "action": "invite"}
+{"phrase": "remove them from the", "action": "kick"}
+{"phrase": "kick from the channel", "action": "kick"}
+{"phrase": "remove user from", "action": "kick"}
+{"phrase": "suspend the account", "action": "ban"}
+{"phrase": "block the user", "action": "ban"}
+{"phrase": "mute notifications from", "action": "mute"}
+{"phrase": "silence notifications for", "action": "mute"}
+{"phrase": "turn off notifications for", "action": "mute"}
+{"phrase": "pin to the top", "action": "pin"}
+{"phrase": "stick to top", "action": "pin"}
+{"phrase": "pin this message", "action": "pin"}
+{"phrase": "add to favorites", "action": "star"}
+{"phrase": "mark as favorite", "action": "star"}
+{"phrase": "bookmark this", "action": "star"}
+{"phrase": "add a reaction", "action": "react"}
+{"phrase": "react to the message", "action": "react"}
+{"phrase": "give a thumbs up", "action": "react"}
+{"phrase": "follow for updates", "action": "follow"}
+{"phrase": "watch for updates", "action": "follow"}
+{"phrase": "subscribe to updates", "action": "follow"}
+{"phrase": "unsubscribe from updates", "action": "unfollow"}
+{"phrase": "stop following the", "action": "unfollow"}
+{"phrase": "remind me to", "action": "remind"}
+{"phrase": "set a reminder for", "action": "remind"}
+{"phrase": "add reminder for", "action": "remind"}
+{"phrase": "snooze for", "action": "snooze"}
+{"phrase": "postpone until", "action": "snooze"}
+{"phrase": "defer to later", "action": "snooze"}
+{"phrase": "schedule a meeting", "action": "schedule"}
+{"phrase": "book time for", "action": "schedule"}
+{"phrase": "pencil in for", "action": "schedule"}
+{"phrase": "add to calendar", "action": "schedule"}
+{"phrase": "give me a summary of", "action": "summarize"}
+{"phrase": "quick recap of", "action": "summarize"}
+{"phrase": "tl;dr of", "action": "summarize"}
+{"phrase": "brief me on", "action": "summarize"}
+{"phrase": "translate to", "action": "translate"}
+{"phrase": "translate into", "action": "translate"}
+{"phrase": "convert to language", "action": "translate"}
+{"phrase": "transcribe the", "action": "transcribe"}
+{"phrase": "convert audio to text", "action": "transcribe"}
+{"phrase": "speech to text from", "action": "transcribe"}
+{"phrase": "classify as", "action": "classify"}
+{"phrase": "categorize as", "action": "classify"}
+{"phrase": "put in category", "action": "classify"}
+{"phrase": "group into", "action": "classify"}
+{"phrase": "detect anomalies in", "action": "detect"}
+{"phrase": "scan for issues", "action": "detect"}
+{"phrase": "look for anomalies", "action": "detect"}
+{"phrase": "run analysis on", "action": "analyze"}
+{"phrase": "do an analysis of", "action": "analyze"}
+{"phrase": "review the data", "action": "analyze"}
+{"phrase": "create chart for", "action": "visualize"}
+{"phrase": "plot the data", "action": "visualize"}
+{"phrase": "show graph of", "action": "visualize"}
+{"phrase": "draw a chart of", "action": "visualize"}
+{"phrase": "run a report on", "action": "report"}
+{"phrase": "pull a report on", "action": "report"}
+{"phrase": "generate report on", "action": "report"}
+{"phrase": "create a report for", "action": "report"}
+{"phrase": "export to csv", "action": "export"}
+{"phrase": "dump the data to", "action": "export"}
+{"phrase": "export all to", "action": "export"}
+{"phrase": "import data from", "action": "import"}
+{"phrase": "migrate data from", "action": "import"}
+{"phrase": "ingest data from", "action": "import"}
+{"phrase": "bring in from", "action": "import"}
+{"phrase": "back up the", "action": "backup"}
+{"phrase": "take a backup of", "action": "backup"}
+{"phrase": "create snapshot of", "action": "backup"}
+{"phrase": "sync changes to", "action": "sync"}
+{"phrase": "synchronize with", "action": "sync"}
+{"phrase": "keep in sync with", "action": "sync"}
+{"phrase": "connect to", "action": "connect"}
+{"phrase": "integrate with", "action": "connect"}
+{"phrase": "set up integration with", "action": "connect"}
+{"phrase": "hook up to", "action": "connect"}
+{"phrase": "plug into", "action": "connect"}
+{"phrase": "remove the connection to", "action": "disconnect"}
+{"phrase": "remove integration with", "action": "disconnect"}
+{"phrase": "disconnect from", "action": "disconnect"}
+{"phrase": "sign in to", "action": "login"}
+{"phrase": "log in to", "action": "login"}
+{"phrase": "log into", "action": "login"}
+{"phrase": "sign out of", "action": "logout"}
+{"phrase": "log out of", "action": "logout"}
+{"phrase": "end session on", "action": "logout"}
+{"phrase": "create an account on", "action": "register"}
+{"phrase": "sign up for", "action": "register"}
+{"phrase": "register for", "action": "register"}
+{"phrase": "grant access to", "action": "grant"}
+{"phrase": "give permission to", "action": "grant"}
+{"phrase": "allow access to", "action": "grant"}
+{"phrase": "add as admin", "action": "grant"}
+{"phrase": "revoke access to", "action": "revoke"}
+{"phrase": "remove permission from", "action": "revoke"}
+{"phrase": "strip access from", "action": "revoke"}
+{"phrase": "review and approve", "action": "review"}
+{"phrase": "code review on", "action": "review"}
+{"phrase": "do a review of", "action": "review"}
+{"phrase": "look over the", "action": "review"}
+{"phrase": "run the build", "action": "build"}
+{"phrase": "build and deploy", "action": "build"}
+{"phrase": "compile the project", "action": "build"}
+{"phrase": "run the tests", "action": "test"}
+{"phrase": "run unit tests", "action": "test"}
+{"phrase": "run integration tests", "action": "test"}
+{"phrase": "run qa on", "action": "test"}
+{"phrase": "add a comment", "action": "comment"}
+{"phrase": "add comment", "action": "comment"}
+{"phrase": "leave a comment", "action": "comment"}
+{"phrase": "post a comment", "action": "comment"}
+{"phrase": "post a remark", "action": "comment"}
+{"phrase": "leave a response", "action": "comment"}
+{"phrase": "add a remark", "action": "comment"}
+{"phrase": "add a note on", "action": "comment"}
+{"phrase": "write a comment on", "action": "comment"}
+{"phrase": "add feedback on", "action": "comment"}
+{"phrase": "leave feedback on", "action": "comment"}
+{"phrase": "set status", "action": "set"}
+{"phrase": "set my status", "action": "set"}
+{"phrase": "set my slack status", "action": "set"}
+{"phrase": "change to", "action": "set"}
+{"phrase": "create a task", "action": "create"}
+{"phrase": "create a ticket", "action": "create"}
+{"phrase": "create a bug", "action": "create"}
+{"phrase": "create a story", "action": "create"}
+{"phrase": "create a epic", "action": "create"}
+{"phrase": "create a jira", "action": "create"}
+{"phrase": "create a new file", "action": "create"}
+{"phrase": "set up a new", "action": "create"}
+{"phrase": "set up a", "action": "create"}
+{"phrase": "set up", "action": "create"}
+{"phrase": "spin up a", "action": "create"}
+{"phrase": "spin up", "action": "create"}
+{"phrase": "put together a", "action": "create"}
+{"phrase": "kick off a", "action": "create"}
+{"phrase": "file a", "action": "create"}
+{"phrase": "block the", "action": "create"}
+{"phrase": "open a new", "action": "create"}
+{"phrase": "assign it to", "action": "assign"}
+{"phrase": "assign to", "action": "assign"}
+{"phrase": "assign ticket", "action": "assign"}
+{"phrase": "hand it to", "action": "assign"}
+{"phrase": "give it to", "action": "assign"}
+{"phrase": "route to", "action": "assign"}
+{"phrase": "hand off to", "action": "assign"}
+{"phrase": "transfer to", "action": "assign"}
+{"phrase": "find the customer", "action": "get"}
+{"phrase": "find the contact", "action": "get"}
+{"phrase": "find the record", "action": "get"}
+{"phrase": "find the contact info", "action": "get"}
+{"phrase": "look up", "action": "get"}
+{"phrase": "pull up the", "action": "get"}
+{"phrase": "i need the", "action": "get"}
+{"phrase": "i need", "action": "get"}
+{"phrase": "track down", "action": "get"}
+{"phrase": "bring up the", "action": "get"}
+{"phrase": "upgraded to", "action": "identify"}
+{"phrase": "downgraded to", "action": "identify"}
+{"phrase": "switched from", "action": "identify"}
+{"phrase": "changed plan", "action": "identify"}
+{"phrase": "changed their", "action": "identify"}
+{"phrase": "flag as", "action": "identify"}
+{"phrase": "mark as", "action": "identify"}
+{"phrase": "tag as", "action": "identify"}
+{"phrase": "payment history", "action": "list"}
+{"phrase": "billing history", "action": "list"}
+{"phrase": "invoice history", "action": "list"}
+{"phrase": "check the invoices", "action": "list"}
+{"phrase": "check invoices", "action": "list"}
+{"phrase": "show all the", "action": "list"}
+{"phrase": "show me all", "action": "list"}
+{"phrase": "list all the", "action": "list"}
+{"phrase": "search for the email", "action": "search"}
+{"phrase": "look for", "action": "search"}
+{"phrase": "dig through", "action": "search"}
+{"phrase": "hunt for", "action": "search"}
+{"phrase": "look through", "action": "search"}
+{"phrase": "grep for", "action": "search"}
+{"phrase": "search for", "action": "search"}
+{"phrase": "fire off", "action": "send"}
+{"phrase": "shoot over", "action": "send"}
+{"phrase": "forward along", "action": "send"}
+{"phrase": "blast out to", "action": "send"}
+{"phrase": "cc them on", "action": "send"}
+{"phrase": "drop a line to", "action": "send"}
+{"phrase": "should be sent", "action": "send"}
+{"phrase": "needs to be sent", "action": "send"}
+{"phrase": "send notification to", "action": "notify"}
+{"phrase": "alert the team", "action": "notify"}
+{"phrase": "broadcast to the", "action": "notify"}
+{"phrase": "page the on-call", "action": "notify"}
+{"phrase": "send alert to", "action": "notify"}
+{"phrase": "forward to", "action": "forward"}
+{"phrase": "forward the email", "action": "forward"}
+{"phrase": "pass it to", "action": "forward"}
+{"phrase": "relay to", "action": "forward"}
+{"phrase": "write back", "action": "reply"}
+{"phrase": "get back to", "action": "reply"}
+{"phrase": "follow up with", "action": "reply"}
+{"phrase": "respond to", "action": "reply"}
+{"phrase": "write up", "action": "draft"}
+{"phrase": "write a draft", "action": "draft"}
+{"phrase": "compose a", "action": "draft"}
+{"phrase": "collect from", "action": "charge"}
+{"phrase": "run the card", "action": "charge"}
+{"phrase": "process the payment", "action": "charge"}
+{"phrase": "bill for", "action": "charge"}
+{"phrase": "charge for", "action": "charge"}
+{"phrase": "return the money", "action": "refund"}
+{"phrase": "reverse the charge", "action": "refund"}
+{"phrase": "give back the payment", "action": "refund"}
+{"phrase": "give back", "action": "refund"}
+{"phrase": "issue a refund", "action": "refund"}
+{"phrase": "credit back the", "action": "refund"}
+{"phrase": "return the funds", "action": "refund"}
+{"phrase": "drop in the", "action": "upload"}
+{"phrase": "drop in a", "action": "upload"}
+{"phrase": "put in the", "action": "upload"}
+{"phrase": "put in a", "action": "upload"}
+{"phrase": "attach the file", "action": "upload"}
+{"phrase": "add attachment", "action": "upload"}
+{"phrase": "let someone see", "action": "share"}
+{"phrase": "give access", "action": "share"}
+{"phrase": "open up to", "action": "share"}
+{"phrase": "read-only access", "action": "share"}
+{"phrase": "read only access", "action": "share"}
+{"phrase": "share with the", "action": "share"}
+{"phrase": "make visible to", "action": "share"}
+{"phrase": "keep track of", "action": "track"}
+{"phrase": "keep an eye on", "action": "track"}
+{"phrase": "log the event", "action": "track"}
+{"phrase": "move to archive", "action": "archive"}
+{"phrase": "archive the", "action": "archive"}
+{"phrase": "put in archive", "action": "archive"}
+{"phrase": "restore from backup", "action": "restore"}
+{"phrase": "recover from", "action": "restore"}
+{"phrase": "bring back the", "action": "restore"}
+{"phrase": "make it public", "action": "publish"}
+{"phrase": "go live with", "action": "publish"}
+{"phrase": "release the", "action": "publish"}
+{"phrase": "publish the", "action": "publish"}
+{"phrase": "filter by", "action": "filter"}
+{"phrase": "show only the", "action": "filter"}
+{"phrase": "narrow down to", "action": "filter"}
+{"phrase": "exclude from the", "action": "filter"}
+{"phrase": "filter the list by", "action": "filter"}
+{"phrase": "move the file to", "action": "move"}
+{"phrase": "move to", "action": "move"}
+{"phrase": "relocate to", "action": "move"}
+{"phrase": "transfer file to", "action": "move"}

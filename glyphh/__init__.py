@@ -85,8 +85,23 @@ from .model import GlyphhModel
 # Conversation state — HDC pathway encoding for sequential decision-making
 from .state import Centroid, ConversationState, DeductiveLayer, InductiveLayer, Pathway, PathwayLibrary, Transition
 
+# Intent extraction — rule-based NL parsing with HDC fallback
+from .intent import (
+    IntentExtractor,
+    VERB_CONFIG as INTENT_VERB_CONFIG,
+    NOUN_CONFIG as INTENT_NOUN_CONFIG,
+    get_extractor,
+    extract_intent,
+    extract_action,
+    extract_target,
+    infer_domain,
+)
+
 # Cognitive loop — HDC domain-agnostic tool calling
 from .cognitive import CognitiveLoop, DomainConfig, IdeaSpace, StepResult
+
+# Linguistics — layered HDC language engine (character → morphology → POS → syntax → attention)
+from .linguistics import LinguisticIntentParser
 
 from .visualization import (
     visualize_similarity_graph,
@@ -185,11 +200,22 @@ __all__ = [
     "cosine_similarity",
     "hamming_similarity",
     "generate_symbol",
+    # Intent Extractor (rule-based NL parsing + HDC fallback)
+    "IntentExtractor",
+    "INTENT_VERB_CONFIG",
+    "INTENT_NOUN_CONFIG",
+    "get_extractor",
+    "extract_intent",
+    "extract_action",
+    "extract_target",
+    "infer_domain",
     # Cognitive Loop (HDC domain-agnostic tool calling)
     "CognitiveLoop",
     "DomainConfig",
     "IdeaSpace",
     "StepResult",
+    # Linguistics Engine (layered HDC NLP)
+    "LinguisticIntentParser",
     # GQL Exceptions
     "GQLError",
     "LexerError",
