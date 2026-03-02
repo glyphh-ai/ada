@@ -1,44 +1,112 @@
-"""Tests for SchemaIntentClassifier — LLM-primary intent classification."""
+"""Tests for SchemaIntentClassifier — GlyphSpace + ModelScorer fallback."""
 
 import pytest
+import numpy as np
 
 from glyphh.cognitive.schema_classifier import SchemaIntentClassifier
-from glyphh.llm.structured import LLMResult
+from glyphh.cognitive.model_scorer import ScorerResult
+from glyphh.core.types import Vector, Glyph, Layer, Segment
 
 # Reuse test domain fixtures
 from .conftest import FUNC_SCHEMAS, DOMAIN_DICT
 
 
-# ── Mock LLM Engine (inline, avoids cross-test-package import) ──
+# ── Helpers ──
 
-class MockLLMEngine:
-    """Same interface as LLMEngine, returns canned responses."""
+SPACE_ID = "test_space"
 
-    def __init__(self, responses=None):
-        self._responses = responses or {}
-        self.calls = []
-        self._loaded = True
 
-    @property
-    def is_loaded(self):
-        return self._loaded
+def _make_glyph(name: str, dim: int = 100, seed: int = 42) -> Glyph:
+    """Create a minimal Glyph for testing with valid identifier format."""
+    rng = np.random.RandomState(seed + abs(hash(name)) % 10000)
+    cortex_data = rng.choice([-1, 1], size=dim).astype(np.int8)
+    cortex = Vector(data=cortex_data, dimension=dim, space_id=SPACE_ID)
 
-    def generate(self, system, user, max_tokens=256, temperature=0.0, stop=None):
-        self.calls.append({"method": "generate", "system": system, "user": user})
-        return self._responses.get("generate", "")
+    role_data = rng.choice([-1, 1], size=dim).astype(np.int8)
+    role_vec = Vector(data=role_data, dimension=dim, space_id=SPACE_ID)
 
-    def structured_generate(self, system, user, tools, max_tokens=256, temperature=0.0):
-        self.calls.append({
-            "method": "structured_generate",
-            "system": system,
-            "user": user,
-            "tools": tools,
-        })
-        data = self._responses.get("structured_generate", {})
-        return LLMResult(data=data, raw_text=str(data), tokens_used=10, latency_ms=5.0)
+    seg_data = rng.choice([-1, 1], size=dim).astype(np.int8)
+    seg_cortex = Vector(data=seg_data, dimension=dim, space_id=SPACE_ID)
+    segment = Segment(name="identity", cortex=seg_cortex, roles={"name": role_vec})
 
-    def unload(self):
-        self._loaded = False
+    layer_data = rng.choice([-1, 1], size=dim).astype(np.int8)
+    layer_cortex = Vector(data=layer_data, dimension=dim, space_id=SPACE_ID)
+    layer = Layer(name="signature", cortex=layer_cortex, segments={"identity": segment})
+
+    return Glyph(
+        identifier=f"{name}@2024-01-01T00:00:00Z#v1",
+        name=name,
+        space_id=SPACE_ID,
+        global_cortex=cortex,
+        layers={"signature": layer},
+        metadata={"function_name": name},
+    )
+
+
+# ── Mock scorers ──
+
+class MockModelScorer:
+    """Mock scorer that returns configurable results (no GlyphSpace protocol)."""
+
+    def __init__(self, results=None, default_confidence=0.8):
+        self._results = results or {}
+        self._default_confidence = default_confidence
+        self._configured = False
+
+    def configure(self, functions):
+        self._configured = True
+
+    def score(self, query: str) -> ScorerResult:
+        if query in self._results:
+            return self._results[query]
+        return ScorerResult(
+            functions=["display"],
+            arguments={"display": {"item_name": "test"}},
+            confidence=self._default_confidence,
+            all_scores=[{"function": "display", "score": self._default_confidence}],
+            is_irrelevant=False,
+        )
+
+    def score_multi(self, query: str) -> ScorerResult:
+        return self.score(query)
+
+
+class MockGlyphModelScorer:
+    """Mock scorer that implements the full GlyphSpace protocol."""
+
+    def __init__(self, dim=100, default_confidence=0.8):
+        self._dim = dim
+        self._default_confidence = default_confidence
+        self._configured = False
+        self._func_glyphs: dict[str, Glyph] = {}
+
+    def configure(self, functions):
+        self._configured = True
+        self._func_glyphs = {
+            f["name"]: _make_glyph(f["name"], dim=self._dim)
+            for f in functions
+        }
+
+    def score(self, query: str) -> ScorerResult:
+        return ScorerResult(
+            functions=["display"],
+            confidence=self._default_confidence,
+            all_scores=[{"function": "display", "score": self._default_confidence}],
+        )
+
+    def score_multi(self, query: str) -> ScorerResult:
+        return self.score(query)
+
+    def encode_query(self, query: str) -> Glyph:
+        """Encode query as a Glyph (deterministic per query string)."""
+        return _make_glyph(f"query_{query}", dim=self._dim)
+
+    def get_func_glyphs(self) -> dict[str, Glyph]:
+        return dict(self._func_glyphs)
+
+    def scoring_strategy(self):
+        """Return a simple cosine strategy."""
+        return None  # Use DefaultScoringStrategy
 
 
 ACTION_TO_FUNC = DOMAIN_DICT["action_to_func"]
@@ -47,44 +115,42 @@ ACTION_TO_FUNC = DOMAIN_DICT["action_to_func"]
 class TestSchemaClassifierConfigure:
     """Tests for configure()."""
 
-    def test_configure_sets_system_prompt(self):
-        engine = MockLLMEngine()
-        classifier = SchemaIntentClassifier(engine, dimension=1000)
+    def test_configure_sets_configured_flag(self):
+        scorer = MockModelScorer()
+        classifier = SchemaIntentClassifier(dimension=1000, model_scorer=scorer)
         classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
 
         assert classifier._configured
-        assert "navigate" in classifier._system_prompt
-        assert "display" in classifier._system_prompt
-        assert "lookup" in classifier._system_prompt
 
-    def test_configure_builds_tool_schema(self):
-        engine = MockLLMEngine()
-        classifier = SchemaIntentClassifier(engine, dimension=1000)
+    def test_configure_configures_scorer(self):
+        scorer = MockModelScorer()
+        classifier = SchemaIntentClassifier(dimension=1000, model_scorer=scorer)
         classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
 
-        assert len(classifier._classify_tools) == 1
-        tool = classifier._classify_tools[0]
-        assert tool["function"]["name"] == "classify_and_call"
-        # Check enum constraint contains function names
-        enum = tool["function"]["parameters"]["properties"]["functions"]["items"]["enum"]
-        assert "navigate" in enum
-        assert "display" in enum
-        assert "lookup" in enum
+        assert scorer._configured
 
-    def test_configure_clears_cache(self):
-        engine = MockLLMEngine(responses={
-            "structured_generate": {
-                "functions": ["display"],
-                "arguments": {},
-                "confidence": 0.9,
-            },
-        })
-        classifier = SchemaIntentClassifier(engine, dimension=1000)
+    def test_configure_with_glyph_scorer_creates_glyph_space(self):
+        scorer = MockGlyphModelScorer(dim=100)
+        classifier = SchemaIntentClassifier(dimension=100, model_scorer=scorer)
         classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
 
-        # Add something to cache
+        assert classifier._glyph_space is not None
+        assert classifier._glyph_space.glyph_count == len(FUNC_SCHEMAS)
+
+    def test_configure_without_glyph_protocol_no_glyph_space(self):
+        scorer = MockModelScorer()
+        classifier = SchemaIntentClassifier(dimension=1000, model_scorer=scorer)
+        classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
+
+        assert classifier._glyph_space is None
+
+    def test_reconfigure_clears_glyph_space_cache(self):
+        scorer = MockGlyphModelScorer(dim=100)
+        classifier = SchemaIntentClassifier(dimension=100, model_scorer=scorer)
+        classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
+
+        # Classify to populate cache
         classifier.classify("show report", {"primary": "root"}, [])
-        assert classifier.cache_size > 0
 
         # Re-configure clears cache
         classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
@@ -95,204 +161,125 @@ class TestSchemaClassifierClassify:
     """Tests for classify()."""
 
     def test_unconfigured_returns_empty(self):
-        engine = MockLLMEngine()
-        classifier = SchemaIntentClassifier(engine, dimension=1000)
+        scorer = MockModelScorer()
+        classifier = SchemaIntentClassifier(dimension=1000, model_scorer=scorer)
 
         result = classifier.classify("show report", {"primary": "root"}, [])
         assert result["functions"] == []
         assert result["confidence"] == 0.0
         assert result["source"] == "unconfigured"
 
-    def test_classify_calls_llm(self):
-        engine = MockLLMEngine(responses={
-            "structured_generate": {
-                "functions": ["display"],
-                "arguments": {"display": {"item_name": "report.txt"}},
-                "confidence": 0.9,
-            },
-        })
-        classifier = SchemaIntentClassifier(engine, dimension=1000)
+    def test_classify_with_glyph_scorer_uses_glyph_space(self):
+        scorer = MockGlyphModelScorer(dim=100)
+        classifier = SchemaIntentClassifier(dimension=100, model_scorer=scorer)
         classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
 
         result = classifier.classify(
             "show the report",
-            {"primary": "root.workspace", "collections": {"items_here": ["report.txt"]}},
+            {"primary": "root"},
+            [],
+        )
+
+        # Should route through GlyphSpace (source starts with "glyph_space")
+        assert result["source"].startswith("glyph_space")
+
+    def test_classify_fallback_scorer_uses_score(self):
+        scorer = MockModelScorer(default_confidence=0.8)
+        classifier = SchemaIntentClassifier(dimension=1000, model_scorer=scorer)
+        classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
+
+        result = classifier.classify(
+            "show the report",
+            {"primary": "root"},
             [],
         )
 
         assert result["functions"] == ["display"]
-        assert result["arguments"]["display"]["item_name"] == "report.txt"
-        assert result["confidence"] == 0.9
-        assert result["source"] == "llm"
-        assert len(engine.calls) == 1
+        assert result["confidence"] == 0.8
+        assert result["source"] == "model_scorer"
 
-    def test_classify_validates_function_names(self):
-        engine = MockLLMEngine(responses={
-            "structured_generate": {
-                "functions": ["display", "nonexistent_func"],
-                "arguments": {},
-                "confidence": 0.8,
-            },
+    def test_classify_scorer_irrelevant(self):
+        scorer = MockModelScorer(results={
+            "random gibberish": ScorerResult(
+                functions=[],
+                arguments={},
+                confidence=0.1,
+                all_scores=[],
+                is_irrelevant=True,
+            ),
         })
-        classifier = SchemaIntentClassifier(engine, dimension=1000)
+        classifier = SchemaIntentClassifier(dimension=1000, model_scorer=scorer)
+        classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
+
+        result = classifier.classify("random gibberish", {"primary": "root"}, [])
+        assert result["functions"] == []
+        assert result["source"] == "model_scorer_irrelevant"
+
+    def test_classify_scorer_low_confidence_falls_through(self):
+        scorer = MockModelScorer(results={
+            "xyzzy plugh": ScorerResult(
+                functions=["display"],
+                arguments={},
+                confidence=0.05,
+                all_scores=[{"function": "display", "score": 0.05}],
+                is_irrelevant=False,
+            ),
+        })
+        classifier = SchemaIntentClassifier(dimension=1000, model_scorer=scorer)
+        classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
+
+        result = classifier.classify("xyzzy plugh", {"primary": "root"}, [])
+        assert result["source"] == "none"
+        assert result["functions"] == []
+        assert result["confidence"] == 0.0
+
+    def test_no_scorer_returns_none(self):
+        classifier = SchemaIntentClassifier(dimension=1000)
         classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
 
         result = classifier.classify("show report", {"primary": "root"}, [])
-        # "nonexistent_func" should be filtered out
-        assert result["functions"] == ["display"]
-
-    def test_classify_caches_result(self):
-        engine = MockLLMEngine(responses={
-            "structured_generate": {
-                "functions": ["display"],
-                "arguments": {},
-                "confidence": 0.9,
-            },
-        })
-        classifier = SchemaIntentClassifier(engine, dimension=1000, cache_threshold=0.5)
-        classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
-
-        # First call hits LLM
-        result1 = classifier.classify("show the report", {"primary": "root"}, [])
-        assert result1["source"] == "llm"
-        assert len(engine.calls) == 1
-
-        # Second identical call hits cache
-        result2 = classifier.classify("show the report", {"primary": "root"}, [])
-        assert result2["source"] == "hdc_cache"
-        assert len(engine.calls) == 1  # No new LLM call
-
-    def test_classify_similar_query_hits_cache(self):
-        engine = MockLLMEngine(responses={
-            "structured_generate": {
-                "functions": ["display"],
-                "arguments": {},
-                "confidence": 0.85,
-            },
-        })
-        classifier = SchemaIntentClassifier(engine, dimension=1000, cache_threshold=0.5)
-        classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
-
-        # First call
-        classifier.classify("show the report", {"primary": "root"}, [])
-        assert len(engine.calls) == 1
-
-        # Similar query
-        result = classifier.classify("show report", {"primary": "root"}, [])
-        assert result["source"] == "hdc_cache"
-        assert len(engine.calls) == 1
-
-    def test_low_confidence_not_cached(self):
-        engine = MockLLMEngine(responses={
-            "structured_generate": {
-                "functions": [],
-                "arguments": {},
-                "confidence": 0.1,
-            },
-        })
-        classifier = SchemaIntentClassifier(engine, dimension=1000)
-        classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
-
-        classifier.classify("xyzzy plugh", {"primary": "root"}, [])
-        assert classifier.cache_size == 0
-
-    def test_state_summary_in_prompt(self):
-        engine = MockLLMEngine(responses={
-            "structured_generate": {
-                "functions": ["display"],
-                "arguments": {},
-                "confidence": 0.9,
-            },
-        })
-        classifier = SchemaIntentClassifier(engine, dimension=1000)
-        classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
-
-        classifier.classify(
-            "show the report",
-            {
-                "primary": "root.workspace",
-                "collections": {"items_here": ["report.txt", "budget.csv"]},
-            },
-            ["navigate"],
-        )
-
-        call = engine.calls[0]
-        assert "root.workspace" in call["user"]
-        assert "navigate" in call["user"]
-        assert "show the report" in call["user"]
+        assert result["source"] == "none"
+        assert result["functions"] == []
 
 
 class TestSchemaClassifierConfirm:
     """Tests for confirm() — Hebbian reinforcement."""
 
-    def test_confirm_correct_strengthens(self):
-        engine = MockLLMEngine(responses={
-            "structured_generate": {
-                "functions": ["display"],
-                "arguments": {},
-                "confidence": 0.9,
-            },
-        })
-        classifier = SchemaIntentClassifier(engine, dimension=1000, cache_threshold=0.5)
+    def test_confirm_on_empty_glyph_space_is_noop(self):
+        scorer = MockGlyphModelScorer(dim=100)
+        classifier = SchemaIntentClassifier(dimension=100, model_scorer=scorer)
         classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
 
-        # Classify to populate cache
-        classifier.classify("show the report", {"primary": "root"}, [])
-        # Trigger cache hit
-        classifier.classify("show the report", {"primary": "root"}, [])
-
-        initial_strength = classifier._cache._entries[0].strength
+        # Should not raise
         classifier.confirm(correct=True)
-        assert classifier._cache._entries[0].strength > initial_strength
-
-    def test_confirm_incorrect_weakens(self):
-        engine = MockLLMEngine(responses={
-            "structured_generate": {
-                "functions": ["display"],
-                "arguments": {},
-                "confidence": 0.9,
-            },
-        })
-        classifier = SchemaIntentClassifier(engine, dimension=1000, cache_threshold=0.5)
-        classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
-
-        classifier.classify("show the report", {"primary": "root"}, [])
-        classifier.classify("show the report", {"primary": "root"}, [])
-
-        initial_strength = classifier._cache._entries[0].strength
         classifier.confirm(correct=False)
-        assert classifier._cache._entries[0].strength < initial_strength
 
-
-class TestSchemaClassifierErrorHandling:
-    """Tests for graceful LLM failure handling."""
-
-    def test_llm_exception_returns_empty(self):
-        class FailingEngine:
-            is_loaded = True
-            def structured_generate(self, **kwargs):
-                raise RuntimeError("Model not loaded")
-
-        classifier = SchemaIntentClassifier(FailingEngine(), dimension=1000)
+    def test_confirm_without_scorer_is_noop(self):
+        classifier = SchemaIntentClassifier(dimension=1000)
         classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
 
-        result = classifier.classify("show report", {"primary": "root"}, [])
-        assert result["functions"] == []
-        assert result["confidence"] == 0.0
-        assert "error" in result
+        # Should not raise
+        classifier.confirm(correct=True)
 
-    def test_invalid_function_in_response(self):
-        engine = MockLLMEngine(responses={
-            "structured_generate": {
-                "functions": ["totally_fake"],
-                "arguments": {},
-                "confidence": 0.95,
-            },
-        })
-        classifier = SchemaIntentClassifier(engine, dimension=1000)
+
+class TestSchemaClassifierCacheSize:
+    """Tests for cache_size property."""
+
+    def test_cache_size_starts_at_zero(self):
+        scorer = MockGlyphModelScorer(dim=100)
+        classifier = SchemaIntentClassifier(dimension=100, model_scorer=scorer)
+        classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
+        assert classifier.cache_size == 0
+
+    def test_cache_size_without_glyph_space(self):
+        classifier = SchemaIntentClassifier(dimension=1000)
+        classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
+        assert classifier.cache_size == 0
+
+    def test_classify_populates_cache(self):
+        scorer = MockGlyphModelScorer(dim=100)
+        classifier = SchemaIntentClassifier(dimension=100, model_scorer=scorer)
         classifier.configure(FUNC_SCHEMAS, ACTION_TO_FUNC)
 
-        result = classifier.classify("do something", {"primary": "root"}, [])
-        # No valid functions → confidence forced to 0.0
-        assert result["functions"] == []
-        assert result["confidence"] == 0.0
+        classifier.classify("show report", {"primary": "root"}, [])
+        assert classifier.cache_size == 1

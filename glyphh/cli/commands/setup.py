@@ -1,9 +1,12 @@
 """
 CLI setup command — one-command environment bootstrap.
 
-glyphh setup          Detect platform, install llama-cpp-python, download model, smoke test
-glyphh setup --cpu    Force CPU-only wheel (skip GPU detection)
-glyphh setup --status Show current setup status without changing anything
+glyphh setup              Auto-detect best backend, download model, smoke test
+glyphh setup --backend mlx       Force MLX backend (Apple Silicon)
+glyphh setup --backend llama-cpp Force llama-cpp-python backend
+glyphh setup --backend api       Use an external OpenAI-compatible API
+glyphh setup --cpu               Force CPU-only llama-cpp-python
+glyphh setup --status            Show current setup status
 """
 
 import os
@@ -20,10 +23,19 @@ from .. import theme
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
+# Backend identifiers for LLM setup (retained for model download support)
+_BACKEND_MLX = "mlx"
+_BACKEND_LLAMA_CPP = "llama-cpp"
+_BACKEND_API = "api"
+
+# MLX packages
+_MLX_PACKAGES = ["mlx>=0.18.0", "mlx-lm>=0.20.0"]
+
+# llama-cpp-python
 _LLAMA_CPP_PACKAGE = "llama-cpp-python"
 _LLAMA_CPP_MIN_VERSION = "0.3.0"
 
-# Pre-built wheel indices from abetlen/llama-cpp-python
+# Pre-built wheel indices for llama-cpp-python
 _WHEEL_INDICES = {
     "cpu":   "https://abetlen.github.io/llama-cpp-python/whl/cpu",
     "metal": "https://abetlen.github.io/llama-cpp-python/whl/metal",
@@ -31,10 +43,15 @@ _WHEEL_INDICES = {
     "cu123": "https://abetlen.github.io/llama-cpp-python/whl/cu123",
 }
 
-# Default model
-_MODEL_REPO = "Qwen/Qwen3-4B-GGUF"
-_MODEL_FILENAME = "Qwen3-4B-Q4_K_M.gguf"
-_MODEL_URL = f"https://huggingface.co/{_MODEL_REPO}/resolve/main/{_MODEL_FILENAME}"
+# Default models
+_MLX_MODEL_REPO = "mlx-community/Qwen3-0.6B-4bit"
+_MLX_MODEL_DIRNAME = "Qwen3-0.6B-4bit"
+
+_GGUF_MODEL_REPO = "Qwen/Qwen3-0.6B-GGUF"
+_GGUF_MODEL_FILENAME = "Qwen3-0.6B-Q4_K_M.gguf"
+_GGUF_MODEL_URL = (
+    f"https://huggingface.co/{_GGUF_MODEL_REPO}/resolve/main/{_GGUF_MODEL_FILENAME}"
+)
 
 
 def _xdg_data_home() -> Path:
@@ -51,10 +68,6 @@ def _model_dir() -> Path:
     return _xdg_data_home() / "glyphh" / "models"
 
 
-def _model_path() -> Path:
-    return _model_dir() / _MODEL_FILENAME
-
-
 # ── Platform detection ───────────────────────────────────────────────────────
 
 def _detect_platform() -> dict:
@@ -62,41 +75,53 @@ def _detect_platform() -> dict:
     info = {
         "os": platform.system(),
         "arch": platform.machine(),
-        "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        "python": (
+            f"{sys.version_info.major}.{sys.version_info.minor}"
+            f".{sys.version_info.micro}"
+        ),
         "gpu": None,
-        "recommended_backend": "cpu",
+        "recommended_backend": _BACKEND_LLAMA_CPP,
+        "llama_cpp_variant": "cpu",
     }
 
-    if info["os"] == "Darwin":
-        # macOS — Apple Silicon gets Metal, Intel gets CPU
-        if info["arch"] == "arm64":
-            info["gpu"] = "Apple Silicon (Metal)"
-            info["recommended_backend"] = "metal"
-        else:
-            info["gpu"] = None
-            info["recommended_backend"] = "cpu"
+    if info["os"] == "Darwin" and info["arch"] == "arm64":
+        info["gpu"] = "Apple Silicon (Metal)"
+        info["recommended_backend"] = _BACKEND_MLX
+        info["llama_cpp_variant"] = "metal"
 
-    elif info["os"] == "Linux":
-        # Check for NVIDIA GPU
-        if shutil.which("nvidia-smi"):
-            try:
-                result = subprocess.run(
-                    ["nvidia-smi", "--query-gpu=name,driver_version",
-                     "--format=csv,noheader"],
-                    capture_output=True, text=True, timeout=5,
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    info["gpu"] = result.stdout.strip().split("\n")[0]
-                    # Default to CUDA 12.4
-                    info["recommended_backend"] = "cu124"
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                pass
+    elif info["os"] == "Darwin":
+        # Intel Mac — CPU only
+        info["llama_cpp_variant"] = "cpu"
+
+    elif info["os"] == "Linux" and shutil.which("nvidia-smi"):
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name,driver_version",
+                 "--format=csv,noheader"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                info["gpu"] = result.stdout.strip().split("\n")[0]
+                info["llama_cpp_variant"] = "cu124"
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
 
     return info
 
 
+# ── Status checks ────────────────────────────────────────────────────────────
+
+def _check_mlx_installed() -> str | None:
+    """Return installed mlx-lm version, or None."""
+    try:
+        from importlib.metadata import version
+        return version("mlx-lm")
+    except Exception:
+        return None
+
+
 def _check_llama_cpp_installed() -> str | None:
-    """Return installed version of llama-cpp-python, or None."""
+    """Return installed llama-cpp-python version, or None."""
     try:
         from importlib.metadata import version
         return version(_LLAMA_CPP_PACKAGE)
@@ -104,48 +129,57 @@ def _check_llama_cpp_installed() -> str | None:
         return None
 
 
-def _check_model_exists() -> Path | None:
-    """Return model path if it exists, or None."""
-    # Check env var first
+def _check_api_configured() -> str | None:
+    """Return the configured API base URL, or None."""
+    return os.environ.get("GLYPHH_API_BASE") or os.environ.get("OPENAI_API_BASE")
+
+
+def _check_mlx_model_exists() -> Path | None:
+    """Return MLX model path if it exists."""
     env_path = os.environ.get("GLYPHH_MODEL_PATH")
     if env_path:
         p = Path(env_path)
-        if p.exists():
+        if p.is_dir() and (p / "config.json").exists():
             return p
 
-    # Check default location
-    p = _model_path()
-    if p.exists():
+    p = _model_dir() / _MLX_MODEL_DIRNAME
+    if p.is_dir() and (p / "config.json").exists():
         return p
+    return None
 
+
+def _check_gguf_model_exists() -> Path | None:
+    """Return GGUF model path if it exists."""
+    env_path = os.environ.get("GLYPHH_MODEL_PATH")
+    if env_path:
+        p = Path(env_path)
+        if p.is_file():
+            return p
+
+    p = _model_dir() / _GGUF_MODEL_FILENAME
+    if p.is_file():
+        return p
     return None
 
 
 # ── Installation steps ───────────────────────────────────────────────────────
 
-def _install_llama_cpp(backend: str) -> bool:
-    """Install llama-cpp-python with the appropriate pre-built wheel."""
-    package = f"{_LLAMA_CPP_PACKAGE}>={_LLAMA_CPP_MIN_VERSION}"
-    index_url = _WHEEL_INDICES.get(backend)
+def _install_mlx() -> bool:
+    """Install MLX and mlx-lm."""
+    cmd = [sys.executable, "-m", "pip", "install"] + _MLX_PACKAGES
 
-    cmd = [sys.executable, "-m", "pip", "install", package]
-    if index_url:
-        cmd.extend(["--extra-index-url", index_url])
-
-    click.secho(f"  Installing {_LLAMA_CPP_PACKAGE} ({backend})...", fg=theme.TEXT)
+    click.secho("  Installing MLX backend...", fg=theme.TEXT)
     click.secho(f"  $ {' '.join(cmd)}", fg=theme.TEXT_DIM)
     click.echo()
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode == 0:
-            click.secho(f"  Installed successfully.", fg=theme.SUCCESS)
+            click.secho("  Installed successfully.", fg=theme.SUCCESS)
             return True
         else:
-            click.secho(f"  Installation failed:", fg=theme.ERROR)
-            # Show last few lines of stderr
-            stderr_lines = result.stderr.strip().splitlines()
-            for line in stderr_lines[-10:]:
+            click.secho("  Installation failed:", fg=theme.ERROR)
+            for line in result.stderr.strip().splitlines()[-10:]:
                 click.secho(f"    {line}", fg=theme.TEXT_DIM)
             return False
     except subprocess.TimeoutExpired:
@@ -153,47 +187,187 @@ def _install_llama_cpp(backend: str) -> bool:
         return False
 
 
-def _download_model() -> bool:
+def _install_llama_cpp(variant: str) -> bool:
+    """Install llama-cpp-python with the appropriate pre-built wheel."""
+    package = f"{_LLAMA_CPP_PACKAGE}>={_LLAMA_CPP_MIN_VERSION}"
+    index_url = _WHEEL_INDICES.get(variant)
+
+    cmd = [sys.executable, "-m", "pip", "install", package]
+    if index_url:
+        cmd.extend(["--extra-index-url", index_url])
+
+    click.secho(f"  Installing {_LLAMA_CPP_PACKAGE} ({variant})...", fg=theme.TEXT)
+    click.secho(f"  $ {' '.join(cmd)}", fg=theme.TEXT_DIM)
+    click.echo()
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0:
+            click.secho("  Installed successfully.", fg=theme.SUCCESS)
+            return True
+        else:
+            click.secho("  Installation failed:", fg=theme.ERROR)
+            for line in result.stderr.strip().splitlines()[-10:]:
+                click.secho(f"    {line}", fg=theme.TEXT_DIM)
+            return False
+    except subprocess.TimeoutExpired:
+        click.secho("  Installation timed out (5 min).", fg=theme.ERROR)
+        return False
+
+
+def _configure_api_backend() -> bool:
+    """Interactive configuration for API backend."""
+    click.secho("  API backend configuration:", fg=theme.TEXT)
+    click.echo()
+
+    base_url = os.environ.get("GLYPHH_API_BASE") or os.environ.get("OPENAI_API_BASE")
+    api_key = os.environ.get("GLYPHH_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    model_name = os.environ.get("GLYPHH_API_MODEL", "")
+
+    if base_url:
+        click.secho(f"    Base URL:  {base_url}", fg=theme.SUCCESS)
+    else:
+        click.secho(
+            "    Set GLYPHH_API_BASE (or OPENAI_API_BASE) to your endpoint.",
+            fg=theme.WARNING,
+        )
+
+    if api_key:
+        click.secho(f"    API key:   {'*' * 8}...{api_key[-4:]}", fg=theme.SUCCESS)
+    else:
+        click.secho(
+            "    Set GLYPHH_API_KEY (or OPENAI_API_KEY) for authentication.",
+            fg=theme.WARNING,
+        )
+
+    if model_name:
+        click.secho(f"    Model:     {model_name}", fg=theme.SUCCESS)
+    else:
+        click.secho(
+            "    Set GLYPHH_API_MODEL for model name "
+            "(default: auto from endpoint).",
+            fg=theme.TEXT_DIM,
+        )
+
+    click.echo()
+
+    if not base_url or not api_key:
+        click.secho(
+            "  Environment variables needed for API backend:",
+            fg=theme.INFO,
+        )
+        click.secho(
+            "    export GLYPHH_API_BASE=https://api.openai.com/v1",
+            fg=theme.TEXT_DIM,
+        )
+        click.secho(
+            "    export GLYPHH_API_KEY=sk-...",
+            fg=theme.TEXT_DIM,
+        )
+        click.secho(
+            "    export GLYPHH_API_MODEL=gpt-4.1-mini  # optional",
+            fg=theme.TEXT_DIM,
+        )
+        click.echo()
+        return bool(base_url and api_key)
+
+    return True
+
+
+def _download_mlx_model() -> bool:
+    """Download the MLX model directory from HuggingFace."""
+    dest = _model_dir() / _MLX_MODEL_DIRNAME
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    click.secho(f"  Downloading {_MLX_MODEL_REPO}...", fg=theme.TEXT)
+    click.secho(f"  To: {dest}", fg=theme.TEXT_DIM)
+    click.echo()
+
+    # Method 1: huggingface_hub (best — progress bar, resume support)
+    try:
+        from huggingface_hub import snapshot_download
+        snapshot_download(
+            repo_id=_MLX_MODEL_REPO,
+            local_dir=str(dest),
+        )
+        click.secho(
+            f"  Download complete ({_dir_size_str(dest)}).",
+            fg=theme.SUCCESS,
+        )
+        return True
+    except ImportError:
+        click.secho(
+            "  huggingface-hub not installed. Installing...",
+            fg=theme.TEXT_DIM,
+        )
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "huggingface-hub"],
+            capture_output=True, timeout=120,
+        )
+        try:
+            from huggingface_hub import snapshot_download
+            snapshot_download(
+                repo_id=_MLX_MODEL_REPO,
+                local_dir=str(dest),
+            )
+            click.secho(
+                f"  Download complete ({_dir_size_str(dest)}).",
+                fg=theme.SUCCESS,
+            )
+            return True
+        except Exception as e:
+            click.secho(f"  Download failed: {e}", fg=theme.ERROR)
+    except Exception as e:
+        click.secho(f"  Download failed: {e}", fg=theme.ERROR)
+
+    click.secho("  You can download manually:", fg=theme.INFO)
+    click.secho(
+        f"    huggingface-cli download {_MLX_MODEL_REPO} --local-dir {dest}",
+        fg=theme.INFO,
+    )
+    return False
+
+
+def _download_gguf_model() -> bool:
     """Download the default GGUF model from HuggingFace."""
-    dest = _model_path()
+    dest = _model_dir() / _GGUF_MODEL_FILENAME
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(".gguf.part")
 
-    click.secho(f"  Downloading {_MODEL_FILENAME}...", fg=theme.TEXT)
-    click.secho(f"  From: {_MODEL_URL}", fg=theme.TEXT_DIM)
+    click.secho(f"  Downloading {_GGUF_MODEL_FILENAME}...", fg=theme.TEXT)
+    click.secho(f"  From: {_GGUF_MODEL_URL}", fg=theme.TEXT_DIM)
     click.secho(f"  To:   {dest}", fg=theme.TEXT_DIM)
     click.echo()
 
-    # Try huggingface_hub first (best progress bar), fall back to httpx, then curl
     if _download_with_huggingface_hub(dest):
         return True
-
     if _download_with_httpx(dest, tmp):
         return True
-
     if _download_with_curl(dest, tmp):
         return True
 
     click.secho("  Download failed. You can download manually:", fg=theme.ERROR)
-    click.secho(f"    curl -L -o {dest} {_MODEL_URL}", fg=theme.INFO)
+    click.secho(f"    curl -L -o {dest} {_GGUF_MODEL_URL}", fg=theme.INFO)
     return False
 
 
 def _download_with_huggingface_hub(dest: Path) -> bool:
-    """Download using huggingface_hub if available (best progress bar)."""
+    """Download GGUF using huggingface_hub if available."""
     try:
         from huggingface_hub import hf_hub_download
         path = hf_hub_download(
-            repo_id=_MODEL_REPO,
-            filename=_MODEL_FILENAME,
+            repo_id=_GGUF_MODEL_REPO,
+            filename=_GGUF_MODEL_FILENAME,
             local_dir=str(dest.parent),
             local_dir_use_symlinks=False,
         )
-        # hf_hub_download may put it in a different location
         downloaded = Path(path)
         if downloaded != dest and downloaded.exists():
             shutil.move(str(downloaded), str(dest))
-        click.secho(f"  Download complete ({_file_size_str(dest)}).", fg=theme.SUCCESS)
+        click.secho(
+            f"  Download complete ({_file_size_str(dest)}).",
+            fg=theme.SUCCESS,
+        )
         return True
     except ImportError:
         return False
@@ -203,14 +377,16 @@ def _download_with_huggingface_hub(dest: Path) -> bool:
 
 
 def _download_with_httpx(dest: Path, tmp: Path) -> bool:
-    """Download using httpx with streaming (usually already installed)."""
+    """Download GGUF using httpx with streaming."""
     try:
         import httpx
     except ImportError:
         return False
 
     try:
-        with httpx.stream("GET", _MODEL_URL, follow_redirects=True, timeout=600) as r:
+        with httpx.stream(
+            "GET", _GGUF_MODEL_URL, follow_redirects=True, timeout=600,
+        ) as r:
             r.raise_for_status()
             total = int(r.headers.get("content-length", 0))
             downloaded = 0
@@ -224,14 +400,19 @@ def _download_with_httpx(dest: Path, tmp: Path) -> bool:
                         pct = int(downloaded * 100 / total)
                         if pct != last_pct and pct % 5 == 0:
                             click.secho(
-                                f"\r  Progress: {pct}% ({downloaded // (1024*1024)}MB / {total // (1024*1024)}MB)",
+                                f"\r  Progress: {pct}% "
+                                f"({downloaded // (1024*1024)}MB"
+                                f" / {total // (1024*1024)}MB)",
                                 fg=theme.TEXT_DIM, nl=False,
                             )
                             last_pct = pct
 
-        click.echo()  # newline after progress
+        click.echo()
         shutil.move(str(tmp), str(dest))
-        click.secho(f"  Download complete ({_file_size_str(dest)}).", fg=theme.SUCCESS)
+        click.secho(
+            f"  Download complete ({_file_size_str(dest)}).",
+            fg=theme.SUCCESS,
+        )
         return True
     except Exception as e:
         tmp.unlink(missing_ok=True)
@@ -240,19 +421,22 @@ def _download_with_httpx(dest: Path, tmp: Path) -> bool:
 
 
 def _download_with_curl(dest: Path, tmp: Path) -> bool:
-    """Download using curl as last resort."""
+    """Download GGUF using curl as last resort."""
     curl = shutil.which("curl")
     if not curl:
         return False
 
     try:
         result = subprocess.run(
-            [curl, "-L", "--progress-bar", "-o", str(tmp), _MODEL_URL],
+            [curl, "-L", "--progress-bar", "-o", str(tmp), _GGUF_MODEL_URL],
             timeout=1200,
         )
         if result.returncode == 0 and tmp.exists():
             shutil.move(str(tmp), str(dest))
-            click.secho(f"  Download complete ({_file_size_str(dest)}).", fg=theme.SUCCESS)
+            click.secho(
+                f"  Download complete ({_file_size_str(dest)}).",
+                fg=theme.SUCCESS,
+            )
             return True
         tmp.unlink(missing_ok=True)
         return False
@@ -260,6 +444,8 @@ def _download_with_curl(dest: Path, tmp: Path) -> bool:
         tmp.unlink(missing_ok=True)
         return False
 
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _file_size_str(path: Path) -> str:
     """Human-readable file size."""
@@ -271,29 +457,32 @@ def _file_size_str(path: Path) -> str:
     return f"{size / 1024:.0f} KB"
 
 
+def _dir_size_str(path: Path) -> str:
+    """Human-readable total size of a directory."""
+    total = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    if total >= 1024 ** 3:
+        return f"{total / (1024**3):.1f} GB"
+    if total >= 1024 ** 2:
+        return f"{total / (1024**2):.0f} MB"
+    return f"{total / 1024:.0f} KB"
+
+
 def _smoke_test() -> bool:
-    """Quick smoke test: load model, generate one token."""
+    """Quick smoke test: verify core SDK imports work."""
     click.secho("  Running smoke test...", fg=theme.TEXT)
 
     try:
-        from glyphh.llm import LLMEngine
-        engine = LLMEngine(n_ctx=512, verbose=False)
-        result = engine.generate(
-            system="You are a test assistant.",
-            user="Say OK.",
-            max_tokens=4,
+        from glyphh import Encoder, EncoderConfig, Concept
+        config = EncoderConfig(dimension=1000, seed=42)
+        encoder = Encoder(config)
+        concept = Concept(name="test", attributes={"key": "value"})
+        glyph = encoder.encode(concept)
+        click.secho(
+            f"  Smoke test passed. SDK operational "
+            f"(encoded test glyph, dim={len(glyph.global_cortex.data)}).",
+            fg=theme.SUCCESS,
         )
-        engine.unload()
-
-        if result and len(result.strip()) > 0:
-            click.secho(f"  Smoke test passed. Model responded: \"{result.strip()}\"", fg=theme.SUCCESS)
-            return True
-        else:
-            click.secho("  Smoke test: model loaded but returned empty response.", fg=theme.WARNING)
-            return True  # Still counts as working
-    except FileNotFoundError as e:
-        click.secho(f"  Smoke test skipped: {e}", fg=theme.WARNING)
-        return False
+        return True
     except Exception as e:
         click.secho(f"  Smoke test failed: {e}", fg=theme.ERROR)
         return False
@@ -302,25 +491,39 @@ def _smoke_test() -> bool:
 # ── CLI command ──────────────────────────────────────────────────────────────
 
 @click.command("setup")
-@click.option("--cpu", is_flag=True, default=False, help="Force CPU-only (skip GPU detection)")
-@click.option("--backend", type=click.Choice(["cpu", "metal", "cu124", "cu123"]),
-              default=None, help="Explicit backend choice")
+@click.option(
+    "--cpu", is_flag=True, default=False,
+    help="Force CPU-only llama-cpp-python (skip GPU detection)",
+)
+@click.option(
+    "--backend",
+    type=click.Choice(["mlx", "llama-cpp", "api"]),
+    default=None,
+    help="Force a specific backend",
+)
 @click.option("--skip-model", is_flag=True, default=False, help="Skip model download")
 @click.option("--skip-test", is_flag=True, default=False, help="Skip smoke test")
 @click.option("--status", is_flag=True, default=False, help="Show setup status only")
 def setup_command(cpu, backend, skip_model, skip_test, status):
     """Bootstrap the Glyphh runtime environment.
 
-    Detects your platform, installs the LLM inference backend with the
-    optimal pre-built wheel, downloads the default model, and verifies
-    everything works.
+    Detects your platform, installs the best LLM inference backend,
+    downloads the default model (Qwen3-0.6B), and verifies everything works.
+
+    \b
+    Backends:
+      mlx        Apple Silicon native (fastest on M-series Macs)
+      llama-cpp  Universal (CPU / CUDA / Metal / Vulkan)
+      api        Bring your own LLM via OpenAI-compatible API
 
     \b
     Examples:
-      glyphh setup              # Auto-detect everything
-      glyphh setup --cpu        # Force CPU-only backend
-      glyphh setup --backend metal   # Explicit Apple Metal backend
-      glyphh setup --status     # Check what's installed
+      glyphh setup                      # Auto-detect everything
+      glyphh setup --backend mlx        # Force MLX (Apple Silicon only)
+      glyphh setup --backend llama-cpp  # Force llama-cpp-python
+      glyphh setup --backend api        # Use external API endpoint
+      glyphh setup --cpu                # Force CPU-only (no GPU)
+      glyphh setup --status             # Check what's installed
     """
     click.echo()
     click.secho("  Glyphh Setup", fg=theme.TEXT, bold=True)
@@ -335,24 +538,51 @@ def setup_command(cpu, backend, skip_model, skip_test, status):
     if info["gpu"]:
         click.secho(f"    GPU:      {info['gpu']}", fg=theme.TEXT_DIM)
     else:
-        click.secho(f"    GPU:      not detected", fg=theme.TEXT_DIM)
+        click.secho("    GPU:      not detected", fg=theme.TEXT_DIM)
     click.echo()
 
     # ── Check current state ─────────────────────────────────────────────
+    mlx_version = _check_mlx_installed()
     llama_version = _check_llama_cpp_installed()
-    model_path = _check_model_exists()
+    api_base = _check_api_configured()
+    mlx_model = _check_mlx_model_exists()
+    gguf_model = _check_gguf_model_exists()
 
     click.secho("  Status", fg=theme.ACCENT, bold=True)
 
-    if llama_version:
-        click.secho(f"    Backend:  {_LLAMA_CPP_PACKAGE} {llama_version}", fg=theme.SUCCESS)
+    if mlx_version:
+        click.secho(f"    MLX:          mlx-lm {mlx_version}", fg=theme.SUCCESS)
     else:
-        click.secho(f"    Backend:  not installed", fg=theme.WARNING)
+        click.secho("    MLX:          not installed", fg=theme.TEXT_DIM)
 
-    if model_path:
-        click.secho(f"    Model:    {model_path} ({_file_size_str(model_path)})", fg=theme.SUCCESS)
+    if llama_version:
+        click.secho(
+            f"    llama.cpp:    {_LLAMA_CPP_PACKAGE} {llama_version}",
+            fg=theme.SUCCESS,
+        )
     else:
-        click.secho(f"    Model:    not found", fg=theme.WARNING)
+        click.secho("    llama.cpp:    not installed", fg=theme.TEXT_DIM)
+
+    if api_base:
+        click.secho(f"    API:          {api_base}", fg=theme.SUCCESS)
+    else:
+        click.secho("    API:          not configured", fg=theme.TEXT_DIM)
+
+    if mlx_model:
+        click.secho(
+            f"    MLX model:    {mlx_model} ({_dir_size_str(mlx_model)})",
+            fg=theme.SUCCESS,
+        )
+    else:
+        click.secho("    MLX model:    not found", fg=theme.TEXT_DIM)
+
+    if gguf_model:
+        click.secho(
+            f"    GGUF model:   {gguf_model} ({_file_size_str(gguf_model)})",
+            fg=theme.SUCCESS,
+        )
+    else:
+        click.secho("    GGUF model:   not found", fg=theme.TEXT_DIM)
 
     click.echo()
 
@@ -361,51 +591,173 @@ def setup_command(cpu, backend, skip_model, skip_test, status):
 
     # ── Determine backend ───────────────────────────────────────────────
     if cpu:
-        chosen_backend = "cpu"
-    elif backend:
-        chosen_backend = backend
+        chosen_backend = _BACKEND_LLAMA_CPP
+        llama_variant = "cpu"
+    elif backend == "mlx":
+        if info["os"] != "Darwin" or info["arch"] != "arm64":
+            click.secho(
+                "  MLX requires Apple Silicon (macOS arm64).",
+                fg=theme.ERROR,
+            )
+            sys.exit(1)
+        chosen_backend = _BACKEND_MLX
+        llama_variant = None
+    elif backend == "llama-cpp":
+        chosen_backend = _BACKEND_LLAMA_CPP
+        llama_variant = info["llama_cpp_variant"]
+    elif backend == "api":
+        chosen_backend = _BACKEND_API
+        llama_variant = None
     else:
         chosen_backend = info["recommended_backend"]
+        llama_variant = info["llama_cpp_variant"]
 
-    # ── Step 1: Install llama-cpp-python ─────────────────────────────────
-    if llama_version:
-        click.secho(f"  [1/3] Backend already installed (v{llama_version}), skipping.",
-                     fg=theme.TEXT_DIM)
-    else:
-        click.secho(f"  [1/3] Installing inference backend ({chosen_backend})",
-                     fg=theme.ACCENT, bold=True)
+    click.secho(
+        f"  Selected backend: {chosen_backend}",
+        fg=theme.INFO,
+    )
+    click.echo()
+
+    # ── Step 1: Install backend ─────────────────────────────────────────
+    if chosen_backend == _BACKEND_API:
+        click.secho(
+            "  [1/3] Configuring API backend",
+            fg=theme.ACCENT, bold=True,
+        )
         click.echo()
-        if not _install_llama_cpp(chosen_backend):
+        _configure_api_backend()
+
+    elif chosen_backend == _BACKEND_MLX:
+        if mlx_version:
+            click.secho(
+                f"  [1/3] MLX already installed (v{mlx_version}), skipping.",
+                fg=theme.TEXT_DIM,
+            )
+        else:
+            click.secho(
+                "  [1/3] Installing MLX backend",
+                fg=theme.ACCENT, bold=True,
+            )
             click.echo()
-            click.secho("  Setup failed at backend installation.", fg=theme.ERROR)
-            click.secho("  Try: pip install llama-cpp-python>=0.3.0", fg=theme.INFO)
-            sys.exit(1)
+            if not _install_mlx():
+                click.echo()
+                click.secho(
+                    "  Setup failed at backend installation.", fg=theme.ERROR,
+                )
+                click.secho(
+                    "  Try: pip install mlx>=0.18.0 mlx-lm>=0.20.0",
+                    fg=theme.INFO,
+                )
+                sys.exit(1)
+    else:
+        if llama_version:
+            click.secho(
+                f"  [1/3] llama-cpp-python already installed "
+                f"(v{llama_version}), skipping.",
+                fg=theme.TEXT_DIM,
+            )
+        else:
+            click.secho(
+                f"  [1/3] Installing llama-cpp-python ({llama_variant})",
+                fg=theme.ACCENT, bold=True,
+            )
+            click.echo()
+            if not _install_llama_cpp(llama_variant):
+                click.echo()
+                click.secho(
+                    "  Setup failed at backend installation.",
+                    fg=theme.ERROR,
+                )
+                click.secho(
+                    f"  Try: pip install {_LLAMA_CPP_PACKAGE}>="
+                    f"{_LLAMA_CPP_MIN_VERSION}",
+                    fg=theme.INFO,
+                )
+                sys.exit(1)
 
     click.echo()
 
     # ── Step 2: Download model ──────────────────────────────────────────
-    if skip_model:
-        click.secho("  [2/3] Model download skipped (--skip-model).", fg=theme.TEXT_DIM)
-    elif model_path:
-        click.secho(f"  [2/3] Model already present ({_file_size_str(model_path)}), skipping.",
-                     fg=theme.TEXT_DIM)
-    else:
-        click.secho(f"  [2/3] Downloading model", fg=theme.ACCENT, bold=True)
-        click.echo()
-        if not _download_model():
+    if chosen_backend == _BACKEND_API:
+        click.secho(
+            "  [2/3] No local model needed for API backend.",
+            fg=theme.TEXT_DIM,
+        )
+    elif skip_model:
+        click.secho(
+            "  [2/3] Model download skipped (--skip-model).",
+            fg=theme.TEXT_DIM,
+        )
+    elif chosen_backend == _BACKEND_MLX:
+        if mlx_model:
+            click.secho(
+                f"  [2/3] MLX model already present "
+                f"({_dir_size_str(mlx_model)}), skipping.",
+                fg=theme.TEXT_DIM,
+            )
+        else:
+            click.secho(
+                "  [2/3] Downloading model (MLX)",
+                fg=theme.ACCENT, bold=True,
+            )
             click.echo()
-            click.secho("  Setup failed at model download.", fg=theme.ERROR)
-            click.secho(f"  Download manually:", fg=theme.INFO)
-            click.secho(f"    curl -L -o {_model_path()} {_MODEL_URL}", fg=theme.INFO)
-            sys.exit(1)
+            if not _download_mlx_model():
+                click.echo()
+                click.secho(
+                    "  Setup failed at model download.", fg=theme.ERROR,
+                )
+                dest = _model_dir() / _MLX_MODEL_DIRNAME
+                click.secho(
+                    f"  Download manually:\n"
+                    f"    huggingface-cli download {_MLX_MODEL_REPO} "
+                    f"--local-dir {dest}",
+                    fg=theme.INFO,
+                )
+                sys.exit(1)
+    else:
+        if gguf_model:
+            click.secho(
+                f"  [2/3] GGUF model already present "
+                f"({_file_size_str(gguf_model)}), skipping.",
+                fg=theme.TEXT_DIM,
+            )
+        else:
+            click.secho(
+                "  [2/3] Downloading model (GGUF)",
+                fg=theme.ACCENT, bold=True,
+            )
+            click.echo()
+            if not _download_gguf_model():
+                click.echo()
+                click.secho(
+                    "  Setup failed at model download.", fg=theme.ERROR,
+                )
+                dest = _model_dir() / _GGUF_MODEL_FILENAME
+                click.secho(
+                    f"  Download manually:\n"
+                    f"    curl -L -o {dest} {_GGUF_MODEL_URL}",
+                    fg=theme.INFO,
+                )
+                sys.exit(1)
 
     click.echo()
 
     # ── Step 3: Smoke test ──────────────────────────────────────────────
     if skip_test:
-        click.secho("  [3/3] Smoke test skipped (--skip-test).", fg=theme.TEXT_DIM)
+        click.secho(
+            "  [3/3] Smoke test skipped (--skip-test).",
+            fg=theme.TEXT_DIM,
+        )
+    elif chosen_backend == _BACKEND_API:
+        click.secho(
+            "  [3/3] Smoke test skipped for API backend "
+            "(requires running endpoint).",
+            fg=theme.TEXT_DIM,
+        )
     else:
-        click.secho("  [3/3] Verifying installation", fg=theme.ACCENT, bold=True)
+        click.secho(
+            "  [3/3] Verifying installation", fg=theme.ACCENT, bold=True,
+        )
         click.echo()
         _smoke_test()
 
@@ -415,6 +767,12 @@ def setup_command(cpu, backend, skip_model, skip_test, status):
     click.secho("  Setup complete.", fg=theme.SUCCESS, bold=True)
     click.echo()
     click.secho("  Next steps:", fg=theme.TEXT)
-    click.secho("    glyphh dev .         Start a local dev server", fg=theme.TEXT_DIM)
-    click.secho("    glyphh chat          Interactive chat session", fg=theme.TEXT_DIM)
+    click.secho(
+        "    glyphh dev .         Start a local dev server",
+        fg=theme.TEXT_DIM,
+    )
+    click.secho(
+        "    glyphh chat          Interactive chat session",
+        fg=theme.TEXT_DIM,
+    )
     click.echo()

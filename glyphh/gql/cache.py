@@ -9,10 +9,14 @@ are not textually identical.
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from glyphh.core import Vector
 from glyphh.gql.encoder import QueryEncoder
+
+# Hebbian reinforcement bounds
+_MIN_STRENGTH = 0.3
+_MAX_STRENGTH = 3.0
 
 
 @dataclass
@@ -34,6 +38,7 @@ class CacheEntry:
     created_at: datetime = field(default_factory=datetime.now)
     hit_count: int = 0
     glyph_refs: Set[str] = field(default_factory=set)
+    strength: float = 1.0  # Hebbian reinforcement strength
 
 
 @dataclass
@@ -92,54 +97,75 @@ class QueryCache:
     
     def __init__(
         self,
-        encoder: QueryEncoder,
+        encoder: Optional[QueryEncoder] = None,
         max_size: int = 1000,
-        similarity_threshold: float = 0.95
+        similarity_threshold: float = 0.95,
+        similarity_fn: Optional[Callable[[Vector, Vector], float]] = None,
     ):
         """
         Initialize the query cache.
-        
+
         Args:
-            encoder: QueryEncoder for computing similarity
+            encoder: QueryEncoder for computing similarity (optional if similarity_fn provided)
             max_size: Maximum number of cached entries
             similarity_threshold: Minimum similarity for cache hit (0.0-1.0)
+            similarity_fn: Optional custom similarity function. When provided,
+                          used instead of encoder.similarity(). Allows GlyphSpace
+                          to create a cache without a GQL QueryEncoder.
         """
         self.encoder = encoder
         self.max_size = max_size
         self.threshold = similarity_threshold
+        self._similarity_fn = similarity_fn
         self._cache: OrderedDict[str, CacheEntry] = OrderedDict()
         self._stats = CacheStats()
         self._glyph_index: Dict[str, Set[str]] = {}  # glyph_id -> cache_keys
+        self._last_hit_key: Optional[str] = None  # for Hebbian reinforce()
     
+    def _compute_similarity(self, v1: Vector, v2: Vector) -> float:
+        """Compute similarity using custom function or encoder."""
+        if self._similarity_fn is not None:
+            return self._similarity_fn(v1, v2)
+        if self.encoder is not None:
+            return self.encoder.similarity(v1, v2)
+        return 0.0
+
     def get(self, query_vector: Vector) -> Optional[Tuple[Any, float]]:
         """
         Look up a query in the cache using HDC similarity.
-        
+
+        Similarity is weighted by Hebbian strength: entries that have been
+        reinforced positively score higher, weakened entries score lower.
+
         Args:
             query_vector: The encoded query vector
-        
+
         Returns:
             Tuple of (result, similarity_score) if found, None otherwise
         """
         best_match: Optional[CacheEntry] = None
         best_key: Optional[str] = None
         best_score = 0.0
-        
+
         for key, entry in self._cache.items():
-            score = self.encoder.similarity(query_vector, entry.query_vector)
-            if score > best_score and score >= self.threshold:
-                best_score = score
+            raw_score = self._compute_similarity(query_vector, entry.query_vector)
+            # Weight by Hebbian strength (capped at 1.0 for scoring)
+            weighted_score = raw_score * min(entry.strength, 1.0)
+            if weighted_score > best_score and weighted_score >= self.threshold:
+                best_score = weighted_score
                 best_match = entry
                 best_key = key
-        
+
         if best_match and best_key:
             # Update hit count and move to end (most recently used)
             best_match.hit_count += 1
             self._cache.move_to_end(best_key)
             self._stats.hits += 1
+            self._last_hit_key = best_key
             return (best_match.result, best_score)
-        
+
         self._stats.misses += 1
+        self._last_hit_key = None
         return None
     
     def put(
@@ -187,6 +213,31 @@ class QueryCache:
         
         return key
     
+    def reinforce(self, correct: bool) -> None:
+        """
+        Hebbian reinforcement on the most recently retrieved cache entry.
+
+        Strengthens correct results (+0.2), weakens incorrect ones (-0.3).
+        Entries that decay below _MIN_STRENGTH are evicted automatically.
+
+        Args:
+            correct: Whether the cached result was correct
+        """
+        if self._last_hit_key is None:
+            return
+        if self._last_hit_key not in self._cache:
+            self._last_hit_key = None
+            return
+
+        entry = self._cache[self._last_hit_key]
+        if correct:
+            entry.strength = min(_MAX_STRENGTH, entry.strength + 0.2)
+        else:
+            entry.strength = max(0.0, entry.strength - 0.3)
+            if entry.strength < _MIN_STRENGTH:
+                self._remove_entry(self._last_hit_key)
+                self._last_hit_key = None
+
     def invalidate_for_glyph(self, glyph_id: str) -> int:
         """
         Invalidate cache entries that reference a specific glyph.

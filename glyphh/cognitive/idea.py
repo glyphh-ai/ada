@@ -125,7 +125,7 @@ class IdeaEncoder:
 
         Args:
             query: Raw user query text
-            intent: Result from IntentExtractor.extract() —
+            intent: Intent extraction result dict —
                     {action, target, domain, keywords}
             state: Current state label (e.g. current context)
             recent_actions: Last N function names called

@@ -154,23 +154,49 @@ class GlyphStorageProtocol(Protocol):
     def get_glyph_attribute(self, glyph_id: GlyphId, attribute: str) -> Any:
         """
         Get an attribute value from a glyph.
-        
+
         This retrieves metadata or properties from a glyph,
         used for filtering and predicate evaluation.
-        
+
         Args:
             glyph_id: The glyph identifier
             attribute: The attribute name to retrieve
-            
+
         Returns:
             The attribute value, or None if not found.
-            
+
         Note:
             Implementations should check:
             1. Direct object attributes (getattr)
             2. attributes dict (SDK glyphs)
             3. metadata dict (runtime glyphs)
         """
+        ...
+
+    def add_glyph(self, glyph_id: GlyphId, glyph: Any) -> None:
+        """
+        Add or replace a glyph in storage.
+
+        Args:
+            glyph_id: The glyph identifier
+            glyph: The glyph object to store
+        """
+        ...
+
+    def remove_glyph(self, glyph_id: GlyphId) -> None:
+        """
+        Remove a glyph from storage.
+
+        Args:
+            glyph_id: The glyph identifier to remove
+
+        Note:
+            Should be a no-op if glyph doesn't exist.
+        """
+        ...
+
+    def clear(self) -> None:
+        """Remove all glyphs from storage."""
         ...
 
 
@@ -306,10 +332,22 @@ class InMemoryGlyphStorage:
             except Exception:
                 return 0.0
     
+    def add_glyph(self, glyph_id: GlyphId, glyph: Any) -> None:
+        """Add or replace a glyph in storage."""
+        self._glyphs[glyph_id] = glyph
+
+    def remove_glyph(self, glyph_id: GlyphId) -> None:
+        """Remove a glyph from storage. No-op if not found."""
+        self._glyphs.pop(glyph_id, None)
+
+    def clear(self) -> None:
+        """Remove all glyphs from storage."""
+        self._glyphs.clear()
+
     def get_glyph_attribute(self, glyph_id: GlyphId, attribute: str) -> Any:
         """
         Get an attribute value from a glyph.
-        
+
         Supports dotted path notation for nested attributes (e.g., "vehicle.identity.make").
         """
         glyph = self.get_glyph(glyph_id)

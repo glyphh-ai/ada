@@ -28,7 +28,7 @@ This is domain-agnostic — the same mechanism works for:
   - Navigation: state_x != target state_y -> prerequisite transition
   - Any domain where actions have implicit prerequisites
 
-Load domain knowledge via packs (like IntentExtractor):
+Load domain knowledge via packs:
 
     from glyphh.state import DeductiveLayer
 
@@ -413,8 +413,7 @@ class DeductiveLayer:
           2. Single-word synonyms — pack-defined mappings
           3. Literal function names — exact match against registered operating verbs
 
-        This resolves NL synonyms without the IntentExtractor's generic
-        vocabulary override problem.
+        This resolves NL synonyms using domain-specific pack vocabulary.
         """
         query_lower = query.lower()
 

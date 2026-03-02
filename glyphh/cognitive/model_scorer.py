@@ -75,3 +75,38 @@ class ModelScorer(Protocol):
         Default implementations can delegate to score().
         """
         ...
+
+    def encode_query(self, query: str) -> Any:
+        """Encode a query into a Glyph in the model's vector space.
+
+        Used by GlyphSpace to get a query Glyph for similarity scoring
+        against stored function Glyphs. Models that implement this method
+        enable the GlyphSpace routing path.
+
+        Returns:
+            An SDK Glyph, or None if the model doesn't support this.
+        """
+        ...
+
+    def get_func_glyphs(self) -> dict[str, Any]:
+        """Return the encoded function Glyphs (after configure()).
+
+        GlyphSpace stores these in InMemoryGlyphStorage for scoring.
+
+        Returns:
+            Mapping of function_name → SDK Glyph.
+            Empty dict if not configured or not supported.
+        """
+        ...
+
+    def scoring_strategy(self) -> Any:
+        """Return the model's scoring strategy for GlyphSpace.
+
+        Models with custom similarity logic (e.g. hierarchical multi-level
+        scoring) return a ScoringStrategy instance. Models that don't
+        implement this get DefaultScoringStrategy (cortex cosine similarity).
+
+        Returns:
+            A ScoringStrategy instance, or None for default.
+        """
+        ...

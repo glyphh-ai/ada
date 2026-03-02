@@ -1,20 +1,20 @@
 """
-CognitiveLoop — HDC + LLM multi-turn tool calling.
+CognitiveLoop — HDC multi-turn tool calling.
 
 The loop runs per turn:
-  1. PERCEIVE  — LLM-primary classification (or IntentExtractor fallback)
+  1. PERCEIVE  — ModelScorer classification (or keyword fallback)
   2. RECALL    — IdeaSpace: find similar past ideas
   3. DEDUCE    — DeductiveLayer: check state mismatch → prerequisites
   4. PREDICT   — InductiveLayer: learned pattern classification
-  5. RESOLVE   — Map intent → function names (skipped when LLM resolves directly)
-  6. SLOT      — SlotExtractor + LLM-provided args merged
-  7. CONVERGE  — Confidence gate (HDC + LLM blended)
+  5. RESOLVE   — Map intent → function names (skipped when scorer resolves directly)
+  6. SLOT      — SlotExtractor + scorer-provided args merged
+  7. CONVERGE  — Confidence gate
   8. DECIDE    — Emit CALL (confident + slots filled) or ASK
   9. RECORD    — Store this turn's idea-glyph in memory
 
-With LLM engine: SchemaIntentClassifier does PERCEIVE+RESOLVE+partial SLOT
-in a single call. HDC IntentCache learns from LLM decisions for fast repeat
-patterns. Without LLM engine: falls back to IntentExtractor (backward compat).
+With ModelScorer: SchemaIntentClassifier does PERCEIVE+RESOLVE+partial SLOT.
+GlyphSpace caches scoring results with Hebbian reinforcement for fast repeat patterns.
+Without ModelScorer: falls back to keyword extraction.
 
 No domain knowledge in the SDK. The config is application.
 """
@@ -36,12 +36,11 @@ from .idea import IdeaSpace, Idea
 from .slots import SlotExtractor
 
 if TYPE_CHECKING:
-    from glyphh.llm import LLMEngine
     from .model_scorer import ModelScorer
 
 logger = logging.getLogger(__name__)
 
-# ── Lightweight keyword extraction (no IntentExtractor needed) ──
+# ── Lightweight keyword extraction ──
 _STOP_WORDS: frozenset[str] = frozenset([
     "the", "a", "an", "to", "for", "on", "in", "is", "it", "i",
     "do", "can", "please", "now", "up", "my", "our", "me", "we",
@@ -81,22 +80,19 @@ class StepResult:
 
 
 class CognitiveLoop:
-    """HDC + LLM cognitive loop for multi-turn tool calling.
+    """HDC cognitive loop for multi-turn tool calling.
 
     Domain-agnostic: all domain knowledge comes from the DomainConfig.
     HDC sub-models handle pattern matching, state tracking, and memory.
-    Optional LLM engine handles NL understanding at specific pipeline points.
+    ModelScorer handles intent classification from domain HDC encoders.
     Emits CALL when confident, ASK when unsure. Never guesses.
 
     Usage:
-        from glyphh.llm import LLMEngine
-
         config = DomainConfig.from_file("domain/my_domain.json")
-        engine = LLMEngine()
         loop = CognitiveLoop(
             packs=["my_pack"],
             domain_config=config,
-            llm_engine=engine,
+            model_scorer=scorer,
         )
         loop_id = loop.begin(functions=func_defs, initial_state=normalized_state)
 
@@ -118,27 +114,23 @@ class CognitiveLoop:
         domain_config: DomainConfig | None = None,
         dimension: int = 10000,
         confidence_threshold: float = 0.25,
-        llm_engine: LLMEngine | None = None,
         model_scorer: ModelScorer | None = None,
     ):
         self._dim = dimension
         self._threshold = confidence_threshold
         self._config = domain_config
-        self._llm = llm_engine
 
-        # Intent classification — created when LLM or ModelScorer is available
-        if llm_engine is not None or model_scorer is not None:
+        # Intent classification — created when ModelScorer is available
+        if model_scorer is not None:
             from .schema_classifier import SchemaIntentClassifier
             self._classifier = SchemaIntentClassifier(
-                llm_engine=llm_engine,
                 dimension=dimension,
                 model_scorer=model_scorer,
             )
         else:
             self._classifier = None
 
-        # No IntentExtractor dependency — keyword extraction is inlined
-        # via _extract_keywords(). LLM handles all intent classification.
+        # Keyword extraction is inlined via _extract_keywords().
 
         # Sub-models
         self.idea_space = IdeaSpace(dimension=dimension)
@@ -199,7 +191,7 @@ class CognitiveLoop:
                 "collections": {},
             }
 
-        # Configure LLM-primary classifier with function schemas
+        # Configure classifier with function schemas
         if self._classifier is not None:
             self._classifier.configure(functions, self._action_to_func)
 
@@ -220,35 +212,34 @@ class CognitiveLoop:
         signals: dict[str, Any] = {}
 
         # ── 1. PERCEIVE: intent classification ──
-        llm_functions: list[str] = []
-        llm_arguments: dict[str, dict] = {}
-        llm_confidence: float = 0.0
+        scorer_functions: list[str] = []
+        scorer_arguments: dict[str, dict] = {}
+        scorer_confidence: float = 0.0
 
         if self._classifier is not None:
-            # LLM-primary path: function schemas define the intent space
+            # ModelScorer-primary path: function schemas define the intent space
             classification = self._classifier.classify(
                 query=query,
                 state=self._state,
                 recent_actions=self._recent_actions[-3:],
             )
             signals["classification"] = classification
-            signals["classification_source"] = classification.get("source", "llm")
+            signals["classification_source"] = classification.get("source", "model_scorer")
 
-            llm_functions = classification.get("functions", [])
-            llm_arguments = classification.get("arguments", {})
-            llm_confidence = classification.get("confidence", 0.0)
+            scorer_functions = classification.get("functions", [])
+            scorer_arguments = classification.get("arguments", {})
+            scorer_confidence = classification.get("confidence", 0.0)
 
             # Back-derive action for downstream compatibility (IdeaEncoder needs it)
             func_to_action = {v: k for k, v in self._action_to_func.items()}
-            action = func_to_action.get(llm_functions[0], "") if llm_functions else ""
+            action = func_to_action.get(scorer_functions[0], "") if scorer_functions else ""
             target = ""
 
-            # Lightweight keyword extraction — inlined, no IntentExtractor needed
             keywords = _extract_keywords(query)
             intent = {"action": action, "target": target, "domain": "", "keywords": keywords}
             signals["intent"] = intent
         else:
-            # No-LLM fallback: keyword-only extraction (no IntentExtractor)
+            # Keyword-only extraction fallback
             keywords = _extract_keywords(query)
             intent = {"action": "", "target": "", "domain": "", "keywords": keywords}
             signals["intent"] = intent
@@ -280,14 +271,12 @@ class CognitiveLoop:
         # ── 4. RESOLVE: map intent → function(s) ──
         # Trust classifier results when confidence is sufficient.
         # Model scorer results use a lower threshold (scorer already gates
-        # at its own confidence tiers), LLM results use 0.3.
-        classify_source = signals.get("classification_source", "")
-        is_scorer = classify_source.startswith("model_scorer")
-        resolve_threshold = 0.1 if is_scorer else 0.3
+        # at its own confidence tiers).
+        resolve_threshold = 0.1
 
-        if llm_functions and llm_confidence > resolve_threshold:
+        if scorer_functions and scorer_confidence > resolve_threshold:
             # Classifier already resolved functions — validate and apply rules
-            functions = [f for f in llm_functions if f in self._available_funcs]
+            functions = [f for f in scorer_functions if f in self._available_funcs]
             functions = self._apply_exclusion_rules(functions)
             signals["resolve_source"] = "classifier_direct"
         else:
@@ -317,12 +306,12 @@ class CognitiveLoop:
             query, functions, self._available_funcs, slot_state,
         )
 
-        # Merge LLM-provided arguments (from SchemaIntentClassifier)
-        if llm_arguments:
-            for fname, args in llm_arguments.items():
+        # Merge scorer-provided arguments (from SchemaIntentClassifier)
+        if scorer_arguments:
+            for fname, args in scorer_arguments.items():
                 if fname in self._available_funcs and isinstance(args, dict):
                     filled.setdefault(fname, {}).update(args)
-            signals["llm_arguments"] = llm_arguments
+            signals["scorer_arguments"] = scorer_arguments
 
         # Check for missing required slots
         missing = self.slot_extractor.missing_required(
@@ -337,9 +326,9 @@ class CognitiveLoop:
             intent, functions, deduction, recalled, filled, missing,
         )
 
-        # Blend with LLM classification confidence
-        if self._classifier is not None and llm_confidence > 0:
-            confidence = 0.4 * confidence + 0.6 * llm_confidence
+        # Blend with scorer classification confidence
+        if self._classifier is not None and scorer_confidence > 0:
+            confidence = 0.4 * confidence + 0.6 * scorer_confidence
 
         signals["confidence"] = confidence
 
@@ -389,7 +378,7 @@ class CognitiveLoop:
         # Reinforce episodic memory
         self.idea_space.reinforce_last(was_correct)
 
-        # Reinforce LLM intent cache
+        # Reinforce intent cache
         if self._classifier is not None:
             self._classifier.confirm(was_correct)
 

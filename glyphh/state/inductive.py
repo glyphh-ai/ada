@@ -21,7 +21,7 @@ This is domain-agnostic — the same mechanism works for:
   - Navigation: learn when transition is needed from query + context patterns
   - Any domain where actions correlate with observable features
 
-Load domain knowledge via packs (like IntentExtractor):
+Load domain knowledge via packs:
 
     from glyphh.state import InductiveLayer
 

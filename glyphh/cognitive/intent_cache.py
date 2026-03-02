@@ -1,10 +1,16 @@
-"""HDC Intent Cache — learns from LLM classifications for fast repeat patterns.
+"""HDC Intent Cache — learns from confirmed classifications for fast repeat patterns.
 
-Encodes query+state into HDC vectors, stores LLM classifications, returns
+.. deprecated::
+    Replaced by GlyphSpace + QueryCache for new code. GlyphSpace uses the
+    model's actual Glyph encoding (much richer than BoW) and leverages
+    QueryCache's Hebbian reinforcement. This module is retained for backward
+    compatibility but is no longer used by SchemaIntentClassifier.
+
+Encodes query+state into HDC vectors, stores classifications, returns
 cached results for similar queries. This is the mechanism by which HDC
-"learns" from LLM decisions:
+"learns" from decisions:
 
-  1. LLM classifies "go to the archive" → navigate(location="archive")
+  1. Classifier resolves "go to the archive" → navigate(location="archive")
   2. IntentCache encodes query + state → HDC vector, stores classification
   3. Next query "switch to the archive" → similar HDC vector → cache hit
   4. confirm(True) strengthens the entry (Hebbian)
