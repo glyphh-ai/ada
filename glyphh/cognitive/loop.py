@@ -37,6 +37,7 @@ from .slots import SlotExtractor
 
 if TYPE_CHECKING:
     from glyphh.llm import LLMEngine
+    from .model_scorer import ModelScorer
 
 logger = logging.getLogger(__name__)
 
@@ -118,18 +119,20 @@ class CognitiveLoop:
         dimension: int = 10000,
         confidence_threshold: float = 0.25,
         llm_engine: LLMEngine | None = None,
+        model_scorer: ModelScorer | None = None,
     ):
         self._dim = dimension
         self._threshold = confidence_threshold
         self._config = domain_config
         self._llm = llm_engine
 
-        # LLM-primary intent classification (when LLM available)
-        if llm_engine is not None:
+        # Intent classification — created when LLM or ModelScorer is available
+        if llm_engine is not None or model_scorer is not None:
             from .schema_classifier import SchemaIntentClassifier
             self._classifier = SchemaIntentClassifier(
                 llm_engine=llm_engine,
                 dimension=dimension,
+                model_scorer=model_scorer,
             )
         else:
             self._classifier = None
@@ -275,11 +278,18 @@ class CognitiveLoop:
         signals["deduction"] = deduction
 
         # ── 4. RESOLVE: map intent → function(s) ──
-        if llm_functions and llm_confidence > 0.3:
-            # LLM already resolved functions — validate and apply rules
+        # Trust classifier results when confidence is sufficient.
+        # Model scorer results use a lower threshold (scorer already gates
+        # at its own confidence tiers), LLM results use 0.3.
+        classify_source = signals.get("classification_source", "")
+        is_scorer = classify_source.startswith("model_scorer")
+        resolve_threshold = 0.1 if is_scorer else 0.3
+
+        if llm_functions and llm_confidence > resolve_threshold:
+            # Classifier already resolved functions — validate and apply rules
             functions = [f for f in llm_functions if f in self._available_funcs]
             functions = self._apply_exclusion_rules(functions)
-            signals["resolve_source"] = "llm_direct"
+            signals["resolve_source"] = "classifier_direct"
         else:
             # Traditional path: action → function mapping
             functions = self._resolve_functions(

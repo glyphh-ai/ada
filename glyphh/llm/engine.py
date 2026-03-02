@@ -159,14 +159,27 @@ class LLMEngine:
         choice = response["choices"][0]
         raw_text = choice["message"].get("content", "") or ""
 
-        # Try tool call first
+        # Try tool calls first
         tool_calls = choice["message"].get("tool_calls") or []
         if tool_calls:
-            args_str = tool_calls[0]["function"]["arguments"]
-            try:
-                data = json.loads(args_str)
-            except (json.JSONDecodeError, TypeError):
-                data = parse_tool_call_response(args_str)
+            if len(tool_calls) == 1:
+                # Single tool call — return as data with name + arguments
+                tc = tool_calls[0]
+                try:
+                    args = json.loads(tc["function"]["arguments"])
+                except (json.JSONDecodeError, TypeError):
+                    args = parse_tool_call_response(tc["function"]["arguments"])
+                data = {"name": tc["function"]["name"], "arguments": args}
+            else:
+                # Multiple tool calls — return as list in data
+                calls = []
+                for tc in tool_calls:
+                    try:
+                        args = json.loads(tc["function"]["arguments"])
+                    except (json.JSONDecodeError, TypeError):
+                        args = parse_tool_call_response(tc["function"]["arguments"])
+                    calls.append({"name": tc["function"]["name"], "arguments": args})
+                data = {"tool_calls": calls}
         else:
             data = parse_tool_call_response(raw_text)
 

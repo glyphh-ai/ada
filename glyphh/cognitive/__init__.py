@@ -18,6 +18,7 @@ from .domain import DomainConfig, SlotDefinition, StateEffect, TriggerSuppressio
 from .idea import IdeaEncoder, IdeaSpace, Idea
 from .intent_cache import IntentCache
 from .loop import CognitiveLoop, StepResult
+from .model_scorer import ModelScorer, ScorerResult
 from .schema_classifier import SchemaIntentClassifier
 from .slots import SlotExtractor
 
@@ -28,7 +29,9 @@ __all__ = [
     "IdeaSpace",
     "Idea",
     "IntentCache",
+    "ModelScorer",
     "SchemaIntentClassifier",
+    "ScorerResult",
     "SlotDefinition",
     "SlotExtractor",
     "StateEffect",

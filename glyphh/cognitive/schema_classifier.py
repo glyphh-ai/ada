@@ -1,18 +1,16 @@
-"""LLM-primary intent classification from function schemas.
+"""Intent classification from function schemas — three-tier waterfall.
 
-Replaces IntentExtractor within CognitiveLoop when an LLM engine is
-available. Uses function schemas as the intent space definition —
-no static vocabulary files or domain packs needed.
+Classification pipeline:
+  1. ModelScorer    (domain HDC encoder, sub-ms — when provided)
+  2. IntentCache    (learned HDC patterns from previous LLM decisions)
+  3. LLM           (structured generation, full classification)
 
-Pipeline:
-  1. HDC cache check (fast path for repeat patterns)
-  2. LLM structured classification (primary)
-  3. HDC cache store (learn from LLM for future fast path)
+When a ModelScorer is provided, it acts as the primary classification path.
+The LLM handles argument extraction and arbitrates uncertain scorer results.
+Over time, the IntentCache learns from confirmed decisions.
 
-The LLM does PERCEIVE + RESOLVE + partial SLOT in a single call:
-it selects function(s), extracts arguments, and reports confidence.
-Over time, HDC learns from LLM decisions and handles common patterns
-without calling the LLM (sub-millisecond).
+Without a ModelScorer, the pipeline is: IntentCache → LLM (original behavior).
+Without an LLM, the pipeline is: ModelScorer → IntentCache (HDC-only).
 """
 
 from __future__ import annotations
@@ -21,6 +19,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from .intent_cache import IntentCache
+from .model_scorer import ModelScorer, ScorerResult
 
 if TYPE_CHECKING:
     from glyphh.llm.engine import LLMEngine
@@ -29,10 +28,14 @@ logger = logging.getLogger(__name__)
 
 
 class SchemaIntentClassifier:
-    """LLM-primary intent classifier driven by function schemas.
+    """Three-tier intent classifier: ModelScorer → IntentCache → LLM.
 
     Usage:
-        classifier = SchemaIntentClassifier(llm_engine, dimension=10000)
+        classifier = SchemaIntentClassifier(
+            llm_engine=engine,       # optional
+            model_scorer=scorer,     # optional
+            dimension=10000,
+        )
         classifier.configure(functions, action_to_func)  # at begin() time
 
         result = classifier.classify(query, state, recent_actions)
@@ -41,13 +44,19 @@ class SchemaIntentClassifier:
         classifier.confirm(correct=True)  # Hebbian reinforcement
     """
 
+    # Confidence tiers for model scorer gating
+    _HIGH_CONFIDENCE = 0.50     # Trust scorer directly, LLM extracts args only
+    _UNCERTAIN_CONFIDENCE = 0.20  # LLM arbitrates (both scorer and LLM vote)
+
     def __init__(
         self,
-        llm_engine: LLMEngine,
+        llm_engine: LLMEngine | None = None,
         dimension: int = 10000,
         cache_threshold: float = 0.85,
+        model_scorer: ModelScorer | None = None,
     ):
         self._llm = llm_engine
+        self._scorer = model_scorer
         self._cache = IntentCache(
             dimension=dimension,
             threshold=cache_threshold,
@@ -83,16 +92,32 @@ class SchemaIntentClassifier:
 
         self._func_schemas = {f["name"]: f for f in functions}
         self._action_to_func = action_to_func
-        func_names = list(self._func_schemas.keys())
 
-        # Build the system prompt with function descriptions baked in
-        func_desc = format_function_descriptions(functions)
-        self._system_prompt = SCHEMA_CLASSIFY_SYSTEM.format(
-            function_descriptions=func_desc,
+        # Build the system prompt — concise, function descriptions
+        # are provided via the tool schemas themselves
+        self._system_prompt = (
+            "You are a function-calling assistant. "
+            "Given the user's query and current context, call the appropriate function(s). "
+            "If the query requires multiple function calls, make all of them. "
+            "If the query doesn't match any function, do not make any calls."
         )
 
-        # Build tool schema with function names as enum constraint
-        self._classify_tools = build_classify_tools(func_names)
+        # Pass the actual function schemas as tools — Qwen3 naturally
+        # calls them directly, which is more reliable than a meta-tool
+        self._classify_tools = []
+        for func in functions:
+            self._classify_tools.append({
+                "type": "function",
+                "function": {
+                    "name": func["name"],
+                    "description": func.get("description", ""),
+                    "parameters": func.get("parameters", {"type": "object", "properties": {}}),
+                },
+            })
+
+        # Configure model scorer with function definitions
+        if self._scorer is not None:
+            self._scorer.configure(functions)
 
         # Clear cache from previous session
         self._cache.clear()
@@ -104,14 +129,14 @@ class SchemaIntentClassifier:
         state: dict[str, Any],
         recent_actions: list[str],
     ) -> dict[str, Any]:
-        """Classify intent from query using HDC cache or LLM.
+        """Classify intent via three-tier waterfall: ModelScorer → Cache → LLM.
 
         Returns:
             {
                 "functions": ["func_name", ...],
                 "arguments": {"func_name": {"param": "value"}},
                 "confidence": 0.0-1.0,
-                "source": "hdc_cache" | "llm",
+                "source": "model_scorer" | "model_scorer+llm" | "hdc_cache" | "llm",
             }
         """
         if not self._configured:
@@ -124,26 +149,110 @@ class SchemaIntentClassifier:
 
         state_primary = state.get("primary", "")
 
-        # 1. HDC cache check (fast path)
+        # ── Tier 1: Model scorer (domain HDC, sub-ms) ──
+        if self._scorer is not None:
+            scorer_result = self._scorer.score(query)
+
+            if scorer_result.is_irrelevant:
+                logger.debug("ModelScorer: irrelevant (conf=%.3f)", scorer_result.confidence)
+                return {
+                    "functions": [],
+                    "arguments": {},
+                    "confidence": scorer_result.confidence,
+                    "source": "model_scorer_irrelevant",
+                    "all_scores": scorer_result.all_scores,
+                }
+
+            if scorer_result.confidence >= self._HIGH_CONFIDENCE:
+                # HIGH: trust scorer for routing, LLM extracts args only
+                logger.debug(
+                    "ModelScorer HIGH (conf=%.3f): %s",
+                    scorer_result.confidence, scorer_result.functions,
+                )
+                result = {
+                    "functions": scorer_result.functions,
+                    "arguments": scorer_result.arguments,
+                    "confidence": scorer_result.confidence,
+                    "source": "model_scorer",
+                    "all_scores": scorer_result.all_scores,
+                }
+                # Use LLM for argument extraction if available
+                if self._llm is not None and scorer_result.functions:
+                    llm_args = self._llm_extract_args(
+                        query, scorer_result.functions, state, recent_actions,
+                    )
+                    if llm_args:
+                        result["arguments"] = llm_args
+                return result
+
+            if scorer_result.confidence >= self._UNCERTAIN_CONFIDENCE:
+                # UNCERTAIN: LLM arbitrates (both score)
+                logger.debug(
+                    "ModelScorer UNCERTAIN (conf=%.3f): %s",
+                    scorer_result.confidence, scorer_result.functions,
+                )
+                if self._llm is not None:
+                    llm_result = self._llm_classify(query, state, recent_actions)
+                    # Check overlap between scorer and LLM
+                    scorer_set = set(scorer_result.functions)
+                    llm_set = set(llm_result.get("functions", []))
+                    overlap = scorer_set & llm_set
+                    if overlap:
+                        # Both agree — boost confidence
+                        llm_result["confidence"] = min(
+                            1.0,
+                            max(llm_result["confidence"], scorer_result.confidence) + 0.1,
+                        )
+                        llm_result["source"] = "model_scorer+llm"
+                    else:
+                        llm_result["source"] = "llm"
+                    llm_result["all_scores"] = scorer_result.all_scores
+                    return llm_result
+                else:
+                    # No LLM — return scorer result as-is
+                    return {
+                        "functions": scorer_result.functions,
+                        "arguments": scorer_result.arguments,
+                        "confidence": scorer_result.confidence,
+                        "source": "model_scorer",
+                        "all_scores": scorer_result.all_scores,
+                    }
+
+            # LOW confidence from scorer — fall through to cache/LLM
+            logger.debug(
+                "ModelScorer LOW (conf=%.3f), falling through",
+                scorer_result.confidence,
+            )
+
+        # ── Tier 2: IntentCache (learned HDC patterns, fast path) ──
         cached = self._cache.lookup(query, state_primary)
         if cached is not None:
             logger.debug("IntentCache hit (sim=%.3f)", cached.get("cache_similarity", 0))
             cached["source"] = "hdc_cache"
             return cached
 
-        # 2. LLM classification (primary)
-        result = self._llm_classify(query, state, recent_actions)
+        # ── Tier 3: LLM classification (generative, full) ──
+        if self._llm is not None:
+            result = self._llm_classify(query, state, recent_actions)
 
-        # 3. Store in cache for future fast path
-        if result["confidence"] > 0.3:
-            self._cache.store(query, state_primary, {
-                "functions": result["functions"],
-                "arguments": result["arguments"],
-                "confidence": result["confidence"],
-            })
+            # Store in cache for future fast path
+            if result["confidence"] > 0.3:
+                self._cache.store(query, state_primary, {
+                    "functions": result["functions"],
+                    "arguments": result["arguments"],
+                    "confidence": result["confidence"],
+                })
 
-        result["source"] = "llm"
-        return result
+            result["source"] = "llm"
+            return result
+
+        # ── No classification source available ──
+        return {
+            "functions": [],
+            "arguments": {},
+            "confidence": 0.0,
+            "source": "none",
+        }
 
     def confirm(self, correct: bool) -> None:
         """Hebbian reinforcement on the most recently cached entry."""
@@ -153,6 +262,67 @@ class SchemaIntentClassifier:
     def cache_size(self) -> int:
         """Number of entries in the HDC cache."""
         return self._cache.size
+
+    def _llm_extract_args(
+        self,
+        query: str,
+        functions: list[str],
+        state: dict[str, Any],
+        recent_actions: list[str],
+    ) -> dict[str, dict]:
+        """Targeted LLM call for argument extraction only.
+
+        Used when the ModelScorer has high confidence on routing but
+        doesn't extract arguments. Constrains the tool set to only
+        the scorer-selected functions for faster/cheaper LLM call.
+        """
+        # Build constrained tool set — only the functions the scorer selected
+        constrained_tools = [
+            t for t in self._classify_tools
+            if t.get("function", {}).get("name") in functions
+        ]
+        if not constrained_tools:
+            return {}
+
+        state_summary = self._summarize_state(state)
+        recent_str = ", ".join(recent_actions) if recent_actions else "none"
+
+        system = (
+            "You are a function-calling assistant. "
+            "The function to call has already been determined. "
+            "Extract the correct arguments from the user's query."
+        )
+        user_prompt = (
+            f"Context: {state_summary}\n"
+            f"Recent: {recent_str}\n"
+            f"Query: {query}"
+        )
+
+        try:
+            result = self._llm.structured_generate(
+                system=system,
+                user=user_prompt,
+                tools=constrained_tools,
+                max_tokens=512,
+            )
+            data = result.data
+            arguments: dict[str, dict] = {}
+
+            if "tool_calls" in data:
+                for tc in data["tool_calls"]:
+                    fname = tc.get("name", "")
+                    fargs = tc.get("arguments", {})
+                    if fname in self._func_schemas and isinstance(fargs, dict):
+                        arguments[fname] = fargs
+            elif "name" in data and data["name"] in self._func_schemas:
+                fargs = data.get("arguments", {})
+                if isinstance(fargs, dict):
+                    arguments[data["name"]] = fargs
+
+            return arguments
+        except Exception as e:
+            logger.warning("LLM arg extraction failed: %s", e)
+            return {}
 
     def _llm_classify(
         self,
@@ -178,13 +348,49 @@ class SchemaIntentClassifier:
                 system=self._system_prompt,
                 user=user_prompt,
                 tools=self._classify_tools,
-                max_tokens=256,
+                max_tokens=1024,
             )
 
             data = result.data
-            functions = data.get("functions", [])
-            arguments = data.get("arguments", {})
-            confidence = float(data.get("confidence", 0.0))
+            functions = []
+            arguments = {}
+            confidence = 0.0
+
+            # Handle three response formats from the LLM:
+            #
+            # 1. Meta-tool format (classify_and_call):
+            #    {"functions": [...], "arguments": {...}, "confidence": 0.9}
+            #
+            # 2. Single direct tool call (Qwen3 prefers calling functions directly):
+            #    {"name": "func_name", "arguments": {"param": "value"}}
+            #
+            # 3. Multiple direct tool calls:
+            #    {"tool_calls": [{"name": "f1", "arguments": {...}}, ...]}
+
+            if "tool_calls" in data:
+                # Multiple direct tool calls
+                for tc in data["tool_calls"]:
+                    fname = tc.get("name", "")
+                    fargs = tc.get("arguments", {})
+                    if fname in self._func_schemas:
+                        functions.append(fname)
+                        if isinstance(fargs, dict):
+                            arguments[fname] = fargs
+                confidence = 0.9 if functions else 0.0
+
+            elif "name" in data and data["name"] in self._func_schemas:
+                # Single direct tool call
+                fname = data["name"]
+                fargs = data.get("arguments", {})
+                functions = [fname]
+                arguments = {fname: fargs} if isinstance(fargs, dict) else {}
+                confidence = 0.9
+
+            elif "functions" in data:
+                # Meta-tool format
+                functions = data.get("functions", [])
+                arguments = data.get("arguments", {})
+                confidence = float(data.get("confidence", 0.0))
 
             # Validate function names against registered schemas
             valid_functions = [f for f in functions if f in self._func_schemas]
