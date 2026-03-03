@@ -714,21 +714,40 @@ class Encoder:
         
         return base_vector
     
+    def _get_morphology_engine(self):
+        """Lazily initialize MorphologyEngine for BoW normalization.
+
+        Creates a single MorphologyEngine per Encoder instance using the
+        same dimension/seed.  Returns None if the linguistics module is
+        unavailable (graceful fallback — BoW still works, just without
+        morphological normalization).
+        """
+        if not hasattr(self, '_morphology_engine'):
+            try:
+                from glyphh.linguistics.character import CharacterEncoder as CharEnc
+                from glyphh.linguistics.morphology import MorphologyEngine
+                char_enc = CharEnc(dimension=self.dimension, seed=self.seed)
+                self._morphology_engine = MorphologyEngine(char_enc)
+            except Exception:
+                self._morphology_engine = None
+        return self._morphology_engine
+
     def _encode_bag_of_words(self, text: str) -> Vector:
         """
         Encode a text value using bag-of-words bundling.
-        
-        Splits the text into individual words, encodes each word as a
-        deterministic symbol via generate_symbol(), and bundles them.
+
+        Splits the text into individual words, normalizes morphology
+        (plurals, tenses, etc.) via MorphologyEngine, encodes each word
+        as a deterministic symbol via generate_symbol(), and bundles them.
         Shared words between two bag-of-words vectors produce shared
         signal in cosine similarity.
-        
+
         Args:
             text: The text value to encode
-        
+
         Returns:
             Bundled bipolar Vector representing the bag of words
-        
+
         Example:
             >>> encoder = Encoder(EncoderConfig(dimension=10000, seed=42))
             >>> v1 = encoder._encode_bag_of_words("calculate area of circle")
@@ -739,10 +758,15 @@ class Encoder:
         # Split on non-alphanumeric, lowercase, filter empty
         words = re.sub(r"[^a-z0-9\s]", "", text.lower()).split()
         words = [w for w in words if len(w) > 1]
-        
+
         if not words:
             return self.generate_symbol("__empty__")
-        
+
+        # Normalize morphology — "days"→"day", "running"→"run", etc.
+        morph = self._get_morphology_engine()
+        if morph is not None:
+            words = [morph.normalize(w)[0] for w in words]
+
         # Deduplicate preserving order
         seen = set()
         unique_words = []
@@ -750,7 +774,7 @@ class Encoder:
             if w not in seen:
                 seen.add(w)
                 unique_words.append(w)
-        
+
         word_vecs = [self.generate_symbol(w) for w in unique_words]
         return self.bundle(word_vecs)
     

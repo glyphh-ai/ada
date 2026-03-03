@@ -145,7 +145,7 @@ async def deploy_model_to_db(
                     model_id=model_id,
                     concept_text=concept_text,
                     embedding=embedding,
-                    metadata=metadata,
+                    metadata={**metadata, "record_type": "pattern"},
                 )
                 created += 1
 

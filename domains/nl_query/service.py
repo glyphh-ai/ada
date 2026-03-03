@@ -260,6 +260,26 @@ def _extract_top_matches(fact_tree, n: int = 3) -> list[dict]:
     return []
 
 
+def _extract_top_match_detail(fact_tree) -> Optional[dict]:
+    """Return {glyph_id, concept_text, score, metadata} of the top-1 match."""
+    try:
+        ft_json = fact_tree.to_json() if hasattr(fact_tree, "to_json") else fact_tree
+        for child in ft_json.get("children", []):
+            if child.get("description") == "results":
+                matches = child.get("children", [])
+                if matches:
+                    v = matches[0].get("value") or {}
+                    return {
+                        "glyph_id": v.get("glyph_id"),
+                        "concept_text": v.get("concept_text"),
+                        "score": v.get("final_score"),
+                        "metadata": v.get("metadata") or {},
+                    }
+    except Exception:
+        pass
+    return None
+
+
 class NLQueryService:
     """
     Natural Language Query Service.
@@ -330,6 +350,34 @@ class NLQueryService:
         self._auto_schema_matcher = matcher
         logger.info("AutoSchemaMatcher set for NL query service")
     
+    async def _resolve_gql_template(
+        self,
+        org_id: str,
+        model_id: str,
+        matched_metadata: dict,
+    ) -> Optional[str]:
+        """Get gql_query from exemplar metadata, falling back to config.yaml default."""
+        # Per-exemplar override
+        gql = matched_metadata.get("gql_query")
+        if gql:
+            return gql
+
+        # Model-level default from config.yaml
+        try:
+            loaded_model = await self.query_service._model_manager.get_model(org_id, model_id)
+            if loaded_model and hasattr(loaded_model, "model_path"):
+                from pathlib import Path
+                import yaml
+                config_path = Path(loaded_model.model_path) / "config.yaml"
+                if config_path.exists():
+                    with open(config_path) as f:
+                        raw = yaml.safe_load(f) or {}
+                    return raw.get("gql_query_default")
+        except Exception:
+            pass
+
+        return None
+
     async def execute_nl_query(
         self,
         org_id: str,
@@ -343,6 +391,7 @@ class NLQueryService:
         Flow:
         1. Try auto-schema matching if AutoSchemaMatcher is available
         2. Default to similarity search (model's encode_query_fn handles NL)
+        2b. If matched exemplar has gql_query — execute Stage 2 reference search
         3. If encoding fails: ERROR
         """
         start_time = time.time()
@@ -432,11 +481,76 @@ class NLQueryService:
                     ),
                 )
 
+            # Step 1c: Confidence threshold — if the best match is below the
+            # model's similarity threshold, no exemplar matched confidently.
+            # Return ASK so the user can refine their query.
+            if top_scores and top_scores[0] < self.confidence_threshold:
+                top_matches = _extract_top_matches(fact_tree, n=3)
+                logger.info(
+                    f"Best score {top_scores[0]:.3f} below threshold "
+                    f"{self.confidence_threshold:.3f} for query: '{query}'"
+                )
+                return NLQueryResult(
+                    state=ResponseState.ASK,
+                    query_type="similarity_search",
+                    match_method="direct",
+                    confidence=top_scores[0],
+                    query_time_ms=elapsed_ms,
+                    ask=AskPayload(
+                        question="No confident match found. Can you be more specific?",
+                        disambiguation_options=[
+                            {
+                                "intent": m["concept_text"],
+                                "confidence": m["score"],
+                                "suggestion": f"{m['concept_text']} ({m['score']:.0%} match)",
+                            }
+                            for m in top_matches
+                        ] if top_matches else [],
+                    ),
+                )
+
+            # Step 2: Two-stage GQL execution (if model defines gql_query)
+            match_detail = _extract_top_match_detail(fact_tree)
+            result_tree = fact_tree
+            match_method = "direct"
+
+            if match_detail and match_detail.get("glyph_id"):
+                gql_template = await self._resolve_gql_template(
+                    org_id, model_id, match_detail.get("metadata", {}),
+                )
+                if gql_template:
+                    try:
+                        stage2_tree = await self.query_service.similarity_search_by_reference(
+                            org_id=org_id,
+                            model_id=model_id,
+                            reference_glyph_id=match_detail["glyph_id"],
+                            top_k=10,
+                            threshold=0.5,
+                        )
+                        resolved_gql = gql_template.replace(
+                            "{matched_id}", match_detail["glyph_id"],
+                        )
+                        result_tree = FactTreeBuilder.build_two_stage_result(
+                            exemplar_match=match_detail,
+                            data_results=stage2_tree,
+                            gql_query=resolved_gql,
+                            total_query_time_ms=(time.time() - start_time) * 1000,
+                        )
+                        match_method = "similarity_search"
+                        logger.info(
+                            f"Two-stage query: exemplar={match_detail['concept_text']!r}, "
+                            f"gql={resolved_gql}"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Stage 2 GQL failed: {e}, returning Stage 1 only")
+
+            elapsed_ms = (time.time() - start_time) * 1000
+
             return NLQueryResult(
                 state=ResponseState.DONE,
-                fact_tree=fact_tree,
+                fact_tree=result_tree,
                 query_type="similarity_search",
-                match_method="direct",
+                match_method=match_method,
                 confidence=top_scores[0] if top_scores else 1.0,
                 translated_query={"operation": "similarity_search", "query": query} if debug else None,
                 query_time_ms=elapsed_ms,

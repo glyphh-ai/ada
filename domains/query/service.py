@@ -11,6 +11,7 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
@@ -257,27 +258,43 @@ class QueryService:
         # Get model config for weights
         config = await self._model_manager.get_config(org_id, model_id)
         similarity_weights = config.similarity_weights
-        
+
+        # Read default_filter from model's config.yaml (e.g. similarity.default_filter)
+        effective_filters = dict(request.filters or {})
+        try:
+            model_config_path = Path(loaded_model.model_path) / "config.yaml"
+            if model_config_path.exists():
+                import yaml
+                with open(model_config_path) as _f:
+                    _raw = yaml.safe_load(_f) or {}
+                default_filter = _raw.get("similarity", {}).get("default_filter") or {}
+                # Default filter only applies if not overridden by the caller
+                for k, v in default_filter.items():
+                    if k not in effective_filters:
+                        effective_filters[k] = v
+        except Exception:
+            pass
+
         async with self._session_factory() as session:
             storage = GlyphStorage(session)
-            
+
             # Get all glyphs for similarity computation
             glyphs, embeddings_dict = await storage.list_glyphs_with_embeddings(
                 org_id=org_id,
                 model_id=model_id,
                 limit=1000,  # Get enough glyphs for search
             )
-            
+
             # Convert to list of (glyph, embedding) tuples, applying filters
             raw_results = []
             for glyph in glyphs:
                 glyph_id_str = str(glyph.id)
                 if glyph_id_str in embeddings_dict:
                     # Apply filters if provided
-                    if request.filters:
+                    if effective_filters:
                         metadata = glyph.metadata or {}
                         matches_filter = all(
-                            metadata.get(k) == v for k, v in request.filters.items()
+                            metadata.get(k) == v for k, v in effective_filters.items()
                         )
                         if not matches_filter:
                             continue
@@ -344,7 +361,104 @@ class QueryService:
             query_time_ms=query_time_ms,
             total_count=len(scored_results),
         )
-    
+
+    async def similarity_search_by_reference(
+        self,
+        org_id: str,
+        model_id: str,
+        reference_glyph_id: str,
+        top_k: int = 10,
+        threshold: float = 0.5,
+        exclude_ids: Optional[set] = None,
+    ) -> FactTree:
+        """
+        Search for glyphs similar to an existing reference glyph.
+
+        Used in two-stage queries: after matching an exemplar (Stage 1),
+        find data records with similar profiles (Stage 2).
+
+        Args:
+            reference_glyph_id: UUID string of the reference glyph
+            top_k: Maximum results to return
+            threshold: Minimum similarity score
+            exclude_ids: Glyph IDs to exclude from results (e.g. other exemplars)
+        """
+        start_time = time.time()
+
+        loaded_model = await self._model_manager.get_model(org_id, model_id)
+        if loaded_model is None:
+            raise ModelNotFoundException(org_id, model_id)
+
+        similarity_service = self._get_similarity_service(loaded_model)
+
+        async with self._session_factory() as session:
+            storage = GlyphStorage(session)
+
+            glyphs, embeddings_dict = await storage.list_glyphs_with_embeddings(
+                org_id=org_id,
+                model_id=model_id,
+                limit=1000,
+            )
+
+            # Get the reference glyph's embedding
+            ref_embedding = embeddings_dict.get(reference_glyph_id)
+            if ref_embedding is None:
+                raise ValidationException(
+                    field="reference_glyph_id",
+                    reason=f"Reference glyph {reference_glyph_id} not found or has no embedding",
+                )
+
+            skip_ids = {reference_glyph_id}
+            if exclude_ids:
+                skip_ids |= exclude_ids
+
+            scored_results = []
+            for glyph in glyphs:
+                glyph_id_str = str(glyph.id)
+
+                if glyph_id_str in skip_ids:
+                    continue
+
+                if glyph_id_str not in embeddings_dict:
+                    continue
+
+                glyph_embedding = embeddings_dict[glyph_id_str]
+                score = similarity_service.compute_similarity(
+                    ref_embedding,
+                    glyph_embedding,
+                )
+
+                if score >= threshold:
+                    scored_results.append(ScoredGlyph(
+                        glyph=glyph,
+                        similarity_score=score,
+                        security_weight=1.0,
+                        final_score=score,
+                    ))
+
+            scored_results.sort(
+                key=lambda x: (-x.final_score, str(x.glyph.id)),
+            )
+
+            # Deduplicate by concept_text
+            seen: set = set()
+            deduped: list = []
+            for sr in scored_results:
+                key = sr.glyph.concept_text
+                if key not in seen:
+                    seen.add(key)
+                    deduped.append(sr)
+            scored_results = deduped[:top_k]
+
+        query_time_ms = (time.time() - start_time) * 1000
+
+        return FactTreeBuilder.build_similarity_search(
+            query=f"glyph_ref({reference_glyph_id})",
+            results=scored_results,
+            query_time_ms=query_time_ms,
+            total_count=len(scored_results),
+        )
+
     async def generate_fact_tree(
         self,
         org_id: str,
@@ -563,6 +677,20 @@ class QueryService:
                     attrs = concept.get("attributes", concept)
                     concept = _Concept(name=name, attributes=attrs)
                 glyph = encoder.encode(concept)
+                # Exclude the _temporal layer from the query embedding so that
+                # similarity scores are deterministic (temporal uses datetime.now()
+                # which changes every call, making scores non-deterministic).
+                # Stored glyphs have a fixed ingestion timestamp — the query should
+                # match their semantic/metrics layers only.
+                non_temporal = [
+                    layer.cortex.data
+                    for name, layer in glyph.layers.items()
+                    if name != "_temporal" and hasattr(layer, "cortex") and layer.cortex is not None
+                ]
+                if non_temporal:
+                    from glyphh.core.ops import bundle
+                    query_arr = bundle(non_temporal)
+                    return query_arr.astype(float).tolist()
                 return glyph.global_cortex.data.astype(float).tolist()
 
             # No custom encoder — fail clean

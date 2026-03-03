@@ -287,6 +287,74 @@ class FactTreeBuilder:
         return fact_tree
 
     @staticmethod
+    def build_two_stage_result(
+        exemplar_match: Dict[str, Any],
+        data_results: FactTree,
+        gql_query: str,
+        total_query_time_ms: float = 0.0,
+    ) -> FactTree:
+        """
+        Build a FactTree for two-stage query results.
+
+        Produces a standard "Similarity Search" FactTree so both CLI and UI
+        render it like any other similarity search (% bars, concept text).
+        The matched exemplar context is preserved in Execution Metadata.
+
+        Args:
+            exemplar_match: {glyph_id, concept_text, score, metadata}
+            data_results: FactTree from Stage 2 similarity search
+            gql_query: The resolved GQL template (for debug)
+            total_query_time_ms: Total time for both stages
+        """
+        fact_tree = FactTree()
+        fact_tree.root.description = "Similarity Search"
+
+        # Query info (the matched exemplar's concept text)
+        fact_tree.add_fact(
+            path=["query"],
+            description="Search Query",
+            value=exemplar_match.get("concept_text", ""),
+        )
+
+        # Copy Stage 2 data results into the standard "results" path
+        try:
+            s2_json = data_results.to_json() if hasattr(data_results, "to_json") else {}
+            match_idx = 1
+            for child in s2_json.get("children", []):
+                if child.get("description") == "results":
+                    for match_node in child.get("children", []):
+                        fact_tree.add_fact(
+                            path=["results", f"match_{match_idx}"],
+                            description=f"Match {match_idx}",
+                            value=match_node.get("value"),
+                            data_context=match_node.get("data_context"),
+                        )
+                        match_idx += 1
+        except Exception:
+            pass
+
+        # Metadata — includes exemplar context for reference
+        exemplar_metadata = exemplar_match.get("metadata") or {}
+        fact_tree.add_fact(
+            path=["metadata"],
+            description="Execution Metadata",
+            value=None,
+            data_context={
+                "query_time_ms": total_query_time_ms,
+                "gql_query": gql_query,
+                "matched_exemplar": {
+                    "glyph_id": exemplar_match.get("glyph_id"),
+                    "concept_text": exemplar_match.get("concept_text"),
+                    "confidence": exemplar_match.get("score"),
+                    **exemplar_metadata,
+                },
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+
+        return fact_tree
+
+    @staticmethod
     def build_error(
         error_message: str,
         error_type: str,

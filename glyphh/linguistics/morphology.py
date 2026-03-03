@@ -50,6 +50,17 @@ _PLURAL_SEEDS: list[tuple[str, str]] = [
     ("items", "item"), ("names", "name"), ("types", "type"),
     ("lines", "line"), ("keys", "key"), ("rooms", "room"),
     ("steps", "step"), ("rules", "rule"),
+    # Multi-syllable (improves generalisation for longer words)
+    ("customers", "customer"), ("tickets", "ticket"), ("numbers", "number"),
+    ("problems", "problem"), ("features", "feature"), ("accounts", "account"),
+    ("reports", "report"), ("records", "record"), ("products", "product"),
+    ("updates", "update"), ("systems", "system"), ("actions", "action"),
+    ("milestones", "milestone"), ("defects", "defect"), ("logins", "login"),
+    ("creates", "create"), ("deletes", "delete"), ("messages", "message"),
+    # Short common nouns
+    ("days", "day"), ("ways", "way"), ("maps", "map"),
+    ("logs", "log"), ("tags", "tag"), ("sets", "set"),
+    ("cases", "case"), ("users", "user"), ("tests", "test"),
     # Irregular / sibilant
     ("boxes", "box"), ("buses", "bus"), ("classes", "class"),
     ("dresses", "dress"), ("foxes", "fox"), ("matches", "match"),

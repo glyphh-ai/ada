@@ -457,29 +457,25 @@ async def clear_data(
 
 # ── Chat UI ───────────────────────────────────────────────────────────────────
 
-def _load_logo_b64() -> str | None:
-    """Try to load glyphh-logo.png from the sibling glyphh-studio directory.
+def _load_asset_b64(filename: str) -> str | None:
+    """Load an image from glyphh-runtime/public/ as base64.
 
-    Returns base64-encoded PNG string, or None if not found (falls back to SVG).
+    Returns base64-encoded string, or None if not found.
     Loaded once at module import time — not per-request.
     """
     import base64
-    candidates = [
-        # Sibling repo layout: glyphh-master/glyphh-studio/public/
-        Path(__file__).resolve().parent.parent.parent.parent / "glyphh-studio" / "public" / "glyphh-logo.png",
-        # Alternate: studio next to runtime root
-        Path(__file__).resolve().parent.parent.parent / "glyphh-studio" / "public" / "glyphh-logo.png",
-    ]
-    for p in candidates:
-        if p.exists():
-            try:
-                return base64.b64encode(p.read_bytes()).decode("ascii")
-            except Exception:
-                pass
+    # glyphh-runtime/public/ — the runtime's own public assets
+    p = Path(__file__).resolve().parent.parent.parent / "public" / filename
+    if p.exists():
+        try:
+            return base64.b64encode(p.read_bytes()).decode("ascii")
+        except Exception:
+            pass
     return None
 
 
-_LOGO_B64: str | None = _load_logo_b64()
+_LOGO_B64: str | None = _load_asset_b64("glyphh-logo.png")
+_FAVICON_B64: str | None = _load_asset_b64("favicon.png")
 
 
 @router.get("/chat", response_class=HTMLResponse, include_in_schema=False)
@@ -504,6 +500,7 @@ def _chat_html(org_id: str, model_id: str, deployment_mode: str = "local") -> st
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>glyphh · {model_id}</title>
+{f'<link rel="icon" type="image/png" href="data:image/png;base64,{_FAVICON_B64}">' if _FAVICON_B64 else ''}
 <style>
 *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
 :root{{
@@ -600,6 +597,11 @@ details[open] .summary-arrow{{transform:rotate(90deg)}}
 .result-pre::-webkit-scrollbar{{height:3px}}
 .result-pre::-webkit-scrollbar-thumb{{background:var(--purple);border-radius:2px}}
 .result-query-label{{padding:4px 12px 8px;font-size:10px;color:var(--text-muted)}}
+/* ── Match result rows (similarity search) ── */
+.match-row{{display:flex;align-items:center;gap:8px;padding:2px 0;font-family:var(--mono)}}
+.match-pct{{color:var(--purple-light);min-width:3.8em;text-align:right;font-size:12px;font-weight:600}}
+.match-bar{{color:var(--purple-light);font-size:11px;opacity:0.65;letter-spacing:0}}
+.match-name{{color:var(--text-light);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 </style>
 </head>
 <body>
@@ -785,11 +787,17 @@ function summarizeResult(ft) {{
     const errChild = (ft.children || []).find(c => c.description === 'Error Details');
     return '⚠ ' + escHtml(String(errChild?.value || 'Query failed'));
   }}
-  // Similarity search matches
+  // Similarity search matches — render all rows like the CLI
   const matches = getMatchNodes(ft);
   if (matches.length > 0) {{
-    const name = matches[0].value?.concept_text || 'match';
-    return `<strong>${{escHtml(name)}}</strong>${{matches.length > 1 ? ` +${{matches.length-1}} more` : ''}}`;
+    return matches.map(m => {{
+      const score = m.value?.final_score ?? 0;
+      const pct = (score * 100).toFixed(1);
+      const filled = Math.round(score * 12);
+      const bar = '█'.repeat(filled) + '░'.repeat(12 - filled);
+      const name = escHtml(m.value?.concept_text || 'match');
+      return `<div class="match-row"><span class="match-pct">${{pct}}%</span><span class="match-bar">[${{bar}}]</span><span class="match-name">${{name}}</span></div>`;
+    }}).join('');
   }}
   // No results
   if (ft.description === 'Similarity Search') return 'No matches found';
@@ -889,24 +897,35 @@ async function submit() {{
       const errChild = (ft?.children || []).find(c => c.description === 'Error Details');
       addMessage('error', escHtml(String(errChild?.value || 'Query error')), null);
     }} else {{
-      const summary = summarizeResult(ft);
-      // Confidence = top match's actual similarity score, not the intent confidence
-      const matches = getMatchNodes(ft);
-      const topScore = matches.length > 0 ? matches[0].value?.final_score : null;
-      const conf = (topScore !== null && topScore !== undefined) ? (topScore * 100).toFixed(0) + '%' : null;
       const ms = typeof data.query_time_ms === 'number' ? data.query_time_ms.toFixed(1) + 'ms' : null;
       const method = data.match_method;
       const qtype = data.query_type;
 
       let metaParts = [];
       if (state) metaParts.push(`<span class="pill state-badge state-${{state}}">${{escHtml(state)}}</span>`);
-      if (conf) metaParts.push(`<span class="conf">↑ ${{conf}}</span>`);
       if (ms) metaParts.push(`<span>${{ms}}</span>`);
       if (method && method !== 'none') metaParts.push(`<span class="pill">${{escHtml(method)}}</span>`);
       if (qtype && qtype !== 'unknown') metaParts.push(`<span class="pill">${{escHtml(qtype)}}</span>`);
 
-      addMessage('assistant', summary, metaParts.join(''));
-      addResult(query, ft, currentTab, state);
+      if (state === 'ASK') {{
+        const askData = data.content?.[0]?.data?.ask || {{}};
+        const question = askData.question || 'Please clarify your request.';
+        let html = escHtml(question);
+        const options = askData.disambiguation_options || [];
+        if (options.length > 0) {{
+          html += '<ul style="margin:6px 0 0;padding-left:20px;list-style:none;">';
+          for (const opt of options) {{
+            const label = opt.suggestion || opt.intent || String(opt);
+            html += `<li style="margin:2px 0;">• ${{escHtml(label)}}</li>`;
+          }}
+          html += '</ul>';
+        }}
+        addMessage('assistant', html, metaParts.join(''));
+      }} else {{
+        const summary = summarizeResult(ft);
+        addMessage('assistant', summary, metaParts.join(''));
+        addResult(query, ft, currentTab, state);
+      }}
     }}
   }} catch(err) {{
     removeEl(thinking);

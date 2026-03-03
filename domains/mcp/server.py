@@ -312,6 +312,7 @@ class MCPServer:
         # Pass the model's assess_query_fn (if any) for semantic slot checking,
         # and min_gap from config for gap-based disambiguation.
         min_gap = 0.03  # default; overridden by model's disambiguation.min_gap
+        similarity_threshold = 0.5  # default; overridden by model's similarity.threshold
         try:
             import yaml
             cfg_path = None
@@ -322,12 +323,13 @@ class MCPServer:
             if cfg_path and cfg_path.exists():
                 _cfg = yaml.safe_load(cfg_path.read_text()) or {}
                 min_gap = _cfg.get("disambiguation", {}).get("min_gap", min_gap)
+                similarity_threshold = _cfg.get("similarity", {}).get("threshold", similarity_threshold)
         except Exception:
             pass
 
         nl_service = NLQueryService(
             query_service=self._query_service,
-            confidence_threshold=0.85,
+            confidence_threshold=similarity_threshold,
             assess_query_fn=getattr(loaded_model, "assess_query_fn", None),
             min_gap=min_gap,
         )
