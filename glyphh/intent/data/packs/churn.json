@@ -1,0 +1,204 @@
+{
+  "pack": "churn",
+  "description": "Customer churn prediction vocabulary — risk scoring, retention, usage analysis, customer health",
+  "actions": [
+    {
+      "canonical": "predict",
+      "synonyms": [
+        "predict", "forecast", "estimate", "project", "anticipate", "calculate probability",
+        "compute risk", "score", "rate", "evaluate", "assess probability", "determine likelihood"
+      ],
+      "phrases": [
+        "predict churn", "predict the risk", "forecast churn", "estimate churn probability",
+        "calculate churn score", "compute risk score", "assess churn risk", "score the customer"
+      ]
+    },
+    {
+      "canonical": "score",
+      "synonyms": [
+        "score", "rank", "rate", "grade", "quantify", "measure health", "compute score",
+        "generate score", "health score", "risk score", "calculate score"
+      ],
+      "phrases": [
+        "score the customer", "generate a risk score", "calculate health score",
+        "rank by churn risk", "rate the account", "compute the score", "get the risk score"
+      ]
+    },
+    {
+      "canonical": "flag",
+      "synonyms": [
+        "flag", "alert", "mark", "tag", "label", "identify", "surface", "highlight",
+        "escalate", "raise", "bubble up", "call out", "identify at-risk", "mark as at-risk"
+      ],
+      "phrases": [
+        "flag at-risk customers", "flag churning customers", "mark as high risk",
+        "identify at-risk accounts", "surface at-risk customers", "highlight churn risk",
+        "escalate to account manager", "tag as churn risk"
+      ]
+    },
+    {
+      "canonical": "analyze",
+      "synonyms": [
+        "analyze", "analyse", "investigate", "examine", "diagnose", "understand",
+        "break down", "deep dive", "drill into", "explore", "study", "review",
+        "audit", "dissect", "profile", "characterize"
+      ],
+      "phrases": [
+        "analyze churn drivers", "investigate why customers churn", "examine usage patterns",
+        "diagnose the drop", "understand the decline", "deep dive into", "audit the account",
+        "profile the customer", "break down the churn", "explore usage trends"
+      ]
+    },
+    {
+      "canonical": "retain",
+      "synonyms": [
+        "retain", "save", "recover", "rescue", "win back", "prevent churn", "keep",
+        "hold", "lock in", "renew", "re-engage", "reactivate", "revive", "bring back",
+        "win over", "prevent cancellation", "stop the churn"
+      ],
+      "phrases": [
+        "retain the customer", "save the account", "prevent churn for", "win back the customer",
+        "re-engage the user", "prevent cancellation", "stop them from churning",
+        "rescue the account", "bring back the churned customer", "reactivate the account"
+      ]
+    },
+    {
+      "canonical": "monitor",
+      "synonyms": [
+        "monitor", "watch", "track", "observe", "check", "keep an eye on", "follow",
+        "audit usage", "watch for signals", "detect", "sense", "scan for", "alert on",
+        "watch the trend", "monitor health"
+      ],
+      "phrases": [
+        "monitor customer health", "track usage trends", "watch for churn signals",
+        "monitor churn indicators", "keep an eye on at-risk accounts", "observe the trend",
+        "detect early churn signals", "monitor feature adoption", "track login activity"
+      ]
+    }
+  ],
+  "targets": [
+    {
+      "canonical": "risk",
+      "synonyms": [
+        "risk", "churn risk", "risk level", "risk score", "health score", "risk signal",
+        "churn probability", "churn score", "attrition risk", "cancellation risk",
+        "risk indicator", "risk factor", "danger signal"
+      ],
+      "phrases": ["the churn risk", "risk level", "risk score", "churn probability", "health score"]
+    },
+    {
+      "canonical": "cohort",
+      "synonyms": [
+        "cohort", "cohorts", "group", "batch", "segment group", "customer group",
+        "customer set", "subset", "behavioral cohort", "usage cohort", "signup cohort"
+      ],
+      "phrases": ["the cohort", "customer cohort", "analyze by cohort", "cohort analysis"]
+    },
+    {
+      "canonical": "segment",
+      "synonyms": [
+        "segment", "segments", "slice", "tier", "cluster", "customer tier", "risk tier",
+        "customer cluster", "usage segment", "high-risk segment", "low-usage segment"
+      ],
+      "phrases": ["the segment", "customer segment", "risk segment", "by segment", "segment analysis"]
+    },
+    {
+      "canonical": "health",
+      "synonyms": [
+        "health", "account health", "customer health", "health score", "health status",
+        "health metrics", "overall health", "customer wellbeing", "relationship health"
+      ],
+      "phrases": ["customer health", "account health", "health score", "health metrics", "overall health"]
+    }
+  ],
+  "phrases": [
+    {"phrase": "predict churn for", "action": "predict"},
+    {"phrase": "churn probability for", "action": "predict"},
+    {"phrase": "flag at-risk", "action": "flag"},
+    {"phrase": "identify at-risk", "action": "flag"},
+    {"phrase": "at-risk customers", "action": "flag"},
+    {"phrase": "which customers are likely to churn", "action": "predict"},
+    {"phrase": "customers at risk of churning", "action": "flag"},
+    {"phrase": "analyze churn drivers", "action": "analyze"},
+    {"phrase": "why did the customer churn", "action": "analyze"},
+    {"phrase": "what caused the churn", "action": "analyze"},
+    {"phrase": "churn reasons for", "action": "analyze"},
+    {"phrase": "retain the customer", "action": "retain"},
+    {"phrase": "save the account", "action": "retain"},
+    {"phrase": "prevent churn", "action": "retain"},
+    {"phrase": "win back", "action": "retain"},
+    {"phrase": "health score for", "action": "score"},
+    {"phrase": "risk score for", "action": "score"},
+    {"phrase": "monitor health", "action": "monitor"},
+    {"phrase": "track churn signals", "action": "monitor"},
+    {"phrase": "watch for churn", "action": "monitor"},
+    {"phrase": "customers with declining", "action": "flag"},
+    {"phrase": "customers with no logins", "action": "flag"},
+    {"phrase": "inactive customers", "action": "flag"},
+    {"phrase": "customers who haven't logged in", "action": "flag"},
+    {"phrase": "low feature adoption", "action": "analyze"},
+    {"phrase": "churned customers", "action": "analyze"},
+    {"phrase": "lost customers", "action": "analyze"},
+    {"phrase": "reactivate the account", "action": "retain"},
+    {"phrase": "re-engage the customer", "action": "retain"}
+  ],
+  "domain_signals": {
+    "churn": {
+      "churn": 10,
+      "at risk": 9,
+      "at-risk": 9,
+      "churned": 10,
+      "churn rate": 10,
+      "churn risk": 10,
+      "churn probability": 10,
+      "churn prediction": 10,
+      "churn score": 9,
+      "churn driver": 9,
+      "churn indicator": 9,
+      "risk score": 8,
+      "health score": 8,
+      "customer health": 8,
+      "account health": 8,
+      "attrition": 9,
+      "cancellation risk": 9,
+      "likely to churn": 10,
+      "cancel their subscription": 7,
+      "not renewing": 8,
+      "non-renewal": 8,
+      "disengaged": 7,
+      "inactive customer": 8,
+      "no logins": 8,
+      "zero logins": 8,
+      "low usage": 7,
+      "declining usage": 8,
+      "dropping off": 7,
+      "high churn risk": 10,
+      "early warning": 7,
+      "churn signal": 9
+    },
+    "retention": {
+      "retain": 9,
+      "retention": 10,
+      "retention rate": 10,
+      "renewal": 8,
+      "renew": 8,
+      "re-engage": 8,
+      "reactivate": 8,
+      "win back": 9,
+      "save the account": 9,
+      "prevent churn": 10,
+      "healthy customer": 8,
+      "engaged customer": 8,
+      "active user": 7,
+      "loyal customer": 8,
+      "net revenue retention": 10,
+      "nrr": 8,
+      "gross revenue retention": 10,
+      "grr": 8,
+      "customer success": 7,
+      "expansion revenue": 8,
+      "upsell": 6,
+      "advocacy": 6
+    }
+  }
+}

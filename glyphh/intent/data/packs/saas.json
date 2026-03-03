@@ -1,0 +1,689 @@
+{
+  "pack": "saas",
+  "description": "SaaS tool routing vocabulary — messaging, email, payments, tickets, CRM, calendar, files, analytics",
+  "actions": [
+    {
+      "canonical": "find",
+      "synonyms": ["find", "seek", "look for", "spot", "track down", "surface", "hunt down", "dig up", "pull up", "zero in on"],
+      "phrases": ["find the", "find me", "find all", "find a", "find out", "find time", "find free time"]
+    },
+    {
+      "canonical": "book",
+      "synonyms": ["book", "reserve", "hold", "block", "lock in", "nail down", "pencil in"],
+      "phrases": ["book a meeting", "book time", "book a call", "reserve time", "block off time", "block time on", "pencil in a"]
+    },
+    {
+      "canonical": "send",
+      "synonyms": [
+        "send", "email", "mail", "post", "announce", "dispatch", "blast", "transmit", "submit",
+        "relay", "cc", "bcc", "ping", "message", "shoot", "drop", "fire off", "push", "deliver",
+        "reach out", "write", "hit up", "touch base", "send off", "dash off", "pop off",
+        "notify", "inform", "tell", "let know", "pass along", "pass on"
+      ],
+      "phrases": [
+        "send a message to", "send an email to", "send a slack", "post to the channel",
+        "ping the team", "ping #", "shoot a message", "drop a message", "fire off an email",
+        "reach out to", "write to", "let them know", "pass this along", "notify the team",
+        "blast to the channel", "cc the team", "bcc on this"
+      ]
+    },
+    {
+      "canonical": "reply",
+      "synonyms": [
+        "reply", "respond", "answer", "acknowledge", "get back to", "follow up", "return",
+        "write back", "respond to", "react to", "come back to", "circle back", "reply to"
+      ],
+      "phrases": [
+        "reply to the", "respond to the", "get back to", "follow up on", "answer the email",
+        "respond to the ticket", "write back to", "circle back on", "reply in the thread"
+      ]
+    },
+    {
+      "canonical": "create",
+      "synonyms": [
+        "create", "make", "open", "file", "add", "build", "generate", "construct", "establish",
+        "provision", "spin up", "set up", "new", "start", "begin", "initiate", "raise", "log",
+        "open up", "kick off", "launch", "stand up", "spin", "cut", "draft", "put in"
+      ],
+      "phrases": [
+        "create a ticket", "create a new", "open a ticket", "open a bug", "file a bug",
+        "file a ticket", "open an issue", "raise a ticket", "log a bug", "add a new",
+        "set up a meeting", "create a contact", "create an event", "spin up a", "new ticket for",
+        "cut a ticket", "put in a ticket", "kick off a", "start a new"
+      ]
+    },
+    {
+      "canonical": "get",
+      "synonyms": [
+        "get", "fetch", "retrieve", "give", "show", "display", "pull", "check", "describe",
+        "summarize", "summarise", "tell", "look", "view", "see", "grab", "obtain", "access",
+        "inspect", "examine", "present", "pull up", "look up", "read", "peek", "review",
+        "check on", "check out", "bring up", "bring back", "return", "give me", "show me"
+      ],
+      "phrases": [
+        "get the details", "get me the", "show me the", "pull up the", "look up the",
+        "check the status", "fetch the", "grab the", "retrieve the", "give me a summary",
+        "what is the status of", "what happened to", "tell me about", "describe the",
+        "summarize the", "check on the", "bring up the", "show me what", "view the"
+      ]
+    },
+    {
+      "canonical": "list",
+      "synonyms": [
+        "list", "enumerate", "show all", "display all", "get all", "pull all", "show me all",
+        "see all", "view all", "get a list", "what are all", "what are the", "give me all",
+        "print all", "output all"
+      ],
+      "phrases": [
+        "list all the", "list the", "show all the", "show me all", "give me all",
+        "get all the", "what are all the", "list out the", "show every", "display all",
+        "pull all the", "get a list of all", "view all the", "see all the"
+      ]
+    },
+    {
+      "canonical": "search",
+      "synonyms": [
+        "search", "lookup", "scan", "hunt", "locate", "discover", "browse", "investigate",
+        "grep", "look for", "find out", "query", "filter", "sort through", "sift", "explore",
+        "dig into", "search for", "look through", "comb through"
+      ],
+      "phrases": [
+        "search for", "search across", "look for", "look through", "find all tickets",
+        "query the", "filter the", "search the inbox", "search messages", "scan for",
+        "hunt for", "locate the", "browse the", "sift through", "dig into the"
+      ]
+    },
+    {
+      "canonical": "update",
+      "synonyms": [
+        "update", "edit", "change", "modify", "adjust", "tweak", "patch", "amend", "revise",
+        "reschedule", "alter", "fix", "correct", "switch", "rename", "move", "shift",
+        "bump", "push", "extend", "swap", "flip", "turn", "toggle"
+      ],
+      "phrases": [
+        "update the ticket", "update the contact", "change the status", "edit the",
+        "modify the", "reschedule the meeting", "adjust the", "rename the", "move the",
+        "shift the deadline", "bump the priority", "extend the subscription", "fix the",
+        "swap out the", "flip the status", "turn on the", "toggle the"
+      ]
+    },
+    {
+      "canonical": "delete",
+      "synonyms": [
+        "delete", "remove", "void", "nuke", "erase", "clear", "destroy", "purge", "trash",
+        "wipe", "eliminate", "drop", "kill", "get rid of", "clean up", "close out",
+        "retire", "decommission", "tear down", "take down", "remove from", "strip out"
+      ],
+      "phrases": [
+        "delete the", "remove the", "get rid of", "wipe the", "nuke the", "purge the",
+        "clean up the", "close out the", "kill the", "drop the", "eliminate the",
+        "tear down the", "take down the", "remove from the"
+      ]
+    },
+    {
+      "canonical": "cancel",
+      "synonyms": [
+        "cancel", "terminate", "discontinue", "stop", "end", "abort", "halt", "suspend",
+        "deactivate", "unsubscribe", "turn off", "shut down", "close", "pause", "disable",
+        "wind down", "wrap up", "kill", "cut off", "opt out", "walk away from"
+      ],
+      "phrases": [
+        "cancel the subscription", "cancel their plan", "cancel for customer", "end the subscription",
+        "stop the subscription", "unsubscribe the customer", "suspend the", "pause the subscription",
+        "deactivate the account", "shut down the", "kill the subscription", "opt out of",
+        "turn off the"
+      ]
+    },
+    {
+      "canonical": "share",
+      "synonyms": [
+        "share", "grant", "distribute", "publish", "collaborate", "give access", "invite",
+        "circulate", "send to", "make available", "open up", "open access", "give permission",
+        "add collaborator", "add user", "add viewer", "add editor"
+      ],
+      "phrases": [
+        "share the file with", "share with", "give access to", "grant access to",
+        "invite to the", "share the folder", "make it accessible", "give them access",
+        "add them as editor", "add them as viewer", "publish the", "distribute to"
+      ]
+    },
+    {
+      "canonical": "upload",
+      "synonyms": [
+        "upload", "attach", "add file", "put", "push file", "drop in", "drag in",
+        "import file", "drop a file", "add an attachment", "include file"
+      ],
+      "phrases": [
+        "upload the file", "upload to drive", "attach to the ticket", "add a file to",
+        "upload to google drive", "drop the file in", "import the file", "attach the"
+      ]
+    },
+    {
+      "canonical": "track",
+      "synonyms": [
+        "track", "record", "log", "capture", "register", "monitor", "observe", "trace",
+        "measure", "note", "mark", "tick", "tally", "keep track of", "fire an event",
+        "fire event", "emit", "report", "flag"
+      ],
+      "phrases": [
+        "track an event", "track the event", "log an event", "record a event",
+        "fire a tracking event", "capture the event", "emit the event", "monitor the",
+        "keep track of", "log that the user", "record that"
+      ]
+    },
+    {
+      "canonical": "identify",
+      "synonyms": [
+        "identify", "recognize", "classify", "tag", "label", "categorize", "detect",
+        "flag", "mark", "associate", "link", "tie", "attach traits", "set traits",
+        "attribute", "profile", "map"
+      ],
+      "phrases": [
+        "identify the user", "identify user", "tag the user", "set user traits",
+        "associate the user", "profile the user", "mark the user as", "classify the user",
+        "link the user to", "attribute to the user", "map the user"
+      ]
+    },
+    {
+      "canonical": "assign",
+      "synonyms": [
+        "assign", "delegate", "allocate", "transfer", "give", "hand off", "move to",
+        "put on", "set assignee", "reassign", "route to", "hand to", "give to", "put in charge"
+      ],
+      "phrases": [
+        "assign the ticket to", "assign to", "hand off to", "delegate to",
+        "give the ticket to", "move to", "reassign to", "put it on", "route to",
+        "hand the ticket to", "give it to", "make them the assignee"
+      ]
+    },
+    {
+      "canonical": "comment",
+      "synonyms": [
+        "comment", "annotate", "remark", "note", "add note", "leave note", "write note",
+        "post comment", "add comment", "leave comment", "drop a note", "write a comment",
+        "leave feedback", "post a note", "say on", "add to"
+      ],
+      "phrases": [
+        "add a comment on", "comment on the ticket", "leave a note on", "post a comment",
+        "add a note to", "drop a note on", "write a comment on", "leave feedback on",
+        "say something on", "add a message to"
+      ]
+    },
+    {
+      "canonical": "charge",
+      "synonyms": [
+        "charge", "bill", "debit", "collect", "invoice customer", "run a charge",
+        "take payment", "process payment", "run payment", "collect payment", "invoice them"
+      ],
+      "phrases": [
+        "charge the customer", "charge the card", "bill the customer", "run a charge",
+        "take a payment", "collect payment from", "process payment for", "invoice the customer",
+        "charge them for", "bill them for"
+      ]
+    },
+    {
+      "canonical": "refund",
+      "synonyms": [
+        "refund", "reimburse", "credit", "compensate", "return money", "reverse charge",
+        "give back", "pay back", "reverse payment", "issue refund", "process refund",
+        "give a refund", "money back"
+      ],
+      "phrases": [
+        "refund the charge", "refund the customer", "issue a refund", "reverse the charge",
+        "give them a refund", "reimburse the", "return the payment", "credit the account",
+        "process a refund", "give back the money", "pay back the"
+      ]
+    },
+    {
+      "canonical": "subscribe",
+      "synonyms": [
+        "subscribe", "enroll", "activate", "join", "sign up", "start subscription",
+        "start a plan", "put on a plan", "move to a plan", "upgrade to", "switch to",
+        "onboard onto", "add to plan", "set up subscription"
+      ],
+      "phrases": [
+        "subscribe the customer", "create a subscription for", "start a subscription",
+        "enroll in", "sign them up for", "put them on the", "activate the subscription",
+        "move to the pro plan", "upgrade to", "switch to the", "set up a subscription for"
+      ]
+    },
+    {
+      "canonical": "draft",
+      "synonyms": [
+        "draft", "compose", "prepare", "outline", "write", "write up", "pen",
+        "put together", "work up", "save as draft", "stage", "prepare a draft"
+      ],
+      "phrases": [
+        "draft an email", "compose an email", "prepare a draft", "write a draft",
+        "save as draft", "draft a message", "compose a message", "put together an email"
+      ]
+    },
+    {
+      "canonical": "set",
+      "synonyms": [
+        "set", "configure", "define", "specify", "apply", "toggle", "enable", "disable",
+        "turn on", "turn off", "activate", "deactivate", "put", "mark as", "flag as",
+        "switch to", "change to", "move to status"
+      ],
+      "phrases": [
+        "set the status", "set my status", "set to away", "configure the", "enable the",
+        "disable the", "turn on the", "turn off the", "mark as done", "flag as urgent",
+        "set the priority", "define the", "apply the label"
+      ]
+    },
+    {
+      "canonical": "schedule",
+      "synonyms": [
+        "schedule", "plan", "book time", "set up time", "arrange", "set up a meeting",
+        "set up a call", "plan a meeting", "line up", "put on the calendar", "add to calendar",
+        "calendar", "calendar a"
+      ],
+      "phrases": [
+        "schedule a meeting", "schedule a call", "schedule time with", "plan a meeting",
+        "set up a meeting", "add to the calendar", "put on the calendar", "arrange a call",
+        "line up a meeting", "calendar a sync", "book a meeting"
+      ]
+    },
+    {
+      "canonical": "notify",
+      "synonyms": [
+        "notify", "alert", "warn", "broadcast", "page", "remind", "let know", "inform",
+        "ping", "shout out", "give heads up", "heads up", "announce to", "tell the team"
+      ],
+      "phrases": [
+        "notify the team", "alert the team", "let the team know", "give the team a heads up",
+        "broadcast to the channel", "page the oncall", "remind the team", "announce to",
+        "ping the channel", "send a heads up to", "inform the team"
+      ]
+    },
+    {
+      "canonical": "forward",
+      "synonyms": [
+        "forward", "redirect", "fwd", "resend", "pass along", "send on",
+        "route to", "forward to", "pass to", "bounce to"
+      ],
+      "phrases": [
+        "forward the email", "forward to", "fwd to", "resend to", "pass this along to",
+        "redirect to", "route this to", "send this on to"
+      ]
+    },
+    {
+      "canonical": "export",
+      "synonyms": [
+        "export", "dump", "download", "extract", "pull out", "export to csv",
+        "export to excel", "export report", "generate export", "pull a report"
+      ],
+      "phrases": [
+        "export the data", "export to csv", "download the report", "pull a report",
+        "generate an export", "export all the", "dump the data", "extract the data"
+      ]
+    },
+    {
+      "canonical": "archive",
+      "synonyms": [
+        "archive", "shelve", "file away", "close out", "move to archive", "put in archive",
+        "retire", "stash", "store away", "move to cold storage"
+      ],
+      "phrases": [
+        "archive the ticket", "archive the channel", "file it away", "shelve the",
+        "move to archive", "close out the", "retire the"
+      ]
+    }
+  ],
+  "targets": [
+    {
+      "canonical": "message",
+      "synonyms": [
+        "message", "msg", "notification", "ping", "note", "post", "update", "announcement",
+        "broadcast", "note", "shoutout", "text", "chat message"
+      ],
+      "phrases": ["a message to", "message the team", "message in the channel"]
+    },
+    {
+      "canonical": "dm",
+      "synonyms": [
+        "dm", "pm", "private message", "direct message", "direct", "private", "1:1 message",
+        "personal message", "private chat"
+      ],
+      "phrases": ["send a dm", "send a direct message", "message them directly", "message privately"]
+    },
+    {
+      "canonical": "channel",
+      "synonyms": [
+        "channel", "room", "workspace channel", "slack channel", "group channel",
+        "#general", "#engineering", "#ops", "#alerts", "#incidents", "#random"
+      ],
+      "phrases": ["in the channel", "to the channel", "in #", "to #", "post in the channel"]
+    },
+    {
+      "canonical": "email",
+      "synonyms": [
+        "email", "e-mail", "inbox", "outbox", "emails", "mail", "email thread",
+        "email chain", "email message", "message"
+      ],
+      "phrases": ["send an email", "email to", "in the inbox", "email thread", "reply to the email"]
+    },
+    {
+      "canonical": "draft",
+      "synonyms": ["draft", "drafts", "unsent email", "email draft", "saved draft", "unpublished"],
+      "phrases": ["save as draft", "as a draft", "create a draft", "the email draft"]
+    },
+    {
+      "canonical": "label",
+      "synonyms": ["label", "labels", "tag", "category", "folder label", "gmail label", "inbox label"],
+      "phrases": ["apply a label", "add a label", "the inbox label", "email label"]
+    },
+    {
+      "canonical": "contact",
+      "synonyms": [
+        "contact", "contacts", "person", "individual", "lead", "connection", "entry",
+        "contact record", "contact profile", "person record"
+      ],
+      "phrases": ["the contact", "contact record", "find the contact", "create a contact", "update the contact"]
+    },
+    {
+      "canonical": "customer",
+      "synonyms": [
+        "customer", "customers", "client", "clients", "account holder", "end user",
+        "subscriber", "buyer", "payer", "account"
+      ],
+      "phrases": ["the customer", "for the customer", "customer record", "customer account", "the client"]
+    },
+    {
+      "canonical": "deal",
+      "synonyms": [
+        "deal", "opportunity", "prospect", "pipeline deal", "crm deal", "sales deal",
+        "potential sale", "sale", "business deal"
+      ],
+      "phrases": ["the deal", "a new deal", "create a deal", "deal in the pipeline", "sales opportunity"]
+    },
+    {
+      "canonical": "user",
+      "synonyms": [
+        "user", "users", "member", "participant", "account", "profile", "workspace member",
+        "team member", "contributor", "collaborator"
+      ],
+      "phrases": ["the user", "user profile", "workspace user", "team member"]
+    },
+    {
+      "canonical": "invoice",
+      "synonyms": [
+        "invoice", "invoices", "receipt", "statement", "bill", "charge record",
+        "payment record", "invoice record", "billing statement"
+      ],
+      "phrases": ["the invoice", "list invoices", "payment invoice", "billing invoice", "invoice for"]
+    },
+    {
+      "canonical": "subscription",
+      "synonyms": [
+        "subscription", "plan", "membership", "recurring plan", "billing plan",
+        "stripe subscription", "active subscription", "recurring billing"
+      ],
+      "phrases": ["the subscription", "their subscription", "cancel the subscription", "create subscription", "subscription plan"]
+    },
+    {
+      "canonical": "payment",
+      "synonyms": [
+        "payment", "transaction", "charge", "payment record", "payment attempt",
+        "stripe charge", "billing event", "payment intent"
+      ],
+      "phrases": ["the payment", "process payment", "a payment of", "payment for"]
+    },
+    {
+      "canonical": "ticket",
+      "synonyms": [
+        "ticket", "tickets", "issue", "bug", "bugs", "task", "tasks", "story", "epic",
+        "defect", "case", "problem", "incident", "work item", "backlog item",
+        "jira ticket", "jira issue", "support ticket"
+      ],
+      "phrases": [
+        "the ticket", "a new ticket", "a bug ticket", "an issue in jira",
+        "jira ticket", "open issue", "work item"
+      ]
+    },
+    {
+      "canonical": "event",
+      "synonyms": [
+        "event", "events", "meeting", "meetings", "appointment", "call", "session",
+        "standup", "sync", "kickoff", "review", "1:1", "one on one", "calendar event",
+        "google calendar event", "scheduled event"
+      ],
+      "phrases": [
+        "a meeting", "a call", "a standup", "calendar event", "schedule an event",
+        "create an event", "a 1:1", "a sync"
+      ]
+    },
+    {
+      "canonical": "free_time",
+      "synonyms": [
+        "free time", "slot", "availability", "open time", "free slot", "open slot",
+        "available time", "open window", "time that works", "mutual availability",
+        "when both are free"
+      ],
+      "phrases": [
+        "find free time", "find availability", "find a slot", "when are both free",
+        "available times", "open slots", "find time that works"
+      ]
+    },
+    {
+      "canonical": "file",
+      "synonyms": [
+        "file", "files", "document", "documents", "doc", "spreadsheet", "sheet",
+        "report", "attachment", "asset", "pdf", "presentation", "slide deck", "google doc"
+      ],
+      "phrases": ["the file", "a document", "google drive file", "upload a file", "search for the file"]
+    },
+    {
+      "canonical": "folder",
+      "synonyms": [
+        "folder", "directory", "drive folder", "google drive folder", "shared folder",
+        "parent folder", "subfolder"
+      ],
+      "phrases": ["the folder", "a new folder", "in the folder", "google drive folder"]
+    },
+    {
+      "canonical": "metric",
+      "synonyms": [
+        "metric", "metrics", "kpi", "stat", "stats", "pageviews", "page views",
+        "visitors", "conversions", "analytics data", "performance metric", "measure"
+      ],
+      "phrases": ["the metrics", "get metrics", "analytics metrics", "pageview count", "conversion rate"]
+    },
+    {
+      "canonical": "funnel",
+      "synonyms": [
+        "funnel", "conversion funnel", "conversion", "flow", "onboarding funnel",
+        "signup funnel", "checkout funnel", "sales funnel"
+      ],
+      "phrases": ["the funnel", "conversion funnel", "funnel report", "funnel analysis", "funnel steps"]
+    },
+    {
+      "canonical": "status",
+      "synonyms": [
+        "status", "state", "presence", "away status", "slack status", "current status",
+        "availability status", "online status"
+      ],
+      "phrases": ["my status", "slack status", "set status to", "update the status"]
+    }
+  ],
+  "phrases": [
+    {"phrase": "send a message to #", "action": "send"},
+    {"phrase": "post to the channel", "action": "send"},
+    {"phrase": "post in #", "action": "send"},
+    {"phrase": "ping the team", "action": "notify"},
+    {"phrase": "ping the channel", "action": "notify"},
+    {"phrase": "send a dm to", "action": "send"},
+    {"phrase": "drop a message in", "action": "send"},
+    {"phrase": "shoot a slack", "action": "send"},
+    {"phrase": "blast to the channel", "action": "notify"},
+    {"phrase": "send an email to", "action": "send"},
+    {"phrase": "email the report to", "action": "send"},
+    {"phrase": "email the invoice to", "action": "send"},
+    {"phrase": "draft an email to", "action": "draft"},
+    {"phrase": "compose an email", "action": "draft"},
+    {"phrase": "reply to the email", "action": "reply"},
+    {"phrase": "respond to the thread", "action": "reply"},
+    {"phrase": "refund the charge", "action": "refund"},
+    {"phrase": "refund the customer", "action": "refund"},
+    {"phrase": "issue a refund", "action": "refund"},
+    {"phrase": "reverse the charge", "action": "refund"},
+    {"phrase": "charge the customer", "action": "charge"},
+    {"phrase": "bill the customer", "action": "charge"},
+    {"phrase": "run a charge", "action": "charge"},
+    {"phrase": "create a subscription for", "action": "subscribe"},
+    {"phrase": "start a subscription", "action": "subscribe"},
+    {"phrase": "cancel the subscription", "action": "cancel"},
+    {"phrase": "cancel their plan", "action": "cancel"},
+    {"phrase": "list the invoices", "action": "list"},
+    {"phrase": "list invoices for", "action": "list"},
+    {"phrase": "get payment history", "action": "get"},
+    {"phrase": "open a jira ticket", "action": "create"},
+    {"phrase": "file a bug in jira", "action": "create"},
+    {"phrase": "create a ticket in jira", "action": "create"},
+    {"phrase": "open an issue in jira", "action": "create"},
+    {"phrase": "add a comment on", "action": "comment"},
+    {"phrase": "leave a note on", "action": "comment"},
+    {"phrase": "assign the ticket to", "action": "assign"},
+    {"phrase": "assign to", "action": "assign"},
+    {"phrase": "find free time", "action": "find"},
+    {"phrase": "find availability", "action": "find"},
+    {"phrase": "find a slot", "action": "find"},
+    {"phrase": "schedule a meeting", "action": "schedule"},
+    {"phrase": "set up a meeting", "action": "schedule"},
+    {"phrase": "book a meeting", "action": "book"},
+    {"phrase": "book a call", "action": "book"},
+    {"phrase": "create a calendar event", "action": "create"},
+    {"phrase": "delete the event", "action": "delete"},
+    {"phrase": "upload to google drive", "action": "upload"},
+    {"phrase": "upload to drive", "action": "upload"},
+    {"phrase": "share the file with", "action": "share"},
+    {"phrase": "give access to the folder", "action": "share"},
+    {"phrase": "search for files", "action": "search"},
+    {"phrase": "find files in", "action": "find"},
+    {"phrase": "track an event", "action": "track"},
+    {"phrase": "log an event", "action": "track"},
+    {"phrase": "fire a tracking event", "action": "track"},
+    {"phrase": "record a checkout", "action": "track"},
+    {"phrase": "identify the user", "action": "identify"},
+    {"phrase": "set user traits", "action": "identify"},
+    {"phrase": "associate the user", "action": "identify"},
+    {"phrase": "get the funnel", "action": "get"},
+    {"phrase": "get the metrics", "action": "get"},
+    {"phrase": "get page views", "action": "get"},
+    {"phrase": "find the customer record", "action": "get"},
+    {"phrase": "look up the contact", "action": "get"},
+    {"phrase": "look up the customer", "action": "get"},
+    {"phrase": "get contact info", "action": "get"},
+    {"phrase": "create a contact", "action": "create"},
+    {"phrase": "add a contact", "action": "create"},
+    {"phrase": "update the contact", "action": "update"},
+    {"phrase": "create a deal", "action": "create"},
+    {"phrase": "add a deal", "action": "create"},
+    {"phrase": "set my slack status", "action": "set"},
+    {"phrase": "set my status to", "action": "set"},
+    {"phrase": "forward the email", "action": "forward"},
+    {"phrase": "export the data", "action": "export"},
+    {"phrase": "search the inbox", "action": "search"}
+  ],
+  "domain_signals": {
+    "messaging": {
+      "slack": 5,
+      "#": 2,
+      "channel": 3,
+      "direct message": 8,
+      "dm ": 6,
+      " dm": 6,
+      "slack channel": 8,
+      "slack message": 8,
+      "threaded reply": 7,
+      "thread_ts": 8,
+      "thread id": 6
+    },
+    "email": {
+      "gmail": 10,
+      "smtp": 10,
+      "subject line": 8,
+      "from:": 7,
+      "reply-to": 7,
+      "email thread": 9,
+      "send an email": 9,
+      "email to": 6,
+      "email the": 5
+    },
+    "payments": {
+      "stripe": 10,
+      "cus_": 10,
+      "ch_": 10,
+      "sub_": 10,
+      "pi_": 10,
+      "pm_": 10,
+      "price_": 10,
+      "billing cycle": 8,
+      "stripe customer": 10,
+      "stripe charge": 10,
+      "trial period": 7,
+      "one-time charge": 8
+    },
+    "tickets": {
+      "jira": 7,
+      "eng-": 10,
+      "proj-": 10,
+      "dev-": 9,
+      "mobile-": 9,
+      "backlog": 6,
+      "story points": 9,
+      "assignee": 5,
+      "jql": 10,
+      "jira ticket": 10,
+      "jira issue": 10,
+      "acceptance criteria": 8
+    },
+    "crm": {
+      "crm": 10,
+      "salesforce": 10,
+      "hubspot": 10,
+      "contact record": 10,
+      "deal pipeline": 10,
+      "customer record": 9,
+      "contact info": 8,
+      "sales pipeline": 9,
+      "crm contact": 10
+    },
+    "calendar": {
+      "gcal": 10,
+      "google calendar": 10,
+      "calendar invite": 9,
+      "recurring meeting": 8,
+      "free time": 8,
+      "time that works": 9,
+      "find time": 7,
+      "schedule time": 6,
+      "book time": 6
+    },
+    "files": {
+      "gdrive": 10,
+      "google drive": 10,
+      "dropbox": 10,
+      "google doc": 9,
+      "google sheet": 9,
+      "shared drive": 9,
+      "drive folder": 9,
+      "file in drive": 9
+    },
+    "analytics": {
+      "segment": 8,
+      "amplitude": 9,
+      "pageview": 9,
+      "page view": 9,
+      "page views": 9,
+      "click event": 8,
+      "tracking event": 9,
+      "user traits": 8,
+      "identify user": 9,
+      "track event": 8,
+      "event properties": 8,
+      "user behavior": 7,
+      "cohort": 7
+    }
+  }
+}

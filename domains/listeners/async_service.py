@@ -884,7 +884,7 @@ class AsyncListenerService:
                             
                             # Store with original record as metadata (user's format)
                             # Include temporal_value from concept metadata for edge creation
-                            concept_text = json.dumps(record)
+                            concept_text = record.get("concept_text") or json.dumps(record)
                             glyph_metadata = dict(record)  # Copy original flat format
                             if concept.metadata.get("temporal_value") is not None:
                                 glyph_metadata["temporal_value"] = concept.metadata["temporal_value"]
