@@ -22,10 +22,14 @@ from .commands.config import config_group
 from .commands.license import license_group
 
 
-from importlib.metadata import version as _pkg_version
+try:
+    from importlib.metadata import version as _pkg_version
+    _version = _pkg_version("glyphh")
+except Exception:
+    _version = "0.7.1"
 
 @click.group(invoke_without_command=True)
-@click.version_option(version=_pkg_version("glyphh"), prog_name="glyphh")
+@click.version_option(version=_version, prog_name="glyphh")
 @click.pass_context
 def cli(ctx):
     """Glyphh — deterministic AI runtime. Run 'glyphh <command> --help' for details."""
