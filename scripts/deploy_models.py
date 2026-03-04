@@ -22,6 +22,46 @@ RUNTIME_ROOT = Path(__file__).parent.parent
 CUSTOM_MODELS_DIR = RUNTIME_ROOT / "custom_models"
 
 
+def _extract_hierarchical_vectors(glyph) -> list[dict]:
+    """Extract layer, segment, and role vectors from an encoded glyph."""
+    vectors = []
+    if not hasattr(glyph, 'layers') or not glyph.layers:
+        return vectors
+
+    for layer_name, layer in glyph.layers.items():
+        if hasattr(layer, 'cortex') and layer.cortex is not None:
+            vectors.append({
+                'level': 'layer',
+                'path': layer_name,
+                'embedding': layer.cortex.data.astype(float).tolist(),
+            })
+
+        if hasattr(layer, 'segments') and layer.segments:
+            for seg_name, segment in layer.segments.items():
+                if hasattr(segment, 'cortex') and segment.cortex is not None:
+                    vectors.append({
+                        'level': 'segment',
+                        'path': f"{layer_name}.{seg_name}",
+                        'embedding': segment.cortex.data.astype(float).tolist(),
+                    })
+
+                if hasattr(segment, 'roles') and segment.roles:
+                    for role_name, role_vec in segment.roles.items():
+                        embedding = None
+                        if hasattr(role_vec, 'data'):
+                            embedding = role_vec.data.astype(float).tolist()
+                        elif hasattr(role_vec, 'tolist'):
+                            embedding = role_vec.tolist()
+                        if embedding:
+                            vectors.append({
+                                'level': 'role',
+                                'path': f"{layer_name}.{seg_name}.{role_name}",
+                                'embedding': embedding,
+                            })
+
+    return vectors
+
+
 def _load_jsonl(data_dir: Path) -> list[dict]:
     """Load exemplar JSONL files from a data directory.
 
@@ -144,7 +184,7 @@ async def deploy_model_to_db(
                 glyph = encoder.encode(concept)
                 embedding = glyph.global_cortex.data.astype(float).tolist()
 
-                await storage.create_glyph(
+                glyph_response = await storage.create_glyph(
                     org_id=org_id,
                     model_id=model_id,
                     concept_text=concept_text,
@@ -152,6 +192,17 @@ async def deploy_model_to_db(
                     metadata={**metadata, "record_type": "pattern"},
                     plan_slug="pro",  # auto-deploy bypasses plan limits
                 )
+
+                # Store hierarchical vectors (layer, segment, role)
+                hierarchical = _extract_hierarchical_vectors(glyph)
+                if hierarchical:
+                    await storage.create_glyph_vectors_batch(
+                        glyph_id=glyph_response.glyph_id,
+                        org_id=org_id,
+                        model_id=model_id,
+                        vectors=hierarchical,
+                    )
+
                 created += 1
 
             except Exception as e:
