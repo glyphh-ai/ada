@@ -18,6 +18,8 @@ from .commands.docker import docker_group
 from .commands.token import token_group
 from .commands.query import query_command
 from .commands.setup import setup_command
+from .commands.config import config_group
+from .commands.license import license_group
 
 
 from importlib.metadata import version as _pkg_version
@@ -42,6 +44,8 @@ cli.add_command(docker_group)
 cli.add_command(token_group)
 cli.add_command(query_command)
 cli.add_command(setup_command)
+cli.add_command(config_group)
+cli.add_command(license_group)
 
 
 if __name__ == "__main__":

@@ -42,11 +42,11 @@ except ImportError:
     def _save_history() -> None: pass    # noqa: E704
 
 from .. import theme
+from ..config import resolve_runtime_url, resolve_runtime_token
 
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 
-_DEFAULT_URL = "http://localhost:8002"
 _LOCAL_ORG   = "local-dev-org"
 
 
@@ -59,33 +59,26 @@ def _resolve_context(model_id_override=None, url_override=None, token_override=N
     Priority order:
       1. Explicit CLI flags (url_override, token_override, model_id_override)
       2. Environment variables (RUNTIME_URL, GLYPHH_TOKEN)
-      3. Local session (glyphh auth login)
-      4. Local dev defaults (localhost:8002, local-dev-org, no token)
+      3. ~/.glyphh/config.json (runtime_url, runtime_token)
+      4. Local session (glyphh auth login)
+      5. Local dev defaults (localhost:8002, local-dev-org, no token)
     """
-    runtime_url = (
-        url_override
-        or os.environ.get("RUNTIME_URL", "")
-        or _DEFAULT_URL
-    ).rstrip("/")
-
-    token = token_override or os.environ.get("GLYPHH_TOKEN", "")
+    runtime_url = resolve_runtime_url(cli_override=url_override)
+    token = resolve_runtime_token(cli_override=token_override) or ""
 
     # Detect whether we're talking to a local dev server.
-    # localhost / 127.0.0.1 always run as local-dev-org regardless of session.
     _is_local_url = (
         "localhost" in runtime_url
         or "127.0.0.1" in runtime_url
     )
 
-    # Try to pull org/model from a logged-in session — only for non-local URLs
+    # Try to pull org from a logged-in session — only for non-local URLs
     org_id = None
     model_id = model_id_override
     if not _is_local_url:
         try:
-            from ..auth import is_logged_in, get_token as _get_token, _load_config
+            from ..auth import is_logged_in, _load_config
             if is_logged_in():
-                if not token:
-                    token = _get_token() or ""
                 cfg = _load_config()
                 org_id = cfg.get("user", {}).get("org_id")
         except Exception:
@@ -143,11 +136,24 @@ def _print_result(data):
     """Render a MCP response to the terminal using the same logic as the web UI."""
     ft = data.get("result")  # fact_tree JSON
 
-    # State lives in content[0].data.state (NL responses)
-    state = (
-        (data.get("content") or [{}])[0].get("data", {}).get("state")
-        or ("DONE" if ft else None)
-    )
+    # Check for errors first
+    if data.get("isError"):
+        click.echo()
+        error_msg = data.get("error") or ""
+        # Also check content for text error messages
+        content = (data.get("content") or [{}])[0]
+        if content.get("type") == "text" and content.get("text"):
+            error_msg = content["text"]
+        click.secho(f"  Error: {error_msg}", fg=theme.ERROR)
+        click.echo()
+        return
+
+    # State lives in content[0].data.state (NL responses with JSON content)
+    content_data = {}
+    content = (data.get("content") or [{}])[0]
+    if content.get("type") == "json":
+        content_data = content.get("data", {})
+    state = content_data.get("state") or ("DONE" if ft else None)
 
     click.echo()
 
@@ -159,7 +165,6 @@ def _print_result(data):
 
     # ASK state — show the question and any disambiguation options / missing slots
     if state == "ASK":
-        content_data = (data.get("content") or [{}])[0].get("data", {})
         ask = content_data.get("ask", {})
         if ask:
             question = ask.get("question") or "Please clarify your request."
@@ -336,7 +341,7 @@ def _run_repl(ctx, tool="nl_query"):
 @click.argument("text", required=False)
 @click.option("--model-id", "-m", default=None, help="Model ID (default: from manifest.yaml)")
 @click.option("--gql", is_flag=True, help="Start in GQL mode")
-@click.option("--url", default=None, help=f"Runtime URL (default: {_DEFAULT_URL})")
+@click.option("--url", default=None, help="Runtime URL (default: from config or localhost:8002)")
 @click.option("--token", default=None, help="API token for non-local deployments")
 def chat_command(text, model_id, gql, url, token):
     """Terminal chat REPL — same MCP endpoints as the web UI.

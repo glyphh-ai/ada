@@ -21,12 +21,27 @@ import click
 from .. import theme
 
 
-_PID_DIR  = Path.home() / ".glyphh"
-_PID_FILE = _PID_DIR / "dev.pid"
-_LOG_FILE = _PID_DIR / "dev.log"
+_PID_DIR   = Path.home() / ".glyphh"
+_PID_FILE  = _PID_DIR / "dev.pid"
+_PORT_FILE = _PID_DIR / "dev.port"
+_LOG_FILE  = _PID_DIR / "dev.log"
 
 # Known subcommands — used to distinguish "glyphh dev stop" from "glyphh dev ./stop-dir"
 _DEV_SUBCOMMANDS = {"stop"}
+
+
+def _find_free_port(start: int, max_attempts: int = 20) -> int:
+    """Find a free port starting from `start`, scanning upward."""
+    import socket
+    for offset in range(max_attempts):
+        port = start + offset
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("0.0.0.0", port))
+                return port
+            except OSError:
+                continue
+    return start  # fallback — let uvicorn report the error
 
 
 def _find_model_dir(start: Path) -> Path | None:
@@ -82,6 +97,15 @@ def _run_server(path: str, port: int, no_reload: bool, daemon: bool) -> None:
             "  Starting server without a pre-loaded model.",
             fg=theme.MUTED,
         )
+
+    # ── Find a free port ──────────────────────────────────────────────────
+    actual_port = _find_free_port(port)
+    if actual_port != port:
+        click.secho(
+            f"  Port {port} in use — using {actual_port} instead.",
+            fg=theme.WARNING,
+        )
+    port = actual_port
 
     # ── Set environment variables before uvicorn starts ────────────────────
     os.environ.setdefault("DEPLOYMENT_MODE", "local")
@@ -160,6 +184,10 @@ def _run_server(path: str, port: int, no_reload: bool, daemon: bool) -> None:
             click.secho(f"    {line}", fg=theme.INFO)
         click.echo()
 
+    # ── Persist the actual port so `glyphh chat` can discover it ─────────
+    _PID_DIR.mkdir(parents=True, exist_ok=True)
+    _PORT_FILE.write_text(str(port))
+
     # ── Daemon mode ────────────────────────────────────────────────────────
     if daemon:
         _start_daemon(port, no_reload)
@@ -168,14 +196,17 @@ def _run_server(path: str, port: int, no_reload: bool, daemon: bool) -> None:
     # ── Foreground mode ────────────────────────────────────────────────────
     import uvicorn
 
-    uvicorn.run(
-        "glyphh.server:app",
-        host="0.0.0.0",
-        port=port,
-        reload=not no_reload,
-        workers=1,
-        log_level="warning",
-    )
+    try:
+        uvicorn.run(
+            "glyphh.server:app",
+            host="0.0.0.0",
+            port=port,
+            reload=not no_reload,
+            workers=1,
+            log_level="warning",
+        )
+    finally:
+        _PORT_FILE.unlink(missing_ok=True)
 
 
 def _start_daemon(port: int, no_reload: bool) -> None:
@@ -298,11 +329,13 @@ def dev_stop():
     except ProcessLookupError:
         click.secho(f"  Process {pid} not found — removing stale PID file.", fg=theme.TEXT_DIM)
         _PID_FILE.unlink(missing_ok=True)
+        _PORT_FILE.unlink(missing_ok=True)
         return
 
     try:
         os.kill(pid, signal.SIGTERM)
         _PID_FILE.unlink(missing_ok=True)
+        _PORT_FILE.unlink(missing_ok=True)
         click.secho(f"  Dev server stopped (PID {pid}).", fg=theme.TEXT, bold=True)
     except PermissionError:
         click.secho(f"  Permission denied stopping PID {pid}.", fg=theme.ERROR)

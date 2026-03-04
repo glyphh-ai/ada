@@ -1,26 +1,31 @@
 """
-JWT authentication middleware for Runtime.
+Authentication middleware for Glyphh Runtime.
 
-Validates JWT tokens issued by Platform and extracts user context.
-Supports local mode bypass for development convenience on model lifecycle
-endpoints (deploy, undeploy, status). Data and query endpoints (listener,
-MCP) always require a valid token.
+Validates API tokens (glyphh_xxxx) via SHA-256 hash lookup in the database.
+Local mode bypasses all auth for development convenience.
+
+No JWT — all API auth uses database-backed tokens created via POST /setup
+or the glyphh token create CLI command.
 """
 
+import hashlib
+import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
-import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from infrastructure.config import get_settings
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class AuthenticatedUser:
-    """Authenticated user context extracted from JWT."""
-    
+    """Authenticated user context extracted from a database token."""
+
     user_id: str
     org_id: str
     role: str
@@ -31,137 +36,8 @@ class AuthenticatedUser:
 security = HTTPBearer(auto_error=False)
 
 
-def _validate_jwt(credentials: HTTPAuthorizationCredentials) -> AuthenticatedUser:
-    """Validate a JWT token and return the authenticated user.
-
-    Shared logic used by both get_current_user and require_token.
-    """
-    settings = get_settings()
-
-    if not settings.jwt_secret_key:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="JWT_SECRET_KEY not configured. Set it to use token-secured endpoints.",
-        )
-
-    try:
-        payload = jwt.decode(
-            credentials.credentials,
-            settings.jwt_secret_key,
-            algorithms=[settings.jwt_algorithm],
-        )
-
-        if payload.get("type") != "access":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token type",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        user_id = payload.get("sub")
-        org_id = payload.get("org_id")
-        role = payload.get("role", "user")
-        plan = payload.get("plan", "free")
-
-        if not user_id or not org_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token missing required claims",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        return AuthenticatedUser(
-            user_id=str(user_id),
-            org_id=str(org_id),
-            role=str(role),
-            plan=str(plan),
-        )
-
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except jwt.InvalidTokenError as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid token: {e}",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-
-async def get_current_user(
-    request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-) -> AuthenticatedUser:
-    """
-    Validate JWT and extract user context.
-    
-    In local mode, returns a mock user for development convenience.
-    In cloud/self-hosted mode, requires valid JWT token.
-    
-    Used for model lifecycle endpoints (deploy, undeploy, status, re-encode).
-    """
-    settings = get_settings()
-    
-    # Local mode: skip auth for development convenience on lifecycle endpoints
-    if settings.deployment_mode == "local":
-        path_org_id = request.path_params.get("org_id", "local-dev-org")
-        return AuthenticatedUser(
-            user_id="local-dev-user",
-            org_id=path_org_id,
-            role="admin",
-            plan="pro",
-        )
-    
-    # Non-local mode: require valid JWT
-    if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authentication token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    return _validate_jwt(credentials)
-
-
-async def require_token(
-    request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-) -> AuthenticatedUser:
-    """
-    Require a valid API token for data and query endpoints (listener, MCP).
-
-    In local mode, bypasses token validation for zero-friction development.
-    In cloud/self-hosted mode, validates tokens by SHA-256 hash lookup in the
-    runtime database, falling back to JWT for platform-issued Studio tokens.
-    """
-    settings = get_settings()
-
-    # Local mode: skip token requirement for development convenience
-    # Use the org_id from the URL path so it matches the deployed model's org
-    if settings.deployment_mode == "local":
-        path_org_id = request.path_params.get("org_id", "local-dev-org")
-        return AuthenticatedUser(
-            user_id="local-dev-user",
-            org_id=path_org_id,
-            role="admin",
-            plan="pro",
-        )
-
-    if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required. Create a token with: glyphh token create --name <name>",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    token = credentials.credentials
-
-    # Try DB token lookup first (API tokens created via glyphh token create)
-    import hashlib
-    from datetime import datetime
+async def _validate_db_token(token: str) -> AuthenticatedUser:
+    """Validate a token by SHA-256 hash lookup in the database."""
     token_hash = hashlib.sha256(token.encode()).hexdigest()
 
     try:
@@ -178,40 +54,108 @@ async def require_token(
             )
             db_token = result.scalar_one_or_none()
 
-            if db_token:
-                # Check expiry
-                if db_token.expires_at and db_token.expires_at < datetime.utcnow():
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Token has expired",
-                        headers={"WWW-Authenticate": "Bearer"},
-                    )
-
-                return AuthenticatedUser(
-                    user_id=f"token:{db_token.id}",
-                    org_id=db_token.org_id,
-                    role="service",
+            if not db_token:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid or revoked token",
+                    headers={"WWW-Authenticate": "Bearer"},
                 )
+
+            # Check expiry
+            if db_token.expires_at and db_token.expires_at < datetime.utcnow():
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Token has expired",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
+            # Determine role from permissions
+            permissions = db_token.permissions or ["read"]
+            role = "admin" if "admin" in permissions else "service"
+
+            return AuthenticatedUser(
+                user_id=f"token:{db_token.id}",
+                org_id=db_token.org_id,
+                role=role,
+            )
     except HTTPException:
         raise
     except Exception as e:
-        # DB not available — fall through to JWT
-        import logging
-        logging.getLogger(__name__).debug(f"DB token lookup failed: {e}")
+        logger.error(f"Token validation error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication service unavailable",
+        )
 
-    # Fall back to JWT validation (for platform-issued tokens / Studio)
-    return _validate_jwt(credentials)
+
+async def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> AuthenticatedUser:
+    """
+    Validate token and extract user context.
+
+    In local mode, returns a mock admin user.
+    In cloud/self-hosted mode, requires a valid database token.
+    """
+    settings = get_settings()
+
+    # Local mode: skip auth
+    if settings.deployment_mode == "local":
+        path_org_id = request.path_params.get("org_id", "local-dev-org")
+        return AuthenticatedUser(
+            user_id="local-dev-user",
+            org_id=path_org_id,
+            role="admin",
+            plan="pro",
+        )
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token. Create one with: glyphh token create",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return await _validate_db_token(credentials.credentials)
+
+
+async def require_token(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> AuthenticatedUser:
+    """
+    Require a valid API token for data and query endpoints.
+
+    In local mode, bypasses token validation.
+    In cloud/self-hosted mode, validates via database lookup.
+    """
+    settings = get_settings()
+
+    if settings.deployment_mode == "local":
+        path_org_id = request.path_params.get("org_id", "local-dev-org")
+        return AuthenticatedUser(
+            user_id="local-dev-user",
+            org_id=path_org_id,
+            role="admin",
+            plan="pro",
+        )
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Create a token with: glyphh token create",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return await _validate_db_token(credentials.credentials)
 
 
 async def get_optional_user(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> Optional[AuthenticatedUser]:
-    """
-    Optional authentication - returns None if no valid token.
-    
-    Useful for endpoints that work differently for authenticated vs anonymous users.
-    """
+    """Optional authentication - returns None if no valid token."""
     try:
         return await get_current_user(request, credentials)
     except HTTPException:

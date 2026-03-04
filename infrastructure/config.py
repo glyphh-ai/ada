@@ -143,12 +143,11 @@ class Settings(BaseSettings):
             return "pgvector"
         return "sqlite"  # safe fallback
     
-    # JWT Authentication
+    # JWT Authentication (deprecated — kept for backward compat with existing envs)
     jwt_secret_key: Optional[str] = Field(
         default=None,
-        description="JWT signing key (required for self-hosted/cloud)"
+        description="Deprecated. Runtime uses database tokens instead of JWTs."
     )
-    jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
     
     # NL Query (enabled by default for studio chat functionality)
     enable_nl_query: bool = Field(
@@ -247,13 +246,6 @@ class Settings(BaseSettings):
         description="Allowed CORS origins for production deployments"
     )
     
-    @field_validator("jwt_secret_key")
-    @classmethod
-    def validate_jwt_secret(cls, v: Optional[str], info) -> Optional[str]:
-        """Require JWT secret for non-local deployments"""
-        # Note: This validation happens at startup
-        # We'll check deployment_mode in the application
-        return v
     
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -277,13 +269,11 @@ def get_settings() -> Settings:
 
 
 def validate_settings() -> None:
-    """Validate settings on startup - raises if invalid"""
+    """Validate settings on startup - raises if invalid."""
     settings = get_settings()
-    
+
     if settings.deployment_mode != "local":
-        if not settings.jwt_secret_key:
+        if not settings.database_url:
             raise ValueError(
-                f"JWT_SECRET_KEY is required for {settings.deployment_mode} deployment mode"
+                "DATABASE_URL is required for non-local deployment modes"
             )
-        
-        # self-hosted: tier enforced via JWT claims at request time, no license key needed

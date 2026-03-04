@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .. import theme
 from ..auth import get_token, get_api_url, is_logged_in
+from ..config import resolve_runtime_url, resolve_runtime_token
 from ..packaging import (
     discover_local_models,
     find_model_dir,
@@ -23,11 +24,6 @@ from ..packaging import (
     read_manifest,
     unpack_model,
 )
-
-
-def _get_runtime_url() -> str:
-    """Return the runtime URL from RUNTIME_URL env var or default."""
-    return os.environ.get("RUNTIME_URL", "http://localhost:8002").rstrip("/")
 
 
 @click.group("model")
@@ -103,8 +99,8 @@ def model_deploy(path):
     model_id = model_id.replace(".glyphh", "")
 
     # Upload to runtime (local or remote)
-    runtime_url = _get_runtime_url()
-    token = get_token()
+    runtime_url = resolve_runtime_url()
+    token = resolve_runtime_token()
 
     # For local runtimes, use local-dev-org (matches runtime's local auth bypass)
     from urllib.parse import urlparse
@@ -180,8 +176,8 @@ def model_status(model_id):
             click.secho("  Provide a model_id or run from a model directory.", fg=theme.MUTED)
             return
 
-    runtime_url = _get_runtime_url()
-    token = get_token()
+    runtime_url = resolve_runtime_url()
+    token = resolve_runtime_token()
 
     from urllib.parse import urlparse
     parsed = urlparse(runtime_url)
@@ -239,8 +235,8 @@ def model_undeploy(model_id):
             click.secho("  Provide a model_id or run from a model directory.", fg=theme.MUTED)
             return
 
-    runtime_url = _get_runtime_url()
-    token = get_token()
+    runtime_url = resolve_runtime_url()
+    token = resolve_runtime_token()
 
     from urllib.parse import urlparse
     parsed = urlparse(runtime_url)
@@ -407,7 +403,7 @@ def model_load(file, model_id, batch_size):
     user = config.get("user", {})
     org_id = user.get("org_id")
 
-    runtime_url = _get_runtime_url()
+    runtime_url = resolve_runtime_url()
     from urllib.parse import urlparse
     parsed = urlparse(runtime_url)
     is_local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
@@ -418,7 +414,7 @@ def model_load(file, model_id, batch_size):
         click.secho("  No org_id in session. Log in first: glyphh auth login", fg=theme.ERROR)
         return
 
-    token = get_token()
+    token = resolve_runtime_token()
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -475,8 +471,8 @@ def _resolve_context():
         click.secho("  Not logged in. Run: glyphh auth login", fg=theme.ERROR)
         return None
 
-    runtime_url = _get_runtime_url()
-    token = get_token()
+    runtime_url = resolve_runtime_url()
+    token = resolve_runtime_token()
 
     config = _load_config()
     user = config.get("user", {})
@@ -632,13 +628,13 @@ def model_clear(model_id):
             click.secho("  Provide --model-id or run from a model directory.", fg=theme.ERROR)
             return
 
-    runtime_url = _get_runtime_url()
+    runtime_url = resolve_runtime_url()
     from urllib.parse import urlparse
     parsed = urlparse(runtime_url)
     is_local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
 
     headers = {}
-    token = get_token()
+    token = resolve_runtime_token()
     if token and not is_local:
         headers["Authorization"] = f"Bearer {token}"
 
@@ -693,13 +689,13 @@ def model_re_encode(model_id):
             click.secho("  Provide --model-id or run from a model directory.", fg=theme.ERROR)
             return
 
-    runtime_url = _get_runtime_url()
+    runtime_url = resolve_runtime_url()
     from urllib.parse import urlparse
     parsed = urlparse(runtime_url)
     is_local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
 
     headers = {}
-    token = get_token()
+    token = resolve_runtime_token()
     if token and not is_local:
         headers["Authorization"] = f"Bearer {token}"
 

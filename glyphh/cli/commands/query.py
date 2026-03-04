@@ -6,29 +6,22 @@ glyphh query "my question"  Single query
 """
 
 import json
-import os
 
 import click
 
 from .. import theme
 from ..auth import get_user, is_logged_in, _load_config
+from ..config import resolve_runtime_url, resolve_runtime_token
 from ..packaging import find_model_dir, read_manifest
-
-
-def _get_runtime_url() -> str:
-    return os.environ.get("RUNTIME_URL", "http://localhost:8002").rstrip("/")
 
 
 def _resolve_query_context(model_id_override=None):
     """Resolve org_id, model_id, token for query commands."""
-    from ..auth import get_token as _get_token
-
     if not is_logged_in():
         click.secho("  Not logged in. Run: glyphh auth login", fg=theme.ERROR)
         return None
 
-    # Use GLYPHH_TOKEN if set (for scripts/CI), otherwise use session token
-    token = os.environ.get("GLYPHH_TOKEN") or _get_token()
+    token = resolve_runtime_token()
     if not token:
         click.secho("  No token available. Run: glyphh auth login", fg=theme.ERROR)
         return None
@@ -52,7 +45,7 @@ def _resolve_query_context(model_id_override=None):
         return None
 
     return {
-        "runtime_url": _get_runtime_url(),
+        "runtime_url": resolve_runtime_url(),
         "token": token,
         "org_id": org_id,
         "model_id": model_id,

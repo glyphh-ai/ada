@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 from infrastructure.config import get_settings, validate_settings
 from infrastructure.database import init_db, close_db, async_session_maker
 from shared.exceptions import GlyphhRuntimeException
+from glyphh.licensing import load_license
 from shared.middleware import (
     CorrelationIDMiddleware,
     LoggingMiddleware,
@@ -70,6 +71,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error(f"Configuration error: {e}")
         raise
     
+    # Load license (determines tier and limits)
+    license_info = load_license()
+    app.state.license = license_info
+    logger.info(f"License: tier={license_info.tier}, org={license_info.org_id}")
+
     await init_db()
     logger.info("Database initialized")
     
@@ -218,9 +224,11 @@ from api.routes import (
     org_scoped_router,
     listeners_router,
     tokens_router,
+    setup_router,
 )
 
 app.include_router(health_router)
+app.include_router(setup_router)
 app.include_router(tokens_router)
 # listeners_router must come before org_scoped_router (more specific prefix)
 app.include_router(listeners_router)

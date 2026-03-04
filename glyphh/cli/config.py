@@ -103,6 +103,74 @@ class RuntimeConfig:
         return {}
 
 
+def _read_dev_port() -> Optional[int]:
+    """Read the port from ~/.glyphh/dev.port if a dev server is running."""
+    port_file = Path.home() / ".glyphh" / "dev.port"
+    pid_file = Path.home() / ".glyphh" / "dev.pid"
+    try:
+        if not port_file.exists():
+            return None
+        port = int(port_file.read_text().strip())
+        # Validate: if there's a PID file, check the process is alive
+        if pid_file.exists():
+            import signal
+            pid = int(pid_file.read_text().strip())
+            os.kill(pid, 0)  # check if process exists
+        return port
+    except (ValueError, ProcessLookupError, OSError):
+        return None
+
+
+def resolve_runtime_url(cli_override: Optional[str] = None) -> str:
+    """Resolve the runtime URL using the priority chain:
+    CLI flag → RUNTIME_URL env → ~/.glyphh/config.json → dev server port → localhost default.
+    """
+    if cli_override:
+        return cli_override.rstrip("/")
+
+    env_url = os.environ.get("RUNTIME_URL", "").strip()
+    if env_url:
+        return env_url.rstrip("/")
+
+    from .auth import _load_config
+    config = _load_config()
+    stored_url = config.get("runtime_url", "").strip()
+    if stored_url:
+        return stored_url.rstrip("/")
+
+    # Check if a dev server is running on a non-default port
+    dev_port = _read_dev_port()
+    if dev_port:
+        return f"http://localhost:{dev_port}"
+
+    return DEFAULT_RUNTIME_URL
+
+
+def resolve_runtime_token(cli_override: Optional[str] = None) -> Optional[str]:
+    """Resolve the runtime auth token using the priority chain:
+    CLI flag → GLYPHH_TOKEN env → config.json runtime_token → config.json access_token → None.
+    """
+    if cli_override:
+        return cli_override
+
+    env_token = os.environ.get("GLYPHH_TOKEN", "").strip()
+    if env_token:
+        return env_token
+
+    from .auth import _load_config
+    config = _load_config()
+
+    runtime_token = config.get("runtime_token", "").strip()
+    if runtime_token:
+        return runtime_token
+
+    access_token = config.get("access_token", "").strip()
+    if access_token:
+        return access_token
+
+    return None
+
+
 def load_env_config(env_file: Optional[str] = None) -> RuntimeConfig:
     """
     Load Runtime configuration from environment variables or .env file.

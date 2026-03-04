@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from domains.models.db_models import Token
 from infrastructure.config import get_settings
 from infrastructure.database import get_db
-from shared.auth import AuthenticatedUser, get_current_user
+from shared.auth import AuthenticatedUser, get_current_user, require_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/{org_id}/tokens", tags=["tokens"])
