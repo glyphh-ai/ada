@@ -216,10 +216,26 @@ def register_runtime() -> bool:
             )
             if res.status_code in (200, 201):
                 data = res.json()
-                config["runtime_id"] = data.get("id")
+                runtime_id = data.get("id")
+                config["runtime_id"] = runtime_id
                 config["runtime_name"] = name
                 _save_config(config)
                 click.secho(f"  Runtime registered: {name}", fg=theme.MUTED)
+
+                # Fetch and save the license
+                license_data = data.get("license")
+                if license_data:
+                    from glyphh.licensing import save_license
+                    save_license(license_data)
+                    tier = license_data.get("tier", "free")
+                    click.secho(f"  License saved ({tier} tier)", fg=theme.MUTED)
+
+                # Print deployment instructions
+                click.echo()
+                click.secho("  To deploy this runtime remotely:", fg=theme.TEXT_DIM)
+                click.secho(f"    GLYPHH_RUNTIME_ID={runtime_id}", fg=theme.ACCENT)
+                click.echo()
+
                 return True
             else:
                 click.secho(f"  Runtime registration failed: {res.text}", fg=theme.WARNING)

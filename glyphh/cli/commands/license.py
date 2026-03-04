@@ -4,6 +4,7 @@ CLI license commands — manage the runtime license file.
 glyphh license show           Display current license info
 glyphh license activate <key> Save a license (JSON string or key)
 glyphh license deactivate     Remove the license file
+glyphh license refresh        Re-fetch license from Platform
 """
 
 import json
@@ -81,6 +82,53 @@ def license_activate(license_data):
     click.echo()
     click.secho("  Restart the runtime for changes to take effect.", fg=theme.MUTED)
     click.echo()
+
+
+@license_group.command("refresh")
+def license_refresh():
+    """Re-fetch the license from the Platform (after plan upgrade, etc.)."""
+    from ..auth import _load_config, get_token, get_api_url
+
+    config = _load_config()
+    runtime_id = config.get("runtime_id")
+    token = get_token()
+
+    if not runtime_id:
+        click.secho("  No runtime registered. Run: glyphh auth login", fg=theme.ERROR)
+        return
+
+    if not token:
+        click.secho("  Not logged in. Run: glyphh auth login", fg=theme.ERROR)
+        return
+
+    api_url = get_api_url()
+
+    try:
+        import httpx
+
+        with httpx.Client(timeout=15) as client:
+            res = client.get(
+                f"{api_url}/runtimes/{runtime_id}/license",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        if res.status_code == 200:
+            data = res.json()
+            path = save_license(data)
+            tier = data.get("tier", "unknown")
+            click.echo()
+            click.secho(f"  License refreshed: {tier} tier", fg=theme.SUCCESS)
+            click.secho(f"  Saved to: {path}", fg=theme.TEXT_DIM)
+            click.echo()
+        elif res.status_code == 401:
+            click.secho("  Session expired. Run: glyphh auth login", fg=theme.ERROR)
+        elif res.status_code == 404:
+            click.secho("  Runtime not found on Platform.", fg=theme.ERROR)
+        else:
+            click.secho(f"  Failed: {res.text}", fg=theme.ERROR)
+
+    except Exception as e:
+        click.secho(f"  Could not reach Platform: {e}", fg=theme.ERROR)
 
 
 @license_group.command("deactivate")

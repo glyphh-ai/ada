@@ -4,7 +4,8 @@ License file loader for Glyphh Runtime.
 Resolution chain:
   1. GLYPHH_LICENSE env var (JSON string)
   2. ~/.glyphh/license.json file
-  3. No license → free tier defaults
+  3. Platform self-fetch (GLYPHH_RUNTIME_ID env var)
+  4. No license → free tier defaults
 """
 
 import json
@@ -92,7 +93,21 @@ def load_license() -> LicenseInfo:
         except (json.JSONDecodeError, KeyError, TypeError) as e:
             logger.warning(f"Invalid license file {LICENSE_FILE}: {e}")
 
-    # 3. No license → free tier
+    # 3. Platform self-fetch (GLYPHH_RUNTIME_ID env var)
+    runtime_id = os.environ.get("GLYPHH_RUNTIME_ID", "").strip()
+    if runtime_id:
+        license_data = _fetch_from_platform(runtime_id)
+        if license_data:
+            try:
+                info = _parse_license(license_data)
+                # Cache locally so subsequent restarts don't need the Platform
+                save_license(license_data)
+                logger.info(f"License fetched from Platform: tier={info.tier}, org={info.org_id}")
+                return info
+            except Exception as e:
+                logger.warning(f"Failed to parse Platform license: {e}")
+
+    # 4. No license → free tier
     logger.info("No license found — using free tier defaults")
     return FREE_TIER
 
@@ -118,6 +133,31 @@ def _parse_license(data: dict) -> LicenseInfo:
         return FREE_TIER
 
     return info
+
+
+def _fetch_from_platform(runtime_id: str) -> Optional[dict]:
+    """Fetch license from Platform API using runtime_id. Returns None on failure."""
+    platform_url = os.environ.get(
+        "GLYPHH_PLATFORM_URL", "https://api.glyphh.ai/api/v1"
+    )
+    try:
+        import httpx
+
+        res = httpx.post(
+            f"{platform_url}/runtimes/validate-license",
+            json={"runtime_id": runtime_id},
+            timeout=10,
+        )
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("valid") and data.get("license"):
+                return data["license"]
+            logger.warning(f"Platform license validation failed: {data.get('error', 'unknown')}")
+        else:
+            logger.warning(f"Platform returned {res.status_code} for license fetch")
+    except Exception as e:
+        logger.warning(f"Could not reach Platform for license: {e}")
+    return None
 
 
 def save_license(data: dict) -> Path:
