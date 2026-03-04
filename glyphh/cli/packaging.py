@@ -88,6 +88,12 @@ def package_model(model_dir: Path, output: Optional[Path] = None) -> Path:
                     if child.is_file() and not child.name.startswith("."):
                         zf.write(child, str(child.relative_to(model_dir)))
 
+        # Include all .py sibling modules (intent.py, scorer.py, etc.)
+        for py_file in sorted(model_dir.glob("*.py")):
+            name = py_file.name
+            if name not in ("build.py", "encoder.py") and name not in zf.namelist():
+                zf.write(py_file, name)
+
     logger.info(f"Packaged {model_id} -> {output}")
     return output
 
