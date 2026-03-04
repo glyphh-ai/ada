@@ -22,8 +22,12 @@ settings = get_settings()
 
 # Resolve and normalise the database URL
 database_url = settings.resolved_database_url
-if database_url.startswith("postgresql://"):
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+elif database_url.startswith("postgresql://"):
     database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+# asyncpg uses "ssl" not "sslmode"
+database_url = database_url.replace("sslmode=", "ssl=")
 
 # SQLite does not support connection pooling — use different engine args
 _is_sqlite = "sqlite" in database_url
