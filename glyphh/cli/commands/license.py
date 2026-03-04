@@ -1,18 +1,16 @@
 """
-CLI license commands — manage the runtime license file.
+CLI license commands — manage the runtime license (Ed25519 signed JWT).
 
 glyphh license show           Display current license info
-glyphh license activate <key> Save a license (JSON string or key)
+glyphh license activate <token> Save a signed JWT license token
 glyphh license deactivate     Remove the license file
 glyphh license refresh        Re-fetch license from Platform
 """
 
-import json
-
 import click
 
 from .. import theme
-from ...licensing import load_license, save_license, remove_license, LICENSE_FILE
+from ...licensing import load_license, save_license_token, remove_license, LICENSE_FILE, _verify_token
 
 
 @click.group("license")
@@ -36,13 +34,14 @@ def license_show():
         click.secho("  Glyphs:    10,000 per model", fg=theme.TEXT_DIM)
         click.echo()
         click.secho("  Activate a license to unlock higher limits:", fg=theme.MUTED)
-        click.secho("    glyphh license activate '<json>'", fg=theme.MUTED)
+        click.secho("    glyphh license activate '<jwt-token>'", fg=theme.MUTED)
         click.echo()
         return
 
     click.secho(f"  License:   {info.license_id or '—'}", fg=theme.ACCENT)
     click.secho(f"  Org:       {info.org_id}", fg=theme.ACCENT)
     click.secho(f"  Tier:      {info.tier}", fg=theme.SUCCESS)
+    click.secho("  Signature: verified", fg=theme.SUCCESS)
 
     models = "unlimited" if info.max_models == -1 else str(info.max_models)
     glyphs = "unlimited" if info.max_glyphs_per_model == -1 else f"{info.max_glyphs_per_model:,}"
@@ -58,26 +57,23 @@ def license_show():
 
 
 @license_group.command("activate")
-@click.argument("license_data")
-def license_activate(license_data):
-    """Activate a license. Pass a JSON string with tier info.
+@click.argument("token")
+def license_activate(token):
+    """Activate a license. Pass the signed JWT token from the Platform.
 
-    Example: glyphh license activate '{"org_id":"my-org","tier":"pro"}'
+    Example: glyphh license activate 'eyJhbGciOiJFZERTQSI...'
     """
-    try:
-        data = json.loads(license_data)
-    except json.JSONDecodeError:
-        click.secho("  Invalid JSON. Expected format:", fg=theme.ERROR)
-        click.secho('    \'{"org_id":"my-org","tier":"pro"}\'', fg=theme.MUTED)
+    # Verify the token before saving
+    claims = _verify_token(token)
+    if not claims:
+        click.secho("  Invalid or unverifiable license token.", fg=theme.ERROR)
+        click.secho("  Get a valid token from the Glyphh dashboard.", fg=theme.MUTED)
         return
 
-    if "tier" not in data:
-        click.secho("  Missing 'tier' field in license data.", fg=theme.ERROR)
-        return
-
-    path = save_license(data)
+    path = save_license_token(token)
+    tier = claims.get("tier", "unknown")
     click.echo()
-    click.secho(f"  License activated: {data.get('tier', 'unknown')} tier", fg=theme.SUCCESS)
+    click.secho(f"  License activated: {tier} tier (signature verified)", fg=theme.SUCCESS)
     click.secho(f"  Saved to: {path}", fg=theme.TEXT_DIM)
     click.echo()
     click.secho("  Restart the runtime for changes to take effect.", fg=theme.MUTED)
@@ -114,10 +110,21 @@ def license_refresh():
 
         if res.status_code == 200:
             data = res.json()
-            path = save_license(data)
-            tier = data.get("tier", "unknown")
+            jwt_token = data.get("token")
+            if not jwt_token:
+                click.secho("  No token in response.", fg=theme.ERROR)
+                return
+
+            # Verify before saving
+            claims = _verify_token(jwt_token)
+            if not claims:
+                click.secho("  Received invalid license token from Platform.", fg=theme.ERROR)
+                return
+
+            path = save_license_token(jwt_token)
+            tier = claims.get("tier", "unknown")
             click.echo()
-            click.secho(f"  License refreshed: {tier} tier", fg=theme.SUCCESS)
+            click.secho(f"  License refreshed: {tier} tier (signature verified)", fg=theme.SUCCESS)
             click.secho(f"  Saved to: {path}", fg=theme.TEXT_DIM)
             click.echo()
         elif res.status_code == 401:

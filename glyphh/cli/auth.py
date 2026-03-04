@@ -222,13 +222,15 @@ def register_runtime() -> bool:
                 _save_config(config)
                 click.secho(f"  Runtime registered: {name}", fg=theme.MUTED)
 
-                # Fetch and save the license
-                license_data = data.get("license")
-                if license_data:
-                    from glyphh.licensing import save_license
-                    save_license(license_data)
-                    tier = license_data.get("tier", "free")
-                    click.secho(f"  License saved ({tier} tier)", fg=theme.MUTED)
+                # Fetch and save the signed JWT license
+                license_info = data.get("license")
+                if license_info and isinstance(license_info, dict):
+                    jwt_token = license_info.get("token")
+                    if jwt_token:
+                        from glyphh.licensing import save_license_token
+                        save_license_token(jwt_token)
+                        tier = license_info.get("tier", "free")
+                        click.secho(f"  License saved ({tier} tier, signed)", fg=theme.MUTED)
 
                 # Print deployment instructions
                 click.echo()

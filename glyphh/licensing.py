@@ -1,9 +1,9 @@
 """
-License file loader for Glyphh Runtime.
+License loader for Glyphh Runtime — Ed25519 signed JWT tokens.
 
 Resolution chain:
-  1. GLYPHH_LICENSE env var (JSON string)
-  2. ~/.glyphh/license.json file
+  1. GLYPHH_LICENSE env var (JWT token string)
+  2. ~/.glyphh/license.json file ({"token": "eyJ..."})
   3. Platform self-fetch (GLYPHH_RUNTIME_ID env var)
   4. No license → free tier defaults
 """
@@ -16,10 +16,61 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import jwt
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
+
 logger = logging.getLogger(__name__)
 
 # License file location
 LICENSE_FILE = Path.home() / ".glyphh" / "license.json"
+
+# Production Ed25519 public key — replace with output of:
+#   python scripts/generate_license_keys.py
+# Override at runtime via GLYPHH_LICENSE_PUBLIC_KEY env var.
+_DEFAULT_PUBLIC_KEY_PEM = """\
+-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAPlaceholderKeyReplaceWithRealKeyFromGen=
+-----END PUBLIC KEY-----
+"""
+
+_public_key = None
+
+
+def _get_public_key():
+    """Load Ed25519 public key from env var or hardcoded default."""
+    global _public_key
+    if _public_key is not None:
+        return _public_key
+
+    raw = os.environ.get("GLYPHH_LICENSE_PUBLIC_KEY", "").strip()
+    if not raw:
+        raw = _DEFAULT_PUBLIC_KEY_PEM.strip()
+
+    try:
+        _public_key = load_pem_public_key(raw.encode())
+    except Exception as e:
+        logger.error(f"Failed to load license public key: {e}")
+        return None
+
+    return _public_key
+
+
+def _verify_token(token_str: str) -> Optional[dict]:
+    """Verify a JWT license token and return claims, or None on failure."""
+    pub = _get_public_key()
+    if pub is None:
+        logger.warning("No public key available — cannot verify license token")
+        return None
+
+    try:
+        claims = jwt.decode(token_str, pub, algorithms=["EdDSA"])
+        return claims
+    except jwt.ExpiredSignatureError:
+        logger.warning("License token has expired")
+        return None
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Invalid license token: {e}")
+        return None
 
 
 @dataclass
@@ -69,63 +120,20 @@ _TIER_DEFAULTS = {
 }
 
 
-def load_license() -> LicenseInfo:
-    """Load license from env var or file. Returns free tier if not found."""
-
-    # 1. GLYPHH_LICENSE env var (JSON string)
-    env_val = os.environ.get("GLYPHH_LICENSE", "").strip()
-    if env_val:
-        try:
-            data = json.loads(env_val)
-            info = _parse_license(data)
-            logger.info(f"License loaded from GLYPHH_LICENSE env var: tier={info.tier}, org={info.org_id}")
-            return info
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.warning(f"Invalid GLYPHH_LICENSE env var: {e}")
-
-    # 2. ~/.glyphh/license.json file
-    if LICENSE_FILE.exists():
-        try:
-            data = json.loads(LICENSE_FILE.read_text())
-            info = _parse_license(data)
-            logger.info(f"License loaded from {LICENSE_FILE}: tier={info.tier}, org={info.org_id}")
-            return info
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.warning(f"Invalid license file {LICENSE_FILE}: {e}")
-
-    # 3. Platform self-fetch (GLYPHH_RUNTIME_ID env var)
-    runtime_id = os.environ.get("GLYPHH_RUNTIME_ID", "").strip()
-    if runtime_id:
-        license_data = _fetch_from_platform(runtime_id)
-        if license_data:
-            try:
-                info = _parse_license(license_data)
-                # Cache locally so subsequent restarts don't need the Platform
-                save_license(license_data)
-                logger.info(f"License fetched from Platform: tier={info.tier}, org={info.org_id}")
-                return info
-            except Exception as e:
-                logger.warning(f"Failed to parse Platform license: {e}")
-
-    # 4. No license → free tier
-    logger.info("No license found — using free tier defaults")
-    return FREE_TIER
-
-
-def _parse_license(data: dict) -> LicenseInfo:
-    """Parse a license dict into LicenseInfo, applying tier defaults for missing limits."""
-    tier = data.get("tier", "free")
+def _claims_to_license_info(claims: dict) -> LicenseInfo:
+    """Convert verified JWT claims into a LicenseInfo."""
+    tier = claims.get("tier", "free")
     defaults = _TIER_DEFAULTS.get(tier, _TIER_DEFAULTS["free"])
 
     info = LicenseInfo(
-        org_id=data.get("org_id", "default"),
+        org_id=claims.get("org_id", "default"),
         tier=tier,
-        max_models=data.get("max_models", defaults["max_models"]),
-        max_glyphs_per_model=data.get("max_glyphs_per_model", defaults["max_glyphs_per_model"]),
-        rate_limit_per_minute=data.get("rate_limit_per_minute", defaults["rate_limit_per_minute"]),
-        license_id=data.get("license_id"),
-        issued_at=data.get("issued_at"),
-        expires_at=data.get("expires_at"),
+        max_models=claims.get("max_models", defaults["max_models"]),
+        max_glyphs_per_model=claims.get("max_glyphs_per_model", defaults["max_glyphs_per_model"]),
+        rate_limit_per_minute=claims.get("rate_limit_per_minute", defaults["rate_limit_per_minute"]),
+        license_id=claims.get("license_id"),
+        issued_at=claims.get("issued_at"),
+        expires_at=claims.get("expires_at"),
     )
 
     if info.is_expired:
@@ -135,8 +143,54 @@ def _parse_license(data: dict) -> LicenseInfo:
     return info
 
 
-def _fetch_from_platform(runtime_id: str) -> Optional[dict]:
-    """Fetch license from Platform API using runtime_id. Returns None on failure."""
+def load_license() -> LicenseInfo:
+    """Load license from env var, file, or Platform. Returns free tier if not found."""
+
+    # 1. GLYPHH_LICENSE env var (JWT token string)
+    env_val = os.environ.get("GLYPHH_LICENSE", "").strip()
+    if env_val:
+        claims = _verify_token(env_val)
+        if claims:
+            info = _claims_to_license_info(claims)
+            logger.info(f"License loaded from GLYPHH_LICENSE env var: tier={info.tier}, org={info.org_id}")
+            return info
+        logger.warning("GLYPHH_LICENSE env var contains invalid or unverifiable token")
+
+    # 2. ~/.glyphh/license.json file ({"token": "eyJ..."})
+    if LICENSE_FILE.exists():
+        try:
+            data = json.loads(LICENSE_FILE.read_text())
+            token_str = data.get("token", "")
+            if token_str:
+                claims = _verify_token(token_str)
+                if claims:
+                    info = _claims_to_license_info(claims)
+                    logger.info(f"License loaded from {LICENSE_FILE}: tier={info.tier}, org={info.org_id}")
+                    return info
+                logger.warning(f"License file {LICENSE_FILE} contains invalid or unverifiable token")
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            logger.warning(f"Invalid license file {LICENSE_FILE}: {e}")
+
+    # 3. Platform self-fetch (GLYPHH_RUNTIME_ID env var)
+    runtime_id = os.environ.get("GLYPHH_RUNTIME_ID", "").strip()
+    if runtime_id:
+        token_str = _fetch_token_from_platform(runtime_id)
+        if token_str:
+            claims = _verify_token(token_str)
+            if claims:
+                save_license_token(token_str)
+                info = _claims_to_license_info(claims)
+                logger.info(f"License fetched from Platform: tier={info.tier}, org={info.org_id}")
+                return info
+            logger.warning("Platform returned invalid license token")
+
+    # 4. No license → free tier
+    logger.info("No license found — using free tier defaults")
+    return FREE_TIER
+
+
+def _fetch_token_from_platform(runtime_id: str) -> Optional[str]:
+    """Fetch signed JWT license from Platform API. Returns token string or None."""
     platform_url = os.environ.get(
         "GLYPHH_PLATFORM_URL", "https://api.glyphh.ai/api/v1"
     )
@@ -150,8 +204,8 @@ def _fetch_from_platform(runtime_id: str) -> Optional[dict]:
         )
         if res.status_code == 200:
             data = res.json()
-            if data.get("valid") and data.get("license"):
-                return data["license"]
+            if data.get("valid") and data.get("token"):
+                return data["token"]
             logger.warning(f"Platform license validation failed: {data.get('error', 'unknown')}")
         else:
             logger.warning(f"Platform returned {res.status_code} for license fetch")
@@ -160,10 +214,10 @@ def _fetch_from_platform(runtime_id: str) -> Optional[dict]:
     return None
 
 
-def save_license(data: dict) -> Path:
-    """Save license data to ~/.glyphh/license.json."""
+def save_license_token(token: str) -> Path:
+    """Save a JWT license token to ~/.glyphh/license.json."""
     LICENSE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    LICENSE_FILE.write_text(json.dumps(data, indent=2))
+    LICENSE_FILE.write_text(json.dumps({"token": token}, indent=2))
     return LICENSE_FILE
 
 
