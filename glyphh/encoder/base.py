@@ -767,14 +767,15 @@ class Encoder:
         if morph is not None:
             words = [morph.normalize(w)[0] for w in words]
 
-        # Deduplicate preserving order
-        seen = set()
-        unique_words = []
+        # Deduplicate — BoW treats each unique word equally regardless of
+        # frequency.  This gives stable cosine distances between exemplar and
+        # query vectors even when descriptions repeat keywords for emphasis.
+        seen: set[str] = set()
+        unique_words: list[str] = []
         for w in words:
             if w not in seen:
                 seen.add(w)
                 unique_words.append(w)
-
         word_vecs = [self.generate_symbol(w) for w in unique_words]
         return self.bundle(word_vecs)
     

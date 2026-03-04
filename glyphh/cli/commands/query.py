@@ -10,7 +10,7 @@ import json
 import click
 
 from .. import theme
-from ..auth import get_user, is_logged_in, _load_config
+from ..auth import get_user, is_logged_in, resolve_org_id
 from ..config import resolve_runtime_url, resolve_runtime_token
 from ..packaging import find_model_dir, read_manifest
 
@@ -26,9 +26,8 @@ def _resolve_query_context(model_id_override=None):
         click.secho("  No token available. Run: glyphh auth login", fg=theme.ERROR)
         return None
 
-    config = _load_config()
-    user = config.get("user", {})
-    org_id = user.get("org_id")
+    runtime_url = resolve_runtime_url()
+    org_id = resolve_org_id(runtime_url)
     if not org_id:
         click.secho("  No org_id in session. Run: glyphh auth login", fg=theme.ERROR)
         return None
@@ -45,7 +44,7 @@ def _resolve_query_context(model_id_override=None):
         return None
 
     return {
-        "runtime_url": resolve_runtime_url(),
+        "runtime_url": runtime_url,
         "token": token,
         "org_id": org_id,
         "model_id": model_id,

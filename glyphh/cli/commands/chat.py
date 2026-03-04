@@ -72,21 +72,10 @@ def _resolve_context(model_id_override=None, url_override=None, token_override=N
         or "127.0.0.1" in runtime_url
     )
 
-    # Try to pull org from a logged-in session — only for non-local URLs
-    org_id = None
-    model_id = model_id_override
-    if not _is_local_url:
-        try:
-            from ..auth import is_logged_in, _load_config
-            if is_logged_in():
-                cfg = _load_config()
-                org_id = cfg.get("user", {}).get("org_id")
-        except Exception:
-            pass
+    from ..auth import resolve_org_id
 
-    # Fall back to local-dev-org for localhost (always) or when no session
-    if not org_id:
-        org_id = _LOCAL_ORG
+    model_id = model_id_override
+    org_id = resolve_org_id(runtime_url) or _LOCAL_ORG
 
     # Discover model_id from manifest if not provided
     if not model_id:

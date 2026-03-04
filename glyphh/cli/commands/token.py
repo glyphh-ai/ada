@@ -9,6 +9,7 @@ token revoke     Revoke a token
 import click
 
 from .. import theme
+from ..auth import resolve_org_id
 from ..config import resolve_runtime_url, resolve_runtime_token
 
 
@@ -20,7 +21,7 @@ def token_group():
 
 @token_group.command("create")
 @click.option("--name", "-n", required=True, help="Token name (e.g. 'boomi-prod')")
-@click.option("--org-id", "-o", required=True, help="Organization ID")
+@click.option("--org-id", "-o", default=None, help="Organization ID (defaults to session)")
 @click.option("--model-id", default=None, help="Scope to a specific model (omit for all models)")
 @click.option("--permissions", "-p", default="read,write", help="Comma-separated: read,write,admin")
 @click.option("--expires", "-e", default=365, type=int, help="Expiration in days (default: 365)")
@@ -28,6 +29,12 @@ def token_create(name, org_id, model_id, permissions, expires):
     """Create a new API token. The token is shown once — copy it."""
     runtime_url = resolve_runtime_url()
     admin_token = resolve_runtime_token()
+
+    if not org_id:
+        org_id = resolve_org_id(runtime_url)
+    if not org_id:
+        click.secho("  No org_id. Provide --org-id or run: glyphh auth login", fg=theme.ERROR)
+        return
 
     headers = {}
     if admin_token:
@@ -80,11 +87,17 @@ def token_create(name, org_id, model_id, permissions, expires):
 
 
 @token_group.command("list")
-@click.option("--org-id", "-o", required=True, help="Organization ID")
+@click.option("--org-id", "-o", default=None, help="Organization ID (defaults to session)")
 def token_list(org_id):
     """List active tokens."""
     runtime_url = resolve_runtime_url()
     admin_token = resolve_runtime_token()
+
+    if not org_id:
+        org_id = resolve_org_id(runtime_url)
+    if not org_id:
+        click.secho("  No org_id. Provide --org-id or run: glyphh auth login", fg=theme.ERROR)
+        return
 
     headers = {}
     if admin_token:
@@ -138,11 +151,17 @@ def token_list(org_id):
 
 @token_group.command("revoke")
 @click.argument("token_id")
-@click.option("--org-id", "-o", required=True, help="Organization ID")
+@click.option("--org-id", "-o", default=None, help="Organization ID (defaults to session)")
 def token_revoke(token_id, org_id):
     """Revoke a token by ID."""
     runtime_url = resolve_runtime_url()
     admin_token = resolve_runtime_token()
+
+    if not org_id:
+        org_id = resolve_org_id(runtime_url)
+    if not org_id:
+        click.secho("  No org_id. Provide --org-id or run: glyphh auth login", fg=theme.ERROR)
+        return
 
     headers = {}
     if admin_token:
@@ -175,18 +194,18 @@ def token_revoke(token_id, org_id):
 def handle_token(func: str | None, args: str = ""):
     """Route token subcommands from the interactive shell."""
     if func == "create":
-        click.secho("  Use: glyphh token create --name <name> --org-id <org>", fg=theme.MUTED)
+        click.secho("  Use: glyphh token create --name <name>", fg=theme.MUTED)
     elif func == "list":
-        click.secho("  Use: glyphh token list --org-id <org>", fg=theme.MUTED)
+        click.secho("  Use: glyphh token list", fg=theme.MUTED)
     elif func == "revoke":
         if not args.strip():
-            click.secho("  usage: token revoke <token-id> --org-id <org>", fg=theme.MUTED)
+            click.secho("  usage: token revoke <token-id>", fg=theme.MUTED)
             return
-        click.secho("  Use: glyphh token revoke <id> --org-id <org>", fg=theme.MUTED)
+        click.secho("  Use: glyphh token revoke <id>", fg=theme.MUTED)
     else:
         click.echo()
         click.secho("  usage:", fg=theme.MUTED)
-        click.secho("    token create --name <n> --org-id <org>   Create API token", fg=theme.MUTED)
-        click.secho("    token list --org-id <org>                List active tokens", fg=theme.MUTED)
-        click.secho("    token revoke <id> --org-id <org>         Revoke a token", fg=theme.MUTED)
+        click.secho("    token create --name <n>    Create API token", fg=theme.MUTED)
+        click.secho("    token list                 List active tokens", fg=theme.MUTED)
+        click.secho("    token revoke <id>          Revoke a token", fg=theme.MUTED)
         click.echo()

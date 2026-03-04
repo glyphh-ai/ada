@@ -14,7 +14,6 @@ from ..auth import (
     get_user,
     device_login,
     clear_session,
-    register_runtime,
 )
 
 
@@ -32,9 +31,7 @@ def auth_login():
         name = user.get("first_name", user.get("email", ""))
         click.secho(f"  Already logged in as {name}.", fg=theme.MUTED)
         return
-    success = device_login()
-    if success:
-        register_runtime()
+    device_login()
 
 
 @auth_group.command("logout")

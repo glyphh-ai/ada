@@ -142,6 +142,7 @@ def device_login() -> bool:
                     click.secho(f"  Welcome, {name}!", fg="bright_cyan")
                     click.echo()
                     register_runtime()
+                    bootstrap_runtime()
                     return True
 
                 if status == "expired":
@@ -245,3 +246,87 @@ def register_runtime() -> bool:
     except Exception as e:
         click.secho(f"  Could not register runtime: {e}", fg=theme.WARNING)
         return False
+
+
+def resolve_org_id(runtime_url: str) -> str | None:
+    """Resolve org_id from runtime URL context.
+
+    Local URLs → "local-dev-org"
+    Remote URLs → session user.org_id (or None if not logged in)
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(runtime_url)
+    if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
+        return "local-dev-org"
+
+    config = _load_config()
+    return config.get("user", {}).get("org_id")
+
+
+def bootstrap_runtime() -> bool:
+    """Push the license JWT to the remote runtime to get an admin token.
+
+    Called after device_login() → register_runtime(). The license JWT
+    (saved to ~/.glyphh/license.json by register_runtime) is sent as
+    Bearer auth to POST /setup. The runtime verifies the Ed25519 signature,
+    revokes old admin tokens, and returns a fresh one. Last auth wins.
+
+    Skips silently if: no remote endpoint, local URL, no license, or runtime offline.
+    """
+    from .config import resolve_runtime_url
+
+    runtime_url = resolve_runtime_url()
+
+    # Skip for local URLs
+    from urllib.parse import urlparse
+    parsed = urlparse(runtime_url)
+    if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
+        return True
+
+    # Read license JWT
+    from glyphh.licensing import LICENSE_FILE
+    if not LICENSE_FILE.exists():
+        return True  # no license yet — skip silently
+
+    try:
+        license_data = json.loads(LICENSE_FILE.read_text())
+        license_jwt = license_data.get("token", "")
+    except Exception:
+        return True
+
+    if not license_jwt:
+        return True
+
+    try:
+        with httpx.Client(timeout=15) as client:
+            res = client.post(
+                f"{runtime_url}/setup",
+                headers={"Authorization": f"Bearer {license_jwt}"},
+            )
+
+        if res.status_code in (200, 201):
+            data = res.json()
+            token = data.get("token")
+            if token:
+                config = _load_config()
+                config["runtime_token"] = token
+                _save_config(config)
+                click.secho(f"  Runtime token saved (org: {data.get('org_id', '?')})", fg=theme.SUCCESS)
+                return True
+
+        else:
+            detail = res.text
+            try:
+                detail = res.json().get("detail", detail)
+            except Exception:
+                pass
+            click.secho(f"  Runtime setup: {detail}", fg=theme.WARNING)
+            return False
+
+    except httpx.ConnectError:
+        click.secho("  Runtime not reachable (token unchanged)", fg=theme.TEXT_DIM)
+        return True
+    except Exception as e:
+        click.secho(f"  Runtime setup skipped: {e}", fg=theme.TEXT_DIM)
+        return True

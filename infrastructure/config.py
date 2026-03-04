@@ -143,10 +143,12 @@ class Settings(BaseSettings):
             return "pgvector"
         return "sqlite"  # safe fallback
     
-    # JWT Authentication (deprecated — kept for backward compat with existing envs)
+    # JWT Authentication — shared secret with Platform for web UI sessions.
+    # Database tokens are the primary auth for CLI/API. Platform JWTs are
+    # accepted for browser-based dashboard sessions (POST /auth/login on Platform).
     jwt_secret_key: Optional[str] = Field(
         default=None,
-        description="Deprecated. Runtime uses database tokens instead of JWTs."
+        description="Platform JWT secret (HS256). Set to same value as Platform's JWT_SECRET_KEY."
     )
     
     # NL Query (enabled by default for studio chat functionality)

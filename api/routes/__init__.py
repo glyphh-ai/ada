@@ -7,6 +7,7 @@ from api.routes.org_scoped import router as org_scoped_router
 from api.routes.listeners import router as listeners_router
 from api.routes.tokens import router as tokens_router
 from api.routes.setup import router as setup_router
+from api.routes.web import router as web_router
 
 __all__ = [
     "health_router",
@@ -14,4 +15,5 @@ __all__ = [
     "listeners_router",
     "tokens_router",
     "setup_router",
+    "web_router",
 ]

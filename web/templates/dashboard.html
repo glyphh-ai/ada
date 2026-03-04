@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>glyphh &middot; {{ model_id }}</title>
+{% if favicon_b64 %}
+<link rel="icon" type="image/png" href="data:image/png;base64,{{ favicon_b64 }}">
+{% endif %}
+<link rel="stylesheet" href="/static/css/app.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.181.0/build/three.module.min.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.181.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div class="dashboard" id="app">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <div class="model-badge">
+        <span class="name">{{ model_id }}</span>
+        <span class="mode">{{ deployment_mode }}</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <span id="glyph-count-badge" style="font-size:11px;color:var(--text-dim);font-family:var(--mono)"></span>
+      {% if deployment_mode != 'local' %}
+      <button class="btn-icon" id="logout-btn" title="Sign out">Sign out</button>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Workspace: 3-panel layout -->
+  <div class="workspace" id="workspace">
+
+    <!-- Left Column: Glyphs + Dropzone -->
+    <div class="left-column" id="col-left">
+      <div class="left-top" id="left-top">
+        <div class="panel-header">
+          <span class="panel-title">Glyphs</span>
+          <button class="clear-btn" id="refresh-glyphs-btn" title="Refresh">&#x21bb;</button>
+        </div>
+        <div class="glyph-search">
+          <input type="text" id="glyph-search-input" placeholder="Search glyphs...">
+        </div>
+        <div class="glyph-list" id="glyph-list">
+          <div class="glyph-empty" id="glyph-empty">
+            <div class="icon">&#x25C8;</div>
+            <div class="label">No glyphs loaded</div>
+          </div>
+        </div>
+      </div>
+      <div class="resize-handle resize-v" id="resize-left-v"></div>
+      <div class="left-bottom" id="left-bottom">
+        <div class="panel-header">
+          <span class="panel-title">Load Data</span>
+        </div>
+        <div class="dropzone" id="dropzone-container">
+          <div class="dropzone-area" id="dropzone-area">
+            <div class="dropzone-icon">&#x2B06;</div>
+            <div class="dropzone-text">Drop .jsonl file here</div>
+            <div class="dropzone-hint">or click to select</div>
+            <input type="file" id="dropzone-input" accept=".jsonl,.json" style="display:none">
+          </div>
+          <div class="dropzone-progress" id="dropzone-progress">
+            <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+            <div class="dropzone-status" id="dropzone-status">Uploading...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Left ↔ Center resize handle -->
+    <div class="resize-handle resize-h" id="resize-left-h"></div>
+
+    <!-- Center Column: Chat / GQL -->
+    <div class="center-column" id="col-center">
+      <div class="chat-tabs">
+        <button class="chat-tab active" id="tab-nl" data-tab="nl">Natural Language</button>
+        <button class="chat-tab" id="tab-gql" data-tab="gql">GQL</button>
+      </div>
+      <div class="chat-messages" id="chat-messages">
+        <div class="msg-row assistant">
+          <div class="bubble">
+            Hello! Ask me anything about <strong>{{ model_id }}</strong>.<br>
+            Switch to GQL tab for direct Glyph Query Language queries.
+          </div>
+        </div>
+      </div>
+      <div class="chat-input-bar">
+        <!-- NL input -->
+        <div class="chat-input-wrap" id="nl-wrap">
+          <input class="chat-input" id="nl-input" type="text" placeholder="Ask anything about your model..." autocomplete="off">
+          <button class="send-btn" id="nl-btn" disabled title="Send (Enter)">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M14 8L2 2l2.5 6L2 14l12-6z" fill="white"/>
+            </svg>
+          </button>
+        </div>
+        <!-- GQL input -->
+        <div class="chat-input-wrap hidden" id="gql-wrap">
+          <textarea class="chat-textarea" id="gql-input" placeholder="LIST ALL LIMIT 5&#10;FIND SIMILAR TO &quot;send message&quot; LIMIT 10" rows="3"></textarea>
+          <button class="send-btn" id="gql-btn" disabled title="Send (Ctrl+Enter)">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M14 8L2 2l2.5 6L2 14l12-6z" fill="white"/>
+            </svg>
+          </button>
+        </div>
+        <div class="input-hint" id="input-hint">Press Enter to send</div>
+      </div>
+    </div>
+
+    <!-- Center ↔ Right resize handle -->
+    <div class="resize-handle resize-h" id="resize-right-h"></div>
+
+    <!-- Right Column: Viewer + Results -->
+    <div class="right-column" id="col-right">
+      <div class="right-top" id="right-top">
+        <div class="panel-header">
+          <span class="panel-title">3D Viewer</span>
+        </div>
+        <div class="viewer-container" id="viewer-container">
+          <div class="viewer-empty" id="viewer-empty">
+            <div class="icon">&#x25C8;</div>
+            <div class="label">Load data to see the graph</div>
+          </div>
+          <!-- Three.js mounts its canvas here -->
+          <div id="viewer-mount"></div>
+          <!-- HTML labels overlay (3D→2D projected) -->
+          <div class="viewer-labels" id="viewer-labels"></div>
+          <!-- UI panels (edge toggles, search, layer key, legend) created by viewer.js -->
+        </div>
+      </div>
+      <div class="resize-handle resize-v" id="resize-right-v"></div>
+      <div class="right-bottom" id="right-bottom">
+        <div class="panel-header">
+          <span class="panel-title">Results</span>
+          <button class="clear-btn" id="clear-results-btn" title="Clear">&#x2715;</button>
+        </div>
+        <div class="panel-body" id="results-body">
+          <div class="results-empty" id="results-empty">
+            <div class="icon">&#x25C8;</div>
+            <div class="label">Results will appear here</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- App config injected by server -->
+<script>
+  window.__GLYPHH__ = {
+    orgId: {{ org_id | tojson }},
+    modelId: {{ model_id | tojson }},
+    deploymentMode: {{ deployment_mode | tojson }},
+    platformUrl: {{ platform_url | tojson }},
+    isLocal: {{ (deployment_mode == 'local') | tojson }},
+  };
+</script>
+
+<script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

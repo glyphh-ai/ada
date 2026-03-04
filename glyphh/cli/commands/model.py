@@ -14,7 +14,7 @@ import click
 from pathlib import Path
 
 from .. import theme
-from ..auth import get_token, get_api_url, is_logged_in
+from ..auth import get_token, get_api_url, is_logged_in, resolve_org_id
 from ..config import resolve_runtime_url, resolve_runtime_token
 from ..packaging import (
     discover_local_models,
@@ -102,14 +102,13 @@ def model_deploy(path):
     runtime_url = resolve_runtime_url()
     token = resolve_runtime_token()
 
-    # For local runtimes, use local-dev-org (matches runtime's local auth bypass)
-    from urllib.parse import urlparse
-    parsed = urlparse(runtime_url)
-    is_local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
-    org_id = "local-dev-org" if is_local else (manifest.get("org_id") or "default")
+    org_id = resolve_org_id(runtime_url)
+    if not org_id:
+        click.secho("  No org_id in session. Run: glyphh auth login", fg=theme.ERROR)
+        return
 
     headers = {}
-    if token and not is_local:
+    if token:
         headers["Authorization"] = f"Bearer {token}"
 
     deploy_url = f"{runtime_url}/{org_id}/{model_id}/model/deploy"
@@ -179,13 +178,13 @@ def model_status(model_id):
     runtime_url = resolve_runtime_url()
     token = resolve_runtime_token()
 
-    from urllib.parse import urlparse
-    parsed = urlparse(runtime_url)
-    is_local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
-    org_id = "local-dev-org" if is_local else "default"
+    org_id = resolve_org_id(runtime_url)
+    if not org_id:
+        click.secho("  No org_id in session. Run: glyphh auth login", fg=theme.ERROR)
+        return
 
     headers = {}
-    if token and not is_local:
+    if token:
         headers["Authorization"] = f"Bearer {token}"
 
     try:
@@ -238,13 +237,13 @@ def model_undeploy(model_id):
     runtime_url = resolve_runtime_url()
     token = resolve_runtime_token()
 
-    from urllib.parse import urlparse
-    parsed = urlparse(runtime_url)
-    is_local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
-    org_id = "local-dev-org" if is_local else "default"
+    org_id = resolve_org_id(runtime_url)
+    if not org_id:
+        click.secho("  No org_id in session. Run: glyphh auth login", fg=theme.ERROR)
+        return
 
     headers = {}
-    if token and not is_local:
+    if token:
         headers["Authorization"] = f"Bearer {token}"
 
     try:
@@ -397,21 +396,10 @@ def model_load(file, model_id, batch_size):
             click.secho("  No manifest.yaml found. Provide --model-id or run from a model directory.", fg=theme.ERROR)
             return
 
-    # Resolve org_id from session
-    from ..auth import _load_config
-    config = _load_config()
-    user = config.get("user", {})
-    org_id = user.get("org_id")
-
     runtime_url = resolve_runtime_url()
-    from urllib.parse import urlparse
-    parsed = urlparse(runtime_url)
-    is_local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
-
-    if is_local and not org_id:
-        org_id = "local-dev-org"
-    elif not org_id:
-        click.secho("  No org_id in session. Log in first: glyphh auth login", fg=theme.ERROR)
+    org_id = resolve_org_id(runtime_url)
+    if not org_id:
+        click.secho("  No org_id in session. Run: glyphh auth login", fg=theme.ERROR)
         return
 
     token = resolve_runtime_token()
@@ -465,8 +453,6 @@ def _resolve_context():
     runtime allows unauthenticated access on lifecycle/admin endpoints,
     so a missing token is not fatal.
     """
-    from ..auth import _load_config
-
     if not is_logged_in():
         click.secho("  Not logged in. Run: glyphh auth login", fg=theme.ERROR)
         return None
@@ -474,22 +460,13 @@ def _resolve_context():
     runtime_url = resolve_runtime_url()
     token = resolve_runtime_token()
 
-    config = _load_config()
-    user = config.get("user", {})
-    org_id = user.get("org_id")
-
-    from urllib.parse import urlparse
-    parsed = urlparse(runtime_url)
-    is_local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
-
-    if is_local and not org_id:
-        org_id = "local-dev-org"
-    elif not org_id:
+    org_id = resolve_org_id(runtime_url)
+    if not org_id:
         click.secho("  No org_id in session. Run: glyphh auth login", fg=theme.ERROR)
         return None
 
     headers = {}
-    if token and not is_local:
+    if token:
         headers["Authorization"] = f"Bearer {token}"
 
     model_dir = find_model_dir()
@@ -610,12 +587,10 @@ def model_clear(model_id):
         click.secho("  Not logged in. Run: glyphh auth login", fg=theme.ERROR)
         return
 
-    from ..auth import _load_config
-    config = _load_config()
-    user = config.get("user", {})
-    org_id = user.get("org_id")
+    runtime_url = resolve_runtime_url()
+    org_id = resolve_org_id(runtime_url)
     if not org_id:
-        click.secho("  No org_id in session.", fg=theme.ERROR)
+        click.secho("  No org_id in session. Run: glyphh auth login", fg=theme.ERROR)
         return
 
     mid = model_id
@@ -628,14 +603,9 @@ def model_clear(model_id):
             click.secho("  Provide --model-id or run from a model directory.", fg=theme.ERROR)
             return
 
-    runtime_url = resolve_runtime_url()
-    from urllib.parse import urlparse
-    parsed = urlparse(runtime_url)
-    is_local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
-
     headers = {}
     token = resolve_runtime_token()
-    if token and not is_local:
+    if token:
         headers["Authorization"] = f"Bearer {token}"
 
     try:
@@ -671,12 +641,10 @@ def model_re_encode(model_id):
         click.secho("  Not logged in. Run: glyphh auth login", fg=theme.ERROR)
         return
 
-    from ..auth import _load_config
-    config = _load_config()
-    user = config.get("user", {})
-    org_id = user.get("org_id")
+    runtime_url = resolve_runtime_url()
+    org_id = resolve_org_id(runtime_url)
     if not org_id:
-        click.secho("  No org_id in session.", fg=theme.ERROR)
+        click.secho("  No org_id in session. Run: glyphh auth login", fg=theme.ERROR)
         return
 
     mid = model_id
@@ -689,14 +657,9 @@ def model_re_encode(model_id):
             click.secho("  Provide --model-id or run from a model directory.", fg=theme.ERROR)
             return
 
-    runtime_url = resolve_runtime_url()
-    from urllib.parse import urlparse
-    parsed = urlparse(runtime_url)
-    is_local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
-
     headers = {}
     token = resolve_runtime_token()
-    if token and not is_local:
+    if token:
         headers["Authorization"] = f"Bearer {token}"
 
     click.secho(f"  Re-encoding {mid}...", fg=theme.MUTED)
