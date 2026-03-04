@@ -23,11 +23,15 @@ CUSTOM_MODELS_DIR = RUNTIME_ROOT / "custom_models"
 
 
 def _load_jsonl(data_dir: Path) -> list[dict]:
-    """Load all JSONL files from a data directory."""
+    """Load exemplar JSONL files from a data directory.
+
+    Only loads files named exemplars*.jsonl (e.g. exemplars.jsonl).
+    Skips test files (test_queries.jsonl etc.) which are test data, not model data.
+    """
     entries = []
     if not data_dir.exists():
         return entries
-    for jsonl_file in sorted(data_dir.glob("*.jsonl")):
+    for jsonl_file in sorted(data_dir.glob("exemplars*.jsonl")):
         with open(jsonl_file) as f:
             for line in f:
                 line = line.strip()
@@ -146,6 +150,7 @@ async def deploy_model_to_db(
                     concept_text=concept_text,
                     embedding=embedding,
                     metadata={**metadata, "record_type": "pattern"},
+                    plan_slug="pro",  # auto-deploy bypasses plan limits
                 )
                 created += 1
 

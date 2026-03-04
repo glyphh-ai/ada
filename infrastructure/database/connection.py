@@ -84,19 +84,17 @@ async def init_db() -> None:
         return
 
     # ── pgvector: run Alembic migrations ─────────────────────────────────────
+    import sys as _sys
+
     app_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     alembic_ini = os.path.join(app_root, "alembic.ini")
 
     migrations_applied = False
 
     if os.path.exists(alembic_ini):
-        alembic_bin = os.path.join(app_root, ".venv", "bin", "alembic")
-        if not os.path.exists(alembic_bin):
-            alembic_bin = shutil.which("alembic") or "alembic"
-
         try:
             result = subprocess.run(
-                [alembic_bin, "upgrade", "head"],
+                [_sys.executable, "-m", "alembic", "upgrade", "head"],
                 cwd=app_root,
                 capture_output=True,
                 text=True,
@@ -119,9 +117,12 @@ async def init_db() -> None:
             from domains.procedures.models import StoredProcedureModel  # noqa: F401
         except ImportError:
             pass
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database tables created via metadata.create_all()")
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("Database tables created via metadata.create_all()")
+        except Exception as e:
+            logger.error(f"Failed to create tables via metadata.create_all(): {e}")
 
 
 async def close_db() -> None:

@@ -114,31 +114,46 @@ def load_encoder_config(model_dir: Path) -> tuple[Any, bool, Any, Any, Any]:
     if not encoder_path.exists():
         return None, False, None, None, None
 
+    import sys
+
     try:
-        spec = importlib.util.spec_from_file_location(
-            f"model_encoder_{model_dir.name}", encoder_path
-        )
-        if spec is None or spec.loader is None:
-            return None, False, None, None, None
+        # Add model directory to sys.path so encoder.py can import sibling modules
+        # (e.g., `from intent import extract_intent` in pipedream's encoder.py)
+        model_dir_str = str(model_dir)
+        added_to_path = False
+        if model_dir_str not in sys.path:
+            sys.path.insert(0, model_dir_str)
+            added_to_path = True
 
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        try:
+            spec = importlib.util.spec_from_file_location(
+                f"model_encoder_{model_dir.name}", encoder_path
+            )
+            if spec is None or spec.loader is None:
+                return None, False, None, None, None
 
-        encoder_config = getattr(module, "ENCODER_CONFIG", None)
-        if encoder_config is None:
-            logger.warning(f"encoder.py in {model_dir.name} has no ENCODER_CONFIG")
-            return None, False, None, None
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
 
-        encode_query_fn = getattr(module, "encode_query", None)
-        entry_to_record_fn = getattr(module, "entry_to_record", None)
-        assess_query_fn = getattr(module, "assess_query", None)
+            encoder_config = getattr(module, "ENCODER_CONFIG", None)
+            if encoder_config is None:
+                logger.warning(f"encoder.py in {model_dir.name} has no ENCODER_CONFIG")
+                return None, False, None, None, None
 
-        logger.info(f"Loaded custom encoder for {model_dir.name}")
-        return encoder_config, True, encode_query_fn, entry_to_record_fn, assess_query_fn
+            encode_query_fn = getattr(module, "encode_query", None)
+            entry_to_record_fn = getattr(module, "entry_to_record", None)
+            assess_query_fn = getattr(module, "assess_query", None)
+
+            logger.info(f"Loaded custom encoder for {model_dir.name}")
+            return encoder_config, True, encode_query_fn, entry_to_record_fn, assess_query_fn
+
+        finally:
+            if added_to_path:
+                sys.path.remove(model_dir_str)
 
     except Exception as e:
         logger.warning(f"Failed to load encoder.py for {model_dir.name}: {e}")
-        return None, False, None, None
+        return None, False, None, None, None
 
 
 def count_exemplars(model_dir: Path) -> int:

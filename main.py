@@ -76,10 +76,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize model manager
     model_manager = ModelManager(async_session_maker)
     logger.info("Model manager initialized")
-    
+
     # Initialize resource manager
     resource_manager = ResourceManager(async_session_maker)
     logger.info("Resource manager initialized")
+
+    # Sync globals to glyphh.server so route handlers can find them
+    # (routes import from glyphh.server, but uvicorn loads main.py)
+    import glyphh.server as _srv
+    _srv.model_manager = model_manager
+    _srv.resource_manager = resource_manager
     
     # Auto-deploy models from directory (JSONL → DB)
     try:

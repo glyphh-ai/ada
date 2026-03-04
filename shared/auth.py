@@ -107,11 +107,12 @@ async def get_current_user(
     
     # Local mode: skip auth for development convenience on lifecycle endpoints
     if settings.deployment_mode == "local":
+        path_org_id = request.path_params.get("org_id", "local-dev-org")
         return AuthenticatedUser(
             user_id="local-dev-user",
-            org_id="local-dev-org",
+            org_id=path_org_id,
             role="admin",
-            plan="free",
+            plan="pro",
         )
     
     # Non-local mode: require valid JWT
@@ -139,12 +140,14 @@ async def require_token(
     settings = get_settings()
 
     # Local mode: skip token requirement for development convenience
+    # Use the org_id from the URL path so it matches the deployed model's org
     if settings.deployment_mode == "local":
+        path_org_id = request.path_params.get("org_id", "local-dev-org")
         return AuthenticatedUser(
             user_id="local-dev-user",
-            org_id="local-dev-org",
+            org_id=path_org_id,
             role="admin",
-            plan="free",
+            plan="pro",
         )
 
     if credentials is None:
