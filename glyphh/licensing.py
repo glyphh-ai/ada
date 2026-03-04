@@ -16,9 +16,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-import jwt
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
-
 logger = logging.getLogger(__name__)
 
 # License file location
@@ -47,7 +44,11 @@ def _get_public_key():
         raw = _DEFAULT_PUBLIC_KEY_PEM.strip()
 
     try:
+        from cryptography.hazmat.primitives.serialization import load_pem_public_key
         _public_key = load_pem_public_key(raw.encode())
+    except ImportError:
+        logger.warning("cryptography package not installed — license verification disabled")
+        return None
     except Exception as e:
         logger.error(f"Failed to load license public key: {e}")
         return None
@@ -63,8 +64,12 @@ def _verify_token(token_str: str) -> Optional[dict]:
         return None
 
     try:
+        import jwt
         claims = jwt.decode(token_str, pub, algorithms=["EdDSA"])
         return claims
+    except ImportError:
+        logger.warning("pyjwt package not installed — license verification disabled")
+        return None
     except jwt.ExpiredSignatureError:
         logger.warning("License token has expired")
         return None
