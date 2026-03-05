@@ -94,8 +94,8 @@ function filterGlyphs(query) {
   } else {
     filteredGlyphs = allGlyphs.filter(g => {
       const text = (g.concept_text || '').toLowerCase();
-      const meta = JSON.stringify(g.metadata || {}).toLowerCase();
-      return text.includes(query) || meta.includes(query);
+      const type = (g.node_type || '').toLowerCase();
+      return text.includes(query) || type.includes(query);
     });
   }
   render();
@@ -124,10 +124,9 @@ function render() {
   // Render each glyph as an expandable item
   for (const g of filteredGlyphs) {
     const name = g.concept_text || g.id || 'unnamed';
-    const nodeType = g.metadata?.node_type || '';
+    const nodeType = g.node_type || '';
     const color = getTypeColor(nodeType);
-    const jsonStr = JSON.stringify(g, null, 2);
-    const propCount = Object.keys(g.metadata || {}).length;
+    const dim = g.vector_dim || 0;
 
     const badge = nodeType
       ? `<span class="glyph-type-badge" style="background:${color}22;color:${color};border:1px solid ${color}44">${escHtml(nodeType)}</span>`
@@ -137,15 +136,25 @@ function render() {
     item.className = 'viewer-item';
     item.dataset.glyphId = g.id || '';
 
+    // Show encoded glyph properties, not raw exemplar data
+    const details = [
+      `<div class="glyph-detail"><span class="glyph-detail-key">id</span> ${escHtml(g.id || '')}</div>`,
+      `<div class="glyph-detail"><span class="glyph-detail-key">concept</span> ${escHtml(name)}</div>`,
+      nodeType ? `<div class="glyph-detail"><span class="glyph-detail-key">type</span> ${escHtml(nodeType)}</div>` : '',
+      dim > 0 ? `<div class="glyph-detail"><span class="glyph-detail-key">cortex</span> ${dim}-dim HDC vector</div>` : '',
+      g.has_embedding ? `<div class="glyph-detail"><span class="glyph-detail-key">encoded</span> <span style="color:#4ade80">\u2713</span></div>` : '',
+      g.created_at ? `<div class="glyph-detail"><span class="glyph-detail-key">created</span> ${new Date(g.created_at).toLocaleString()}</div>` : '',
+    ].filter(Boolean).join('\n');
+
     item.innerHTML = `
       <details>
         <summary>
           <span class="summary-arrow">\u25B6</span>
           ${badge}
           <span class="summary-label">${escHtml(name)}</span>
-          <span class="summary-count">${propCount} prop${propCount !== 1 ? 's' : ''}</span>
+          ${dim > 0 ? `<span class="summary-count">${dim}d</span>` : ''}
         </summary>
-        <pre class="result-pre">${escHtml(jsonStr)}</pre>
+        <div class="glyph-details-body">${details}</div>
       </details>`;
 
     // Click summary to select (dispatch event for 3D viewer)

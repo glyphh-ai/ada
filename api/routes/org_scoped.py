@@ -403,7 +403,9 @@ async def list_data(
             {
                 "id": str(g.id),
                 "concept_text": g.concept_text[:200] if g.concept_text else "",
-                "metadata": g.metadata,
+                "node_type": (g.glyph_metadata or {}).get("node_type", ""),
+                "has_embedding": g.embedding is not None,
+                "vector_dim": len(g.embedding) if g.embedding else 0,
                 "created_at": g.created_at.isoformat() + "Z" if g.created_at else None,
             }
             for g in glyphs

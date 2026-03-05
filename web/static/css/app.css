@@ -968,6 +968,28 @@ body.resizing-v * {
 
 .viewer-item summary::-webkit-details-marker { display: none; }
 
+.glyph-details-body {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+}
+
+.glyph-detail {
+  padding: 3px 0;
+  display: flex;
+  gap: 8px;
+}
+
+.glyph-detail-key {
+  color: var(--text-dim);
+  min-width: 60px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
 .viewer-item details[open] .summary-arrow { transform: rotate(90deg); }
 
 .viewer-item.highlighted details {
