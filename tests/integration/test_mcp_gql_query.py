@@ -107,17 +107,46 @@ def mock_loaded_model():
 def mock_query_service(sample_glyphs, sample_embeddings, mock_loaded_model):
     """Create a mock QueryService."""
     service = MagicMock()
-    
+
     # Mock model manager
     service._model_manager = MagicMock()
     service._model_manager.get_model = AsyncMock(return_value=mock_loaded_model)
-    
+
     # Mock list_glyphs_with_embeddings
     service.list_glyphs_with_embeddings = AsyncMock(
         return_value=(sample_glyphs, sample_embeddings)
     )
-    
+
+    # Mock _session_factory as async context manager returning a usable session.
+    # The MCP GQL handler creates GlyphStorage(session) internally, so the
+    # session's execute() must return a synchronous result object (MagicMock,
+    # NOT AsyncMock) whose .scalars().all() chain works without await.
+    mock_execute_result = MagicMock()
+    mock_execute_result.scalars.return_value.all.return_value = []
+    mock_execute_result.scalar.return_value = 0
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_execute_result)
+
+    mock_cm = AsyncMock()
+    mock_cm.__aenter__.return_value = mock_session
+    mock_cm.__aexit__.return_value = False
+    service._session_factory = MagicMock(return_value=mock_cm)
+
     return service
+
+
+@pytest.fixture
+def mock_glyph_storage(sample_glyphs, sample_embeddings):
+    """Patch GlyphStorage so the MCP GQL handler skips real DB access."""
+    with patch('domains.models.storage.GlyphStorage') as mock_class:
+        mock_instance = AsyncMock()
+        mock_instance.list_glyphs_with_embeddings.return_value = (
+            sample_glyphs, sample_embeddings,
+        )
+        mock_instance.get_hierarchical_embeddings.return_value = {}
+        mock_class.return_value = mock_instance
+        yield mock_instance
 
 
 @pytest.fixture
@@ -174,6 +203,7 @@ class TestMCPGQLQuery:
         mock_auth_service,
         sample_glyphs,
         mock_fact_tree,
+        mock_glyph_storage,
     ):
         """
         Test that a simple LIST query returns results in the expected format.
@@ -227,6 +257,7 @@ class TestMCPGQLQuery:
         mock_query_service,
         mock_auth_service,
         mock_fact_tree,
+        mock_glyph_storage,
     ):
         """
         Test that GQL query result is in FactTree JSON format.
@@ -278,6 +309,7 @@ class TestMCPGQLQuery:
         sample_glyphs,
         sample_embeddings,
         mock_fact_tree,
+        mock_glyph_storage,
     ):
         """
         Test that GQL query uses DatabaseGlyphStorage (not GlyphWrapper).
@@ -316,8 +348,8 @@ class TestMCPGQLQuery:
                         auth_token="test-token",
                     )
         
-        # Verify database path was used (list_glyphs_with_embeddings fetches from DB)
-        mock_query_service.list_glyphs_with_embeddings.assert_called_once_with(
+        # Verify database path was used (GlyphStorage.list_glyphs_with_embeddings)
+        mock_glyph_storage.list_glyphs_with_embeddings.assert_called_once_with(
             org_id="test-org",
             model_id="test-model",
             limit=10000,
@@ -396,6 +428,7 @@ class TestMCPGQLQuery:
         mock_query_service,
         mock_auth_service,
         mock_fact_tree,
+        mock_glyph_storage,
     ):
         """
         Test that MCPResponse.to_dict() returns the expected format.
@@ -466,6 +499,7 @@ class TestMCPGQLQueryWithRealStorage:
         sample_embeddings,
         mock_loaded_model,
         mock_fact_tree,
+        mock_glyph_storage,
     ):
         """
         Test that DatabaseGlyphStorage is instantiated with correct parameters.
@@ -522,6 +556,7 @@ class TestMCPGQLQueryWithRealStorage:
         sample_embeddings,
         mock_loaded_model,
         mock_fact_tree,
+        mock_glyph_storage,
     ):
         """
         Test that ExecutionContext is created with storage parameter.
