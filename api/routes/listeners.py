@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from domains.jobs.manager import get_job_manager
 from domains.listeners.async_service import AsyncListenerService
 from infrastructure.config import get_settings
-from shared.auth import AuthenticatedUser, require_token
+from shared.auth import AuthenticatedUser, get_current_user, require_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/{org_id}/{model_id}/listener", tags=["listeners"])
@@ -25,10 +25,17 @@ settings = get_settings()
 async def validate_listener_access(
     org_id: str,
     model_id: str,
-    current_user: AuthenticatedUser = Depends(require_token),
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> AuthenticatedUser:
-    """Validate that the user has access to load data into this org/model."""
+    """Validate that the user has access to load data into this org/model.
+
+    Uses get_current_user (supports local mode bypass) instead of require_token
+    so the web dashboard dropzone can load data without a token in local mode.
+    """
     from fastapi import HTTPException
+
+    if current_user.org_id == "local-dev-org":
+        return current_user
 
     if current_user.org_id != org_id:
         raise HTTPException(
