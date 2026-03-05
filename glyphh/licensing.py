@@ -21,27 +21,46 @@ logger = logging.getLogger(__name__)
 # License file location
 LICENSE_FILE = Path.home() / ".glyphh" / "license.json"
 
-# Production Ed25519 public key — replace with output of:
-#   python scripts/generate_license_keys.py
-# Override at runtime via GLYPHH_LICENSE_PUBLIC_KEY env var.
-_DEFAULT_PUBLIC_KEY_PEM = """\
------BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEA9bkHfSlc2ZGuCOAzXnZW3xMQtuHkR/7lA0PT+B/9pyw=
------END PUBLIC KEY-----
-"""
-
 _public_key = None
 
 
+def _fetch_public_key_from_platform() -> Optional[str]:
+    """Fetch the Ed25519 public key PEM from the Platform API."""
+    platform_url = os.environ.get(
+        "GLYPHH_PLATFORM_URL", "https://api.glyphh.ai/api/v1"
+    )
+    try:
+        import httpx
+
+        res = httpx.get(f"{platform_url}/runtimes/public-key", timeout=10)
+        if res.status_code == 200:
+            pem = res.text.strip()
+            if pem.startswith("-----BEGIN PUBLIC KEY-----"):
+                return pem
+            logger.warning("Platform returned unexpected public key format")
+        else:
+            logger.warning(f"Platform returned {res.status_code} for public key fetch")
+    except Exception as e:
+        logger.warning(f"Could not fetch public key from Platform: {e}")
+    return None
+
+
 def _get_public_key():
-    """Load Ed25519 public key from env var or hardcoded default."""
+    """Load Ed25519 public key from env var or fetch from Platform."""
     global _public_key
     if _public_key is not None:
         return _public_key
 
     raw = os.environ.get("GLYPHH_LICENSE_PUBLIC_KEY", "").strip()
     if not raw:
-        raw = _DEFAULT_PUBLIC_KEY_PEM.strip()
+        raw = _fetch_public_key_from_platform() or ""
+
+    if not raw:
+        logger.warning(
+            "No license public key available — set GLYPHH_LICENSE_PUBLIC_KEY "
+            "or GLYPHH_PLATFORM_URL to enable license verification"
+        )
+        return None
 
     try:
         from cryptography.hazmat.primitives.serialization import load_pem_public_key
