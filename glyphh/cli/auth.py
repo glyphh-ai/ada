@@ -203,10 +203,13 @@ def register_runtime() -> bool:
     hostname = platform.node() or "unknown"
     name = f"{hostname}-{machine_id[:8]}"
 
-    # Check if already registered
+    # Check if already registered AND has a license
     config = _load_config()
     if config.get("runtime_id"):
-        return True
+        from glyphh.licensing import LICENSE_FILE
+        if LICENSE_FILE.exists():
+            return True
+        # Registered but missing license — re-register to fetch it
 
     try:
         with httpx.Client(timeout=15) as client:

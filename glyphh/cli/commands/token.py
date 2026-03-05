@@ -194,14 +194,31 @@ def token_revoke(token_id, org_id):
 def handle_token(func: str | None, args: str = ""):
     """Route token subcommands from the interactive shell."""
     if func == "create":
-        click.secho("  Use: glyphh token create --name <name>", fg=theme.MUTED)
+        # Parse --name / -n from args
+        parts = args.split()
+        name = None
+        i = 0
+        while i < len(parts):
+            if parts[i] in ("--name", "-n") and i + 1 < len(parts):
+                name = parts[i + 1]
+                i += 2
+            else:
+                i += 1
+        if not name:
+            click.secho("  usage: token create --name <name>", fg=theme.MUTED)
+            return
+        ctx = click.Context(token_create)
+        ctx.invoke(token_create, name=name)
     elif func == "list":
-        click.secho("  Use: glyphh token list", fg=theme.MUTED)
+        ctx = click.Context(token_list)
+        ctx.invoke(token_list)
     elif func == "revoke":
-        if not args.strip():
+        token_id = args.strip()
+        if not token_id:
             click.secho("  usage: token revoke <token-id>", fg=theme.MUTED)
             return
-        click.secho("  Use: glyphh token revoke <id>", fg=theme.MUTED)
+        ctx = click.Context(token_revoke)
+        ctx.invoke(token_revoke, token_id=token_id)
     else:
         click.echo()
         click.secho("  usage:", fg=theme.MUTED)

@@ -15,6 +15,7 @@ from .commands.token import handle_token
 from .commands.query import handle_query
 from .commands.chat import handle_chat
 from .commands.dev import handle_dev
+from .commands.config import handle_config
 from . import theme
 
 # Try to import readline for history/completion
@@ -34,6 +35,7 @@ COMMAND_HANDLERS = {
     "query": handle_query,
     "chat": handle_chat,
     "dev": handle_dev,
+    "config": handle_config,
 }
 
 
@@ -59,6 +61,7 @@ _SUBCOMMANDS = {
     "query": [],
     "chat": [],
     "dev": ["start", "stop", "status", "log", "restart"],
+    "config": ["show", "set", "clear"],
 }
 
 _CATEGORIES = list(_SUBCOMMANDS.keys()) + ["help", "clear", "home", "exit", "quit"]
@@ -295,6 +298,12 @@ def _print_help():
     click.secho("    dev status               Show dev server status", fg=theme.MUTED)
     click.secho("    dev log [n]              Show last n lines of log (default 30)", fg=theme.MUTED)
     click.secho("    dev restart [path]       Restart the dev server", fg=theme.MUTED)
+    click.echo()
+    click.secho("  config", fg=theme.ACCENT)
+    click.secho("    config show              Show current configuration", fg=theme.MUTED)
+    click.secho("    config set endpoint <url> Set runtime endpoint", fg=theme.MUTED)
+    click.secho("    config set token <jwt>   Set runtime auth token", fg=theme.MUTED)
+    click.secho("    config clear             Clear all config", fg=theme.MUTED)
     click.echo()
     click.secho("  general", fg=theme.ACCENT)
     click.secho("    clear, home             Clear screen and show banner", fg=theme.MUTED)

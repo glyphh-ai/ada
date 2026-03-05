@@ -153,9 +153,38 @@ def _resolve_with_source(kind: str) -> tuple:
         stored_rt = config.get("runtime_token", "").strip()
         if stored_rt:
             return stored_rt, "~/.glyphh/config.json (runtime_token)"
-        stored_at = config.get("access_token", "").strip()
-        if stored_at:
-            return stored_at, "session (glyphh auth login)"
-        return "", "none"
+        return "", "none (run: auth logout → auth login to bootstrap)"
 
     return "", "unknown"
+
+
+# ── Handler for interactive shell ──
+
+def handle_config(func: str | None, args: str = ""):
+    """Route config subcommands from the interactive shell."""
+    if func == "show":
+        ctx = click.Context(config_show)
+        ctx.invoke(config_show)
+    elif func == "set":
+        parts = args.split(None, 1)
+        if not parts:
+            click.secho("  usage: config set endpoint <url> | config set token <jwt>", fg=theme.MUTED)
+            return
+        sub = parts[0].lower()
+        val = parts[1] if len(parts) > 1 else ""
+        if sub == "endpoint" and val:
+            ctx = click.Context(config_set_endpoint)
+            ctx.invoke(config_set_endpoint, url=val)
+        elif sub == "token" and val:
+            ctx = click.Context(config_set_token)
+            ctx.invoke(config_set_token, jwt=val)
+        else:
+            click.secho("  usage: config set endpoint <url> | config set token <jwt>", fg=theme.MUTED)
+    elif func == "clear":
+        # Parse optional flags from args
+        endpoint = "--endpoint" in args
+        clear_token = "--token" in args
+        ctx = click.Context(config_clear)
+        ctx.invoke(config_clear, endpoint=endpoint, clear_token=clear_token)
+    else:
+        click.secho("  usage: config show | config set endpoint <url> | config set token <jwt> | config clear", fg=theme.MUTED)
