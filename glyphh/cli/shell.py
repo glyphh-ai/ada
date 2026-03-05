@@ -11,10 +11,10 @@ from .banner import print_banner
 from .auth import is_logged_in, device_login, register_runtime
 from .commands.auth import handle_auth
 from .commands.model import handle_model
-from .commands.catalog import handle_catalog
 from .commands.token import handle_token
 from .commands.query import handle_query
 from .commands.chat import handle_chat
+from .commands.dev import handle_dev
 from . import theme
 
 # Try to import readline for history/completion
@@ -30,15 +30,84 @@ HISTORY_FILE = Path.home() / ".glyphh" / "history"
 COMMAND_HANDLERS = {
     "auth": handle_auth,
     "model": handle_model,
-    "catalog": handle_catalog,
     "token": handle_token,
     "query": handle_query,
     "chat": handle_chat,
+    "dev": handle_dev,
 }
 
 
+import glob as _glob
+import os as _os
+
+# Commands that take file/directory path arguments
+_FILE_ARG_COMMANDS = {
+    ("model", "load"),
+    ("model", "deploy"),
+    ("model", "package"),
+    ("model", "init"),
+    ("dev", "start"),
+    ("dev", "restart"),
+}
+
+# Subcommands per category
+_SUBCOMMANDS = {
+    "auth": ["login", "logout", "status"],
+    "model": ["list", "deploy", "load", "data", "count", "clear",
+              "re-encode", "status", "undeploy", "init", "package", "test"],
+    "token": ["create", "list", "revoke"],
+    "query": [],
+    "chat": [],
+    "dev": ["start", "stop", "status", "log", "restart"],
+}
+
+_CATEGORIES = list(_SUBCOMMANDS.keys()) + ["help", "clear", "home", "exit", "quit"]
+
+
+def _completer(text, state):
+    """Tab completer: commands for first two words, file paths for arguments."""
+    line = readline.get_line_buffer()
+    parts = line.split()
+    # Number of complete words (if line ends with space, cursor is on next word)
+    n_complete = len(parts) if line.endswith(" ") else max(0, len(parts) - 1)
+
+    if n_complete == 0:
+        # Completing first word — category
+        options = [c + " " for c in _CATEGORIES if c.startswith(text)]
+    elif n_complete == 1:
+        # Completing second word — subcommand
+        cat = parts[0].lower()
+        subs = _SUBCOMMANDS.get(cat, [])
+        options = [s + " " for s in subs if s.startswith(text)]
+    else:
+        # Third word+ — file path completion
+        # Expand ~ and complete paths
+        prefix = text
+        if prefix.startswith("~"):
+            prefix = _os.path.expanduser(prefix)
+        if _os.path.isdir(prefix) and not prefix.endswith(_os.sep):
+            prefix += _os.sep
+        matches = _glob.glob(prefix + "*")
+        options = []
+        for m in matches:
+            # Re-apply ~ if user typed it
+            display = m
+            if text.startswith("~"):
+                home = _os.path.expanduser("~")
+                if display.startswith(home):
+                    display = "~" + display[len(home):]
+            if _os.path.isdir(m):
+                display += _os.sep
+            options.append(display)
+
+    try:
+        return options[state]
+    except IndexError:
+        return None
+
+
 def setup_readline():
-    """Setup readline for history."""
+    """Setup readline for history and tab completion."""
     if not HAS_READLINE:
         return
 
@@ -50,6 +119,10 @@ def setup_readline():
             pass
 
     readline.set_history_length(1000)
+
+    # Set up tab completion
+    readline.set_completer(_completer)
+    readline.set_completer_delims(" \t")
 
     if "libedit" in (readline.__doc__ or ""):
         readline.parse_and_bind("bind ^I rl_complete")
@@ -71,12 +144,51 @@ def get_prompt() -> str:
     return click.style("glyphh", fg=theme.PRIMARY) + click.style("> ", fg=theme.TEXT)
 
 
+def _show_dev_server_info():
+    """If a dev server is running, print its connection info."""
+    import json as _json
+    import os
+
+    info_file = Path.home() / ".glyphh" / "dev.json"
+    pid_file = Path.home() / ".glyphh" / "dev.pid"
+    if not info_file.exists() or not pid_file.exists():
+        return
+
+    # Verify the process is actually running
+    try:
+        pid = int(pid_file.read_text().strip())
+        os.kill(pid, 0)
+    except (ValueError, ProcessLookupError, PermissionError):
+        return
+
+    try:
+        info = _json.loads(info_file.read_text())
+    except Exception:
+        return
+
+    name = info.get("model_name") or info.get("model_id") or "unknown"
+    ver = info.get("model_version")
+    label = f"{name} v{ver}" if ver else name
+
+    click.echo()
+    click.secho(f"  Dev Server  ·  {label}", fg=theme.TEXT, bold=True)
+    click.echo()
+    click.secho(f"  Storage:   {info.get('storage', '?')}", fg=theme.TEXT_DIM)
+    if info.get("mcp_url"):
+        click.secho(f"  MCP:       {info['mcp_url']}", fg=theme.ACCENT)
+    port = info.get("port", 8002)
+    click.secho(f"  Docs:      http://localhost:{port}/docs", fg=theme.TEXT_DIM)
+    click.secho("  Auth:      none (local mode)", fg=theme.TEXT_DIM)
+    click.echo()
+
+
 @click.command()
 @click.pass_context
 def shell(ctx):
     """Start an interactive Glyphh shell."""
     setup_readline()
     print_banner()
+    _show_dev_server_info()
 
     # If not logged in, prompt once
     if not is_logged_in():
@@ -165,12 +277,6 @@ def _print_help():
     click.secho("    model init [name]       Scaffold new model", fg=theme.MUTED)
     click.secho("    model package [path]    Create .glyphh file", fg=theme.MUTED)
     click.echo()
-    click.secho("  catalog", fg=theme.ACCENT)
-    click.secho("    catalog list             Browse platform models", fg=theme.MUTED)
-    click.secho("    catalog search <query>   Search by name/category", fg=theme.MUTED)
-    click.secho("    catalog download <name>  Download .glyphh model", fg=theme.MUTED)
-    click.secho("    catalog info <name>      Show model details", fg=theme.MUTED)
-    click.echo()
     click.secho("  token", fg=theme.ACCENT)
     click.secho("    token create             Create an API token", fg=theme.MUTED)
     click.secho("    token list               List active tokens", fg=theme.MUTED)
@@ -182,6 +288,13 @@ def _print_help():
     click.secho("  chat", fg=theme.ACCENT)
     click.secho("    chat                     Open interactive chat REPL", fg=theme.MUTED)
     click.secho("    chat <question>          Single query and return", fg=theme.MUTED)
+    click.echo()
+    click.secho("  dev", fg=theme.ACCENT)
+    click.secho("    dev start [path]         Start dev server (background)", fg=theme.MUTED)
+    click.secho("    dev stop                 Stop the dev server", fg=theme.MUTED)
+    click.secho("    dev status               Show dev server status", fg=theme.MUTED)
+    click.secho("    dev log [n]              Show last n lines of log (default 30)", fg=theme.MUTED)
+    click.secho("    dev restart [path]       Restart the dev server", fg=theme.MUTED)
     click.echo()
     click.secho("  general", fg=theme.ACCENT)
     click.secho("    clear, home             Clear screen and show banner", fg=theme.MUTED)

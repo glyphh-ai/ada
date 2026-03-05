@@ -325,6 +325,11 @@ class NLQueryService:
         self._auto_schema_matcher = auto_schema_matcher
         self._assess_query_fn = assess_query_fn
         self._min_gap = min_gap
+        # Cache for Stage 2 GQL storage per model — avoids reloading all
+        # glyph embeddings on every request.  Key: (org_id, model_id).
+        self._gql_storage_cache: Dict[tuple, tuple] = {}  # (org, model) → (storage, timestamp)
+        import asyncio
+        self._gql_cache_lock = asyncio.Lock()
     
     def set_schema_index(self, schema_index: 'SchemaIndex') -> None:
         """
@@ -350,33 +355,238 @@ class NLQueryService:
         self._auto_schema_matcher = matcher
         logger.info("AutoSchemaMatcher set for NL query service")
     
+    def _resolve_model_paths(self, model_path: str) -> list:
+        """Return candidate model directories (model_path + dev model dir)."""
+        import os
+        from pathlib import Path
+        paths = [Path(model_path)]
+        # Dev mode: GLYPHH_DEV_MODEL_DIR points to the actual source directory
+        # (model_path may be a temp extraction dir from .glyphh package)
+        dev_dir = os.environ.get("GLYPHH_DEV_MODEL_DIR", "").strip()
+        if dev_dir:
+            paths.append(Path(dev_dir))
+        return paths
+
+    def _load_gql_procedures(self, model_path: str) -> dict:
+        """Load procedure registry from model's gql.json."""
+        import json
+        for path in self._resolve_model_paths(model_path):
+            gql_path = path / "gql.json"
+            if gql_path.exists():
+                try:
+                    return json.loads(gql_path.read_text())
+                except Exception:
+                    pass
+        return {}
+
+    def _resolve_procedure_id(self, proc_id: str, procedures: dict) -> Optional[str]:
+        """If proc_id is a key in the procedure registry, return its GQL template."""
+        proc = procedures.get(proc_id)
+        if proc and isinstance(proc, dict):
+            return proc.get("gql")
+        return None
+
     async def _resolve_gql_template(
         self,
         org_id: str,
         model_id: str,
         matched_metadata: dict,
     ) -> Optional[str]:
-        """Get gql_query from exemplar metadata, falling back to config.yaml default."""
-        # Per-exemplar override
+        """Resolve GQL template from exemplar metadata, gql.json, or config.yaml.
+
+        Resolution order:
+          1. Per-exemplar inline gql_query
+          2. Per-exemplar gql_id → gql.json procedure
+          3. config.yaml gql_query_default → gql.json procedure or inline GQL
+        """
+        # 1. Per-exemplar inline gql_query
         gql = matched_metadata.get("gql_query")
         if gql:
             return gql
 
-        # Model-level default from config.yaml
+        # Load model for path access
         try:
             loaded_model = await self.query_service._model_manager.get_model(org_id, model_id)
-            if loaded_model and hasattr(loaded_model, "model_path"):
-                from pathlib import Path
-                import yaml
-                config_path = Path(loaded_model.model_path) / "config.yaml"
+        except Exception:
+            return None
+        if not loaded_model or not hasattr(loaded_model, "model_path") or not loaded_model.model_path:
+            return None
+
+        model_path = loaded_model.model_path
+        procedures = self._load_gql_procedures(model_path)
+        logger.debug(
+            f"GQL resolution for {org_id}/{model_id}: "
+            f"model_path={model_path}, procedures={list(procedures.keys())}"
+        )
+
+        # 2. Per-exemplar gql_id → gql.json
+        gql_id = matched_metadata.get("gql_id")
+        if gql_id:
+            resolved = self._resolve_procedure_id(gql_id, procedures)
+            if resolved:
+                return resolved
+
+        # 3. config.yaml gql_query_default → procedure ID or inline GQL
+        try:
+            import yaml
+            for path in self._resolve_model_paths(model_path):
+                config_path = path / "config.yaml"
                 if config_path.exists():
                     with open(config_path) as f:
                         raw = yaml.safe_load(f) or {}
-                    return raw.get("gql_query_default")
+                    default = raw.get("gql_query_default")
+                    if default:
+                        # Check if it's a procedure ID reference
+                        resolved = self._resolve_procedure_id(default, procedures)
+                        if resolved:
+                            return resolved
+                        # Otherwise treat as inline GQL
+                        return default
         except Exception:
             pass
 
         return None
+
+    @staticmethod
+    def _fill_slots(
+        template: str,
+        matched_id: str,
+        matched_metadata: dict,
+        query_text: str,
+    ) -> str:
+        """Fill {slot} placeholders in a GQL template.
+
+        Slot sources:
+          {matched_id}       → matched exemplar glyph UUID
+          {query}            → original NL query text
+          {exm.attribute}    → matched exemplar metadata field
+        """
+        import re
+
+        # Built-in slots
+        template = template.replace("{matched_id}", matched_id)
+        template = template.replace("{query}", query_text)
+
+        # Exemplar attribute slots: {exm.field_name} → metadata[field_name]
+        def _resolve_exm(match):
+            attr = match.group(1)
+            val = matched_metadata.get(attr)
+            if val is not None and isinstance(val, (str, int, float)):
+                return str(val)
+            return match.group(0)  # leave unresolved if not found
+
+        template = re.sub(r"\{exm\.([a-zA-Z_][a-zA-Z0-9_]*)\}", _resolve_exm, template)
+
+        return template
+
+    async def _get_or_build_gql_storage(
+        self, org_id: str, model_id: str,
+    ):
+        """Get or build a cached GQL storage for Stage 2 queries.
+
+        Caches glyph embeddings per model to avoid reloading 22K+ vectors
+        on every request.  Uses an async lock to prevent thundering herd —
+        only one request builds the cache, others wait.
+        Cache is invalidated after 5 minutes.
+        """
+        import time as _time
+        from domains.gql.storage import DatabaseGlyphStorage
+        from domains.models.storage import GlyphStorage
+        from shared.similarity_service import SimilarityService
+
+        cache_key = (org_id, model_id)
+
+        # Fast path: check cache without lock
+        cached = self._gql_storage_cache.get(cache_key)
+        if cached is not None:
+            storage, ts = cached
+            if _time.time() - ts < 300:  # 5 min TTL
+                return storage
+
+        # Slow path: acquire lock, build cache once
+        async with self._gql_cache_lock:
+            # Re-check after acquiring lock (another request may have built it)
+            cached = self._gql_storage_cache.get(cache_key)
+            if cached is not None:
+                storage, ts = cached
+                if _time.time() - ts < 300:
+                    return storage
+
+            loaded_model = await self.query_service._model_manager.get_model(org_id, model_id)
+            if loaded_model is None:
+                raise ValueError(f"Model {org_id}/{model_id} not loaded")
+
+            async with self.query_service._session_factory() as session:
+                storage_db = GlyphStorage(session)
+
+                all_glyphs, all_embeddings = await storage_db.list_glyphs_with_embeddings(
+                    org_id=org_id,
+                    model_id=model_id,
+                    limit=50000,
+                )
+
+                # Include all glyphs so glyph("uuid") references resolve
+                # (Stage 2 GQL may reference the matched exemplar's vector).
+                # Pattern glyphs are filtered from results by build_two_stage_result.
+                db_glyphs = all_glyphs
+
+                embeddings = {
+                    str(g.id): all_embeddings[str(g.id)]
+                    for g in db_glyphs
+                    if str(g.id) in all_embeddings
+                }
+
+                glyph_ids = [g.id for g in db_glyphs]
+                hierarchical = await storage_db.get_hierarchical_embeddings(
+                    org_id=org_id,
+                    model_id=model_id,
+                    glyph_ids=glyph_ids,
+                )
+
+            similarity_service = SimilarityService(
+                similarity_calculator=getattr(loaded_model, 'similarity_calculator', None),
+            )
+
+            gql_storage = DatabaseGlyphStorage(
+                org_id=org_id,
+                model_id=model_id,
+                glyphs=db_glyphs,
+                embeddings=embeddings,
+                similarity_service=similarity_service,
+                hierarchical_embeddings=hierarchical,
+            )
+
+            self._gql_storage_cache[cache_key] = (gql_storage, _time.time())
+            logger.info(f"Built GQL storage cache for {org_id}/{model_id}: "
+                         f"{len(db_glyphs)} glyphs, {len(embeddings)} embeddings")
+            return gql_storage
+
+    async def _execute_gql(
+        self,
+        org_id: str,
+        model_id: str,
+        gql_query: str,
+    ) -> FactTree:
+        """Execute a GQL query string through the GQL executor engine.
+
+        Uses cached glyph storage to avoid reloading embeddings per request.
+        """
+        from glyphh.gql import GQLExecutor, ExecutionContext
+
+        loaded_model = await self.query_service._model_manager.get_model(org_id, model_id)
+        if loaded_model is None:
+            raise ValueError(f"Model {org_id}/{model_id} not loaded")
+
+        gql_storage = await self._get_or_build_gql_storage(org_id, model_id)
+
+        context = ExecutionContext(
+            model=loaded_model.sdk_model,
+            storage=gql_storage,
+            encoder=getattr(loaded_model, 'encoder', None),
+        )
+
+        executor = GQLExecutor(context=context, enable_cache=False)
+        return executor.execute(gql_query)
 
     async def execute_nl_query(
         self,
@@ -384,9 +594,16 @@ class NLQueryService:
         model_id: str,
         query: str,
         debug: bool = False,
+        stage: str = "auto",
+        confirmed: bool = False,
     ) -> NLQueryResult:
         """
         Execute a natural language query.
+
+        Stage modes:
+        - "auto" (default): Full two-stage pipeline (NL → exemplar → GQL → data)
+        - "patterns": Stage 1 only — search exemplar patterns, skip Stage 2 GQL
+        - "data": Direct data search — skip exemplar matching, search data records
 
         Flow:
         1. Try auto-schema matching if AutoSchemaMatcher is available
@@ -396,7 +613,11 @@ class NLQueryService:
         """
         start_time = time.time()
 
-        logger.info(f"NL query received: '{query}' for org={org_id}, model={model_id}")
+        logger.info(f"NL query received: '{query}' for org={org_id}, model={model_id}, stage={stage}")
+
+        # Stage "data" — bypass exemplar matching, search data records directly
+        if stage == "data":
+            return await self._execute_data_stage(org_id, model_id, query, debug, start_time)
 
         # Step 0: Try auto-schema matching if available
         if self._auto_schema_matcher is not None:
@@ -455,8 +676,9 @@ class NLQueryService:
 
             # Step 1b: Gap analysis — if top results cluster within min_gap,
             # the query is ambiguous.  Return ASK with the top candidates.
+            # Skip when confirmed=True (user already picked from disambiguation).
             top_scores = _extract_top_scores(fact_tree)
-            if len(top_scores) >= 2 and (top_scores[0] - top_scores[1]) < self._min_gap:
+            if not confirmed and len(top_scores) >= 2 and (top_scores[0] - top_scores[1]) < self._min_gap:
                 top_matches = _extract_top_matches(fact_tree, n=3)
                 logger.info(
                     f"Gap too small ({top_scores[0]:.3f} vs {top_scores[1]:.3f}) "
@@ -484,7 +706,8 @@ class NLQueryService:
             # Step 1c: Confidence threshold — if the best match is below the
             # model's similarity threshold, no exemplar matched confidently.
             # Return ASK so the user can refine their query.
-            if top_scores and top_scores[0] < self.confidence_threshold:
+            # Skip when confirmed=True (user already picked from disambiguation).
+            if not confirmed and top_scores and top_scores[0] < self.confidence_threshold:
                 top_matches = _extract_top_matches(fact_tree, n=3)
                 logger.info(
                     f"Best score {top_scores[0]:.3f} below threshold "
@@ -510,25 +733,33 @@ class NLQueryService:
                 )
 
             # Step 2: Two-stage GQL execution (if model defines gql_query)
+            # Skip Stage 2 when:
+            #   - stage="patterns" (caller only wants exemplar match)
+            #   - matched exemplar is a pattern and has no per-exemplar gql_query
+            #     (pattern-only models like Pipedream — Stage 2 would just re-find
+            #     the same pattern, wasting memory and time)
             match_detail = _extract_top_match_detail(fact_tree)
             result_tree = fact_tree
             match_method = "direct"
 
-            if match_detail and match_detail.get("glyph_id"):
+            if stage != "patterns" and match_detail and match_detail.get("glyph_id"):
+                match_meta = match_detail.get("metadata", {})
+                glyph_id = match_detail["glyph_id"]
+
+                # Always try to resolve a GQL template — covers:
+                #   per-exemplar gql_query, per-exemplar gql_id → gql.json,
+                #   config.yaml gql_query_default → gql.json or inline
                 gql_template = await self._resolve_gql_template(
-                    org_id, model_id, match_detail.get("metadata", {}),
+                    org_id, model_id, match_meta,
                 )
+
                 if gql_template:
                     try:
-                        stage2_tree = await self.query_service.similarity_search_by_reference(
-                            org_id=org_id,
-                            model_id=model_id,
-                            reference_glyph_id=match_detail["glyph_id"],
-                            top_k=10,
-                            threshold=0.5,
+                        resolved_gql = self._fill_slots(
+                            gql_template, glyph_id, match_meta, query,
                         )
-                        resolved_gql = gql_template.replace(
-                            "{matched_id}", match_detail["glyph_id"],
+                        stage2_tree = await self._execute_gql(
+                            org_id, model_id, resolved_gql,
                         )
                         result_tree = FactTreeBuilder.build_two_stage_result(
                             exemplar_match=match_detail,
@@ -536,13 +767,22 @@ class NLQueryService:
                             gql_query=resolved_gql,
                             total_query_time_ms=(time.time() - start_time) * 1000,
                         )
-                        match_method = "similarity_search"
+                        match_method = "two_stage_gql"
                         logger.info(
                             f"Two-stage query: exemplar={match_detail['concept_text']!r}, "
                             f"gql={resolved_gql}"
                         )
                     except Exception as e:
                         logger.warning(f"Stage 2 GQL failed: {e}, returning Stage 1 only")
+                else:
+                    # No GQL procedure defined — return exemplar match directly
+                    result_tree = FactTreeBuilder.build_two_stage_result(
+                        exemplar_match=match_detail,
+                        data_results=None,
+                        gql_query=None,
+                        total_query_time_ms=(time.time() - start_time) * 1000,
+                    )
+                    match_method = "two_stage_gql"
 
             elapsed_ms = (time.time() - start_time) * 1000
 
@@ -577,6 +817,52 @@ class NLQueryService:
             ),
         )
     
+    async def _execute_data_stage(
+        self,
+        org_id: str,
+        model_id: str,
+        query: str,
+        debug: bool,
+        start_time: float,
+    ) -> NLQueryResult:
+        """Execute a direct data search — skip exemplar matching.
+
+        Searches data records only (excludes record_type=pattern) by routing
+        through _execute_gql which already filters out patterns.
+        Uses a FIND SIMILAR TO "query" GQL query against data glyphs.
+        """
+        try:
+            # Escape quotes in query for GQL string literal
+            safe_query = query.replace('"', '\\"')
+            gql_query = f'FIND SIMILAR TO "{safe_query}" LIMIT 10'
+
+            result_tree = await self._execute_gql(org_id, model_id, gql_query)
+            elapsed_ms = (time.time() - start_time) * 1000
+
+            return NLQueryResult(
+                state=ResponseState.DONE,
+                fact_tree=result_tree,
+                query_type="similarity_search",
+                match_method="data_direct",
+                confidence=1.0,
+                query_time_ms=elapsed_ms,
+            )
+
+        except Exception as e:
+            logger.warning(f"Data stage search failed: {e}")
+            elapsed_ms = (time.time() - start_time) * 1000
+            return NLQueryResult(
+                state=ResponseState.ERROR,
+                query_type="unknown",
+                match_method="none",
+                query_time_ms=elapsed_ms,
+                error=ErrorPayload(
+                    error_code="DATA_SEARCH_FAILED",
+                    message=str(e),
+                    recoverable=True,
+                ),
+            )
+
     async def _execute_auto_schema_query(
         self,
         org_id: str,

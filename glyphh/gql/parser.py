@@ -182,6 +182,10 @@ class GQLParser:
                 where = self._parse_condition()
             elif self._match_and_advance(TokenType.IN):
                 scope = self._parse_scope()
+            elif self._match_and_advance(TokenType.AT):
+                # AT LAYER x / AT SEGMENT x.y — same semantics as IN scope
+                hier = self._parse_hierarchy_level()
+                scope = hier.path if hier.path else hier.level_type
             elif self._match_and_advance(TokenType.LIMIT):
                 limit = self._parse_positive_int("LIMIT")
             elif self._match_and_advance(TokenType.THRESHOLD):

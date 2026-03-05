@@ -152,7 +152,7 @@ def _print_result(data):
         color = getattr(theme, color_attr, theme.INFO)
         click.secho(f"  {state}", fg=color, bold=True)
 
-    # ASK state — show the question and any disambiguation options / missing slots
+    # ASK state — show the question and numbered disambiguation options
     if state == "ASK":
         ask = content_data.get("ask", {})
         if ask:
@@ -161,13 +161,26 @@ def _print_result(data):
             missing = ask.get("missing_slots") or []
             if missing:
                 click.secho(f"  Missing: {', '.join(missing)}", fg=theme.TEXT_DIM)
-            for opt in (ask.get("disambiguation_options") or []):
+            options = ask.get("disambiguation_options") or []
+            option_labels = []
+            for i, opt in enumerate(options, 1):
                 label = opt.get("suggestion") or opt.get("intent") or str(opt)
-                click.secho(f"    •  {label}", fg=theme.TEXT)
+                # Strip trailing match score like "(74% match)" for re-query
+                import re as _re
+                clean = _re.sub(r"\s*\(\d+%\s*match\)\s*$", "", label).strip()
+                option_labels.append(clean)
+                click.echo(
+                    click.style(f"    {i}. ", fg=theme.ACCENT, bold=True)
+                    + click.style(label, fg=theme.TEXT)
+                )
+            if option_labels:
+                click.echo()
+                click.secho("  Enter a number to select, or type a new query.", fg=theme.MUTED)
         else:
+            option_labels = []
             click.secho("  Please clarify your request.", fg=theme.WARNING)
         click.echo()
-        return
+        return option_labels
 
     if not ft:
         click.secho("  No result.", fg=theme.TEXT_DIM)
@@ -203,6 +216,12 @@ def _print_result(data):
                 )
             else:
                 click.secho(f"  •  {concept}", fg=theme.TEXT)
+
+            # Show response/metadata if present
+            meta = v.get("metadata") or {}
+            response_text = meta.get("response", "")
+            if response_text:
+                click.secho(f"          {response_text}", fg=theme.TEXT_DIM)
     else:
         click.secho("  No matches found.", fg=theme.WARNING)
 
@@ -226,8 +245,10 @@ def _print_result(data):
 
 # ── Single query execution ───────────────────────────────────────────────────
 
-def _do_query(ctx, query_text, tool="nl_query"):
-    """POST one query to the MCP endpoint and print the result."""
+def _do_query(ctx, query_text, tool="nl_query", stage="auto", confirmed=False):
+    """POST one query to the MCP endpoint and print the result.
+    Returns a list of disambiguation option strings if ASK state, else None.
+    """
     import httpx
 
     if not ctx["model_id"]:
@@ -235,17 +256,22 @@ def _do_query(ctx, query_text, tool="nl_query"):
             "  No model_id found. Run from a model directory or pass --model-id.",
             fg=theme.ERROR,
         )
-        return
+        return None
 
     url = f"{ctx['runtime_url']}/{ctx['org_id']}/{ctx['model_id']}/mcp"
-    payload = {"tool": tool, "arguments": {"query": query_text}}
+    args = {"query": query_text}
+    if tool == "nl_query" and stage != "auto":
+        args["stage"] = stage
+    if confirmed:
+        args["confirmed"] = True
+    payload = {"tool": tool, "arguments": args}
 
     try:
         with httpx.Client(timeout=30) as client:
             res = client.post(url, json=payload, headers=ctx["headers"])
 
         if res.status_code == 200:
-            _print_result(res.json())
+            return _print_result(res.json())
         elif res.status_code == 401:
             click.secho(
                 "  401 Unauthorized — pass --token or set GLYPHH_TOKEN.",
@@ -278,6 +304,9 @@ def _do_query(ctx, query_text, tool="nl_query"):
 
 # ── REPL loop (shared by CLI command and shell handler) ──────────────────────
 
+_STAGE_VALUES = ("auto", "patterns", "data")
+
+
 def _run_repl(ctx, tool="nl_query"):
     """Run the interactive chat REPL. Returns when the user exits."""
     model_label = ctx["model_id"] or "unknown"
@@ -289,17 +318,22 @@ def _run_repl(ctx, tool="nl_query"):
         fg=theme.TEXT, bold=True,
     )
     click.secho(
-        "  /gql  /nl  /quit  — or just type",
+        "  /gql  /nl  /stage <auto|patterns|data>  /quit  — or just type",
         fg=theme.TEXT_DIM,
     )
     click.echo()
 
     current_tool = tool
+    current_stage = "auto"
+    pending_options = []  # disambiguation options from last ASK response
     _setup_history()
 
     while True:
         mode_indicator = click.style("GQL" if current_tool == "gql_query" else " NL", fg=theme.ACCENT)
-        prompt = click.style("  [", fg=theme.TEXT_DIM) + mode_indicator + click.style("] › ", fg=theme.TEXT_DIM)
+        stage_indicator = ""
+        if current_tool == "nl_query" and current_stage != "auto":
+            stage_indicator = click.style(f":{current_stage}", fg=theme.WARNING)
+        prompt = click.style("  [", fg=theme.TEXT_DIM) + mode_indicator + stage_indicator + click.style("] › ", fg=theme.TEXT_DIM)
 
         try:
             line = input(prompt).strip()
@@ -320,8 +354,27 @@ def _run_repl(ctx, tool="nl_query"):
         elif line.lower() == "/nl":
             current_tool = "nl_query"
             click.secho("  → NL mode", fg=theme.TEXT_DIM)
+        elif line.lower().startswith("/stage"):
+            parts = line.split(None, 1)
+            if len(parts) < 2 or parts[1].lower() not in _STAGE_VALUES:
+                click.secho(f"  Usage: /stage <{'|'.join(_STAGE_VALUES)}>", fg=theme.TEXT_DIM)
+                click.secho(f"  Current: {current_stage}", fg=theme.TEXT_DIM)
+            else:
+                current_stage = parts[1].lower()
+                click.secho(f"  → stage: {current_stage}", fg=theme.TEXT_DIM)
         else:
-            _do_query(ctx, line, tool=current_tool)
+            # If user typed a number and we have pending options, select that option
+            query = line
+            is_selection = False
+            if pending_options and line.isdigit():
+                idx = int(line) - 1
+                if 0 <= idx < len(pending_options):
+                    query = pending_options[idx]
+                    is_selection = True
+                    click.secho(f"  → {query}", fg=theme.TEXT_DIM)
+
+            result = _do_query(ctx, query, tool=current_tool, stage=current_stage, confirmed=is_selection)
+            pending_options = result if result else []
 
 
 # ── CLI command ──────────────────────────────────────────────────────────────
@@ -359,3 +412,15 @@ def chat_command(text, model_id, gql, url, token):
         return
 
     _run_repl(ctx, tool=tool)
+
+
+# ── Handler for interactive shell ──
+
+def handle_chat(func: str | None, args: str = ""):
+    """Route chat subcommands from the interactive shell."""
+    full_query = " ".join(p for p in [func, args] if p).strip()
+    ctx = _resolve_context()
+    if full_query:
+        _do_query(ctx, full_query)
+    else:
+        _run_repl(ctx)

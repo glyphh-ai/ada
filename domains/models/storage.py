@@ -178,7 +178,7 @@ class GlyphStorage:
             values["embedding"] = embedding
         
         if metadata is not None:
-            values["glyph_metadata"] = metadata
+            values["metadata"] = metadata
         
         result = await self._session.execute(
             update(Glyph)
@@ -254,37 +254,50 @@ class GlyphStorage:
                 org_id, model_id, query_embedding, top_k, filters
             )
 
-        # pgvector: native cosine distance via HNSW index
-        query = (
-            select(
-                Glyph,
-                (1 - Glyph.embedding.cosine_distance(query_embedding)).label("similarity")
-            )
-            .where(
-                Glyph.org_id == org_id,
-                Glyph.model_id == model_id,
-            )
-            .order_by(Glyph.embedding.cosine_distance(query_embedding))
-            .limit(top_k)
-        )
+        # pgvector: native cosine distance via HNSW index.
+        # Use raw SQL because VectorType (TypeDecorator) doesn't expose
+        # pgvector's cosine_distance operator on the SQLAlchemy column.
+        from sqlalchemy import text as sa_text
 
+        emb_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+
+        filter_clauses = ""
+        params: dict = {
+            "org_id": org_id,
+            "model_id": model_id,
+            "emb": emb_str,
+            "top_k": top_k,
+        }
         if filters:
-            for key, value in filters.items():
-                query = query.where(Glyph.glyph_metadata[key].astext == str(value))
+            for i, (key, value) in enumerate(filters.items()):
+                filter_clauses += f" AND metadata->>:fk{i} = :fv{i}"
+                params[f"fk{i}"] = key
+                params[f"fv{i}"] = str(value)
 
-        result = await self._session.execute(query)
-        rows = result.all()
+        sql = sa_text(f"""
+            SELECT id, org_id, model_id, concept_text, metadata,
+                   created_at, updated_at,
+                   1 - (embedding <=> CAST(:emb AS vector)) as similarity
+            FROM glyphs
+            WHERE org_id = :org_id AND model_id = :model_id
+              {filter_clauses}
+            ORDER BY embedding <=> CAST(:emb AS vector)
+            LIMIT :top_k
+        """)
+
+        result = await self._session.execute(sql, params)
+        rows = result.fetchall()
 
         return [
             (
                 GlyphResponse(
-                    id=row.Glyph.id,
-                    org_id=row.Glyph.org_id,
-                    model_id=row.Glyph.model_id,
-                    concept_text=row.Glyph.concept_text,
-                    metadata=row.Glyph.glyph_metadata,
-                    created_at=row.Glyph.created_at,
-                    updated_at=row.Glyph.updated_at,
+                    id=row.id,
+                    org_id=row.org_id,
+                    model_id=row.model_id,
+                    concept_text=row.concept_text,
+                    metadata=row.metadata,
+                    created_at=row.created_at,
+                    updated_at=row.updated_at,
                 ),
                 float(row.similarity)
             )
@@ -312,12 +325,17 @@ class GlyphStorage:
             )
         )
 
-        if filters:
-            for key, value in filters.items():
-                stmt = stmt.where(Glyph.glyph_metadata[key].astext == str(value))
-
         result = await self._session.execute(stmt)
         glyphs = result.scalars().all()
+
+        # Filter by metadata in Python (SQLite JSON doesn't support .astext)
+        if filters:
+            filtered = []
+            for g in glyphs:
+                meta = g.glyph_metadata or {}
+                if all(str(meta.get(k)) == str(v) for k, v in filters.items()):
+                    filtered.append(g)
+            glyphs = filtered
 
         if not glyphs:
             return []

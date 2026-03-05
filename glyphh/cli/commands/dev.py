@@ -137,7 +137,6 @@ def _run_server(path: str, port: int, no_reload: bool, daemon: bool) -> None:
     # Effective org_id in local mode (matches auth.py mock user)
     org_id = "local-dev-org"
     mcp_url  = f"http://localhost:{port}/{org_id}/{model_id}/mcp"  if model_id else None
-    chat_url = f"http://localhost:{port}/{org_id}/{model_id}/chat" if model_id else None
 
     # ── Print startup header ───────────────────────────────────────────────
     click.echo()
@@ -156,8 +155,6 @@ def _run_server(path: str, port: int, no_reload: bool, daemon: bool) -> None:
     click.secho(f"  Storage:   {storage_label}", fg=theme.TEXT_DIM)
     if mcp_url:
         click.secho(f"  MCP:       {mcp_url}", fg=theme.ACCENT)
-    if chat_url:
-        click.secho(f"  Chat:      {chat_url}", fg=theme.ACCENT)
     click.secho(f"  Docs:      http://localhost:{port}/docs", fg=theme.TEXT_DIM)
     click.secho("  Auth:      none (local mode)", fg=theme.TEXT_DIM)
 
@@ -184,9 +181,19 @@ def _run_server(path: str, port: int, no_reload: bool, daemon: bool) -> None:
             click.secho(f"    {line}", fg=theme.INFO)
         click.echo()
 
-    # ── Persist the actual port so `glyphh chat` can discover it ─────────
+    # ── Persist dev server info so `glyphh` shell can display it ────────
     _PID_DIR.mkdir(parents=True, exist_ok=True)
     _PORT_FILE.write_text(str(port))
+    _DEV_INFO = _PID_DIR / "dev.json"
+    _DEV_INFO.write_text(json.dumps({
+        "port": port,
+        "org_id": org_id,
+        "model_id": model_id,
+        "model_name": model_name,
+        "model_version": model_version,
+        "mcp_url": mcp_url,
+        "storage": storage_label,
+    }))
 
     # ── Daemon mode ────────────────────────────────────────────────────────
     if daemon:
@@ -207,6 +214,7 @@ def _run_server(path: str, port: int, no_reload: bool, daemon: bool) -> None:
         )
     finally:
         _PORT_FILE.unlink(missing_ok=True)
+        (_PID_DIR / "dev.json").unlink(missing_ok=True)
 
 
 def _start_daemon(port: int, no_reload: bool) -> None:
@@ -330,14 +338,142 @@ def dev_stop():
         click.secho(f"  Process {pid} not found — removing stale PID file.", fg=theme.TEXT_DIM)
         _PID_FILE.unlink(missing_ok=True)
         _PORT_FILE.unlink(missing_ok=True)
+        (_PID_DIR / "dev.json").unlink(missing_ok=True)
         return
 
     try:
         os.kill(pid, signal.SIGTERM)
         _PID_FILE.unlink(missing_ok=True)
         _PORT_FILE.unlink(missing_ok=True)
+        (_PID_DIR / "dev.json").unlink(missing_ok=True)
         click.secho(f"  Dev server stopped (PID {pid}).", fg=theme.TEXT, bold=True)
     except PermissionError:
         click.secho(f"  Permission denied stopping PID {pid}.", fg=theme.ERROR)
     except Exception as exc:
         click.secho(f"  Failed to stop server: {exc}", fg=theme.ERROR)
+
+
+# ── Shell handler ─────────────────────────────────────────────────────────────
+
+def handle_dev(func: str | None, args: str = ""):
+    """Route dev subcommands from the interactive shell."""
+    if func is None:
+        func = "status"
+
+    if func == "start":
+        # Check if already running before printing the full header
+        if _PID_FILE.exists():
+            try:
+                pid = int(_PID_FILE.read_text().strip())
+                os.kill(pid, 0)
+                click.secho(
+                    f"  Dev server already running (PID {pid}). "
+                    "Use 'dev restart' to restart.",
+                    fg=theme.WARNING,
+                )
+                return
+            except (ProcessLookupError, ValueError):
+                _PID_FILE.unlink(missing_ok=True)  # stale
+        path = args.strip() or "."
+        _run_server(path, port=8002, no_reload=False, daemon=True)
+
+    elif func == "stop":
+        import signal
+
+        if not _PID_FILE.exists():
+            click.secho("  No dev server running.", fg=theme.WARNING)
+            return
+        try:
+            pid = int(_PID_FILE.read_text().strip())
+        except ValueError:
+            click.secho("  PID file is malformed.", fg=theme.ERROR)
+            _PID_FILE.unlink(missing_ok=True)
+            return
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            click.secho(f"  Process {pid} not found — removing stale PID file.", fg=theme.TEXT_DIM)
+            _PID_FILE.unlink(missing_ok=True)
+            _PORT_FILE.unlink(missing_ok=True)
+            (_PID_DIR / "dev.json").unlink(missing_ok=True)
+            return
+        try:
+            os.kill(pid, signal.SIGTERM)
+            _PID_FILE.unlink(missing_ok=True)
+            _PORT_FILE.unlink(missing_ok=True)
+            (_PID_DIR / "dev.json").unlink(missing_ok=True)
+            click.secho(f"  Dev server stopped (PID {pid}).", fg=theme.TEXT, bold=True)
+        except PermissionError:
+            click.secho(f"  Permission denied stopping PID {pid}.", fg=theme.ERROR)
+        except Exception as exc:
+            click.secho(f"  Failed to stop server: {exc}", fg=theme.ERROR)
+
+    elif func == "status":
+        if not _PID_FILE.exists():
+            click.secho("  No dev server running.", fg=theme.TEXT_DIM)
+            return
+        try:
+            pid = int(_PID_FILE.read_text().strip())
+            os.kill(pid, 0)
+        except (ValueError, ProcessLookupError):
+            click.secho("  No dev server running (stale PID file).", fg=theme.TEXT_DIM)
+            _PID_FILE.unlink(missing_ok=True)
+            _PORT_FILE.unlink(missing_ok=True)
+            (_PID_DIR / "dev.json").unlink(missing_ok=True)
+            return
+
+        # Read dev.json for details
+        info_file = _PID_DIR / "dev.json"
+        if info_file.exists():
+            try:
+                info = json.loads(info_file.read_text())
+                name = info.get("model_name") or info.get("model_id") or "unknown"
+                ver = info.get("model_version")
+                label = f"{name} v{ver}" if ver else name
+                click.echo()
+                click.secho(f"  Dev Server  ·  {label}  (PID {pid})", fg=theme.TEXT, bold=True)
+                click.echo()
+                click.secho(f"  Storage:   {info.get('storage', '?')}", fg=theme.TEXT_DIM)
+                if info.get("mcp_url"):
+                    click.secho(f"  MCP:       {info['mcp_url']}", fg=theme.ACCENT)
+                port = info.get("port", 8002)
+                click.secho(f"  Docs:      http://localhost:{port}/docs", fg=theme.TEXT_DIM)
+                click.echo()
+            except Exception:
+                click.secho(f"  Dev server running (PID {pid}).", fg=theme.TEXT)
+        else:
+            click.secho(f"  Dev server running (PID {pid}).", fg=theme.TEXT)
+
+    elif func in ("log", "logs", "tail"):
+        if not _LOG_FILE.exists():
+            click.secho("  No log file found.", fg=theme.TEXT_DIM)
+            return
+        # Show last N lines
+        n = 30
+        if args.strip().isdigit():
+            n = int(args.strip())
+        try:
+            lines = _LOG_FILE.read_text().splitlines()
+            tail = lines[-n:] if len(lines) > n else lines
+            if not tail:
+                click.secho("  Log file is empty.", fg=theme.TEXT_DIM)
+                return
+            click.echo()
+            for line in tail:
+                click.secho(f"  {line}", fg=theme.TEXT_DIM)
+            click.echo()
+            click.secho(f"  ({len(lines)} total lines, showing last {len(tail)})", fg=theme.MUTED)
+        except Exception as exc:
+            click.secho(f"  Failed to read log: {exc}", fg=theme.ERROR)
+
+    elif func == "restart":
+        # Stop then start
+        handle_dev("stop", "")
+        import time
+        time.sleep(0.5)
+        path = args.strip() or "."
+        _run_server(path, port=8002, no_reload=False, daemon=True)
+
+    else:
+        click.secho(f"  Unknown dev command: {func}", fg=theme.WARNING)
+        click.secho("  Available: start, stop, status, log, restart", fg=theme.TEXT_DIM)

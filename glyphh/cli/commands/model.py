@@ -38,7 +38,6 @@ def model_list():
     models = discover_local_models()
     if not models:
         click.secho("  No models found in current directory.", fg=theme.MUTED)
-        click.secho("  Try: catalog download <model-name>", fg=theme.TEXT_DIM)
         return
 
     # Table header
@@ -361,26 +360,37 @@ def model_load(file, model_id, batch_size):
         click.secho("  Not logged in. Run: glyphh auth login", fg=theme.ERROR)
         return
 
-    # Load the concepts file
+    # Load concepts file (JSON array, {"records": [...]}, or JSONL)
     target = Path(file).resolve()
     try:
         raw = target.read_text()
-        data = json_mod.loads(raw)
-    except json_mod.JSONDecodeError as e:
-        click.secho(f"  Invalid JSON: {e}", fg=theme.ERROR)
-        return
     except Exception as e:
         click.secho(f"  Could not read file: {e}", fg=theme.ERROR)
         return
 
-    # Accept either a bare array or {"records": [...]}
-    if isinstance(data, list):
-        records = data
-    elif isinstance(data, dict) and "records" in data:
-        records = data["records"]
-    else:
-        click.secho("  Expected a JSON array of records, or {\"records\": [...]}.", fg=theme.ERROR)
-        return
+    records = None
+    # Try JSON first (array or {"records": [...]})
+    try:
+        data = json_mod.loads(raw)
+        if isinstance(data, list):
+            records = data
+        elif isinstance(data, dict) and "records" in data:
+            records = data["records"]
+    except json_mod.JSONDecodeError:
+        pass
+
+    # Fall back to JSONL (one JSON object per line)
+    if records is None:
+        records = []
+        for i, line in enumerate(raw.splitlines(), 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json_mod.loads(line))
+            except json_mod.JSONDecodeError as e:
+                click.secho(f"  Invalid JSON on line {i}: {e}", fg=theme.ERROR)
+                return
 
     if not records:
         click.secho("  No records found in file.", fg=theme.WARNING)
@@ -775,43 +785,44 @@ def model_test(path, verbose, keyword):
 def handle_model(func: str | None, args: str = ""):
     """Route model subcommands from the interactive shell."""
     if func == "list":
-        model_list.invoke(click.Context(model_list))
+        ctx = click.Context(model_list)
+        ctx.invoke(model_list)
     elif func == "deploy":
         ctx = click.Context(model_deploy)
-        model_deploy.invoke(ctx, path=args.strip() or ".")
+        ctx.invoke(model_deploy, path=args.strip() or ".")
     elif func == "status":
         ctx = click.Context(model_status)
-        model_status.invoke(ctx, model_id=args.strip() or None)
+        ctx.invoke(model_status, model_id=args.strip() or None)
     elif func == "undeploy":
         ctx = click.Context(model_undeploy)
-        model_undeploy.invoke(ctx, model_id=args.strip() or None)
+        ctx.invoke(model_undeploy, model_id=args.strip() or None)
     elif func == "init":
         ctx = click.Context(model_init)
-        model_init.invoke(ctx, name=args.strip() or None)
+        ctx.invoke(model_init, name=args.strip() or None)
     elif func == "package":
         ctx = click.Context(model_package)
-        model_package.invoke(ctx, path=args.strip() or ".", output=None)
+        ctx.invoke(model_package, path=args.strip() or ".", output=None)
     elif func == "load":
         if not args.strip():
             click.secho("  usage: model load <concepts.json>", fg=theme.MUTED)
             return
         ctx = click.Context(model_load)
-        model_load.invoke(ctx, file=args.strip(), model_id=None, batch_size=50)
+        ctx.invoke(model_load, file=args.strip(), model_id=None, batch_size=50)
     elif func == "data":
         ctx = click.Context(model_data)
-        model_data.invoke(ctx, model_id=None, limit=20, offset=0)
+        ctx.invoke(model_data, model_id=None, limit=20, offset=0)
     elif func == "count":
         ctx = click.Context(model_count)
-        model_count.invoke(ctx, model_id=None)
+        ctx.invoke(model_count, model_id=None)
     elif func == "clear":
         ctx = click.Context(model_clear)
-        model_clear.invoke(ctx, model_id=None)
+        ctx.invoke(model_clear, model_id=None)
     elif func == "re-encode":
         ctx = click.Context(model_re_encode)
-        model_re_encode.invoke(ctx, model_id=None)
+        ctx.invoke(model_re_encode, model_id=None)
     elif func == "test":
         ctx = click.Context(model_test)
-        model_test.invoke(ctx, path=args.strip() or ".", verbose=True, keyword=None)
+        ctx.invoke(model_test, path=args.strip() or ".", verbose=True, keyword=None)
     else:
         click.echo()
         click.secho("  usage:", fg=theme.MUTED)

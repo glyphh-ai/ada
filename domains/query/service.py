@@ -247,20 +247,26 @@ class QueryService:
         # Get similarity service for this model
         similarity_service = self._get_similarity_service(loaded_model)
         
-        # Encode query text using SDK encoder with lexicon matching
-        query_embedding = await self._encode_query(
+        # Encode query text using SDK encoder with lexicon matching.
+        # encode_query may also return model-provided metadata filters
+        # (e.g. app_slug extracted from the query text).
+        query_embedding, query_filters = await self._encode_query(
             loaded_model.encoder,
             request.query,
             org_id=org_id,
             model_id=model_id,
         )
-        
+
         # Get model config for weights
         config = await self._model_manager.get_config(org_id, model_id)
         similarity_weights = config.similarity_weights
 
         # Read default_filter from model's config.yaml (e.g. similarity.default_filter)
+        # Merge: request filters > query filters > config defaults
         effective_filters = dict(request.filters or {})
+        for k, v in query_filters.items():
+            if k not in effective_filters:
+                effective_filters[k] = v
         try:
             model_config_path = Path(loaded_model.model_path) / "config.yaml"
             if model_config_path.exists():
@@ -275,71 +281,39 @@ class QueryService:
         except Exception:
             pass
 
+        # Fetch extra candidates for dedup — multiple exemplars per concept
+        # are collapsed to the best-scoring one, so we need more than top_k.
+        fetch_k = max(request.top_k * 3, 30)
+
         async with self._session_factory() as session:
             storage = GlyphStorage(session)
 
-            # Get all glyphs for similarity computation
-            glyphs, embeddings_dict = await storage.list_glyphs_with_embeddings(
+            # Use pgvector HNSW index for similarity search (fast, no limit issues)
+            results = await storage.similarity_search(
                 org_id=org_id,
                 model_id=model_id,
-                limit=1000,  # Get enough glyphs for search
+                query_embedding=query_embedding,
+                top_k=fetch_k,
+                filters=effective_filters or None,
             )
 
-            # Convert to list of (glyph, embedding) tuples, applying filters
-            raw_results = []
-            for glyph in glyphs:
-                glyph_id_str = str(glyph.id)
-                if glyph_id_str in embeddings_dict:
-                    # Apply filters if provided
-                    if effective_filters:
-                        metadata = glyph.metadata or {}
-                        matches_filter = all(
-                            metadata.get(k) == v for k, v in effective_filters.items()
-                        )
-                        if not matches_filter:
-                            continue
-                    raw_results.append((glyph, embeddings_dict[glyph_id_str]))
-            
-            # Compute similarities using SimilarityService
             scored_results = []
-            for glyph_response, glyph_embedding in raw_results:
-                # Compute security weight
+            for glyph_response, base_similarity in results:
                 security_weight = self._compute_security_weight(
                     glyph_response,
                     permissions,
                 )
-                
-                # Skip if no access
                 if security_weight == 0:
                     continue
-                
-                # Compute similarity using SimilarityService
-                base_similarity = similarity_service.compute_similarity(
-                    query_embedding,
-                    glyph_embedding,
-                )
-                
-                # Apply edge-type weights (simplified - using base similarity)
-                weighted_similarity = base_similarity
-                
-                # Combine weights multiplicatively
-                final_score = weighted_similarity * security_weight
-                
-                # Normalize to [0, 1]
-                final_score = max(0.0, min(1.0, final_score))
-                
+
+                final_score = max(0.0, min(1.0, base_similarity * security_weight))
+
                 scored_results.append(ScoredGlyph(
                     glyph=glyph_response,
                     similarity_score=base_similarity,
                     security_weight=security_weight,
                     final_score=final_score,
                 ))
-            
-            # Sort by final score descending with stable tiebreaker (glyph ID)
-            # so near-equal scores always return in the same order
-            scored_results.sort(
-                key=lambda x: (-x.final_score, str(x.glyph.id)),
-            )
 
             # Deduplicate by concept_text — keep only the highest-scoring
             # exemplar per concept (tools/items can have multiple exemplars)
@@ -532,7 +506,7 @@ class QueryService:
         # Encode current state concepts
         state_embeddings = []
         for concept in request.current_state:
-            embedding = await self._encode_query(loaded_model.encoder, concept, org_id=org_id, model_id=model_id)
+            embedding, _ = await self._encode_query(loaded_model.encoder, concept, org_id=org_id, model_id=model_id)
             state_embeddings.append(embedding)
         
         # Use SDK's BeamSearchPredictor if available
@@ -603,7 +577,7 @@ class QueryService:
         # Encode current state concepts
         state_embeddings = []
         for concept in request.current_state:
-            embedding = await self._encode_query(loaded_model.encoder, concept, org_id=org_id, model_id=model_id)
+            embedding, _ = await self._encode_query(loaded_model.encoder, concept, org_id=org_id, model_id=model_id)
             state_embeddings.append(embedding)
         
         # Use SDK's BeamSearchPredictor if available
@@ -651,14 +625,16 @@ class QueryService:
         query: str,
         org_id: Optional[str] = None,
         model_id: Optional[str] = None,
-    ) -> List[float]:
+    ) -> tuple:
         """
         Encode query text using the model's custom encode_query_fn.
 
-        Every model that serves queries must have an encode_query_fn
-        defined in its encoder.py. There is no generic fallback — models
-        without a custom encoder will fail cleanly rather than produce
-        garbage results from heuristic encoding.
+        Returns (embedding: List[float], query_filters: Dict[str, str]).
+
+        The encode_query_fn may include a ``_filters`` key in its returned
+        dict (e.g. ``{"app_slug": "slack_bot"}``).  These are extracted
+        before encoding and returned separately so the caller can apply
+        them as metadata filters on the similarity search.
         """
         try:
             loaded_model = None
@@ -671,7 +647,9 @@ class QueryService:
                 #   1. A Concept directly
                 #   2. {"name": "...", "attributes": {...}} — standard encode_query format
                 #   3. A flat attributes dict {"action": ..., "target": ...}
+                query_filters: Dict[str, str] = {}
                 if isinstance(concept, dict):
+                    query_filters = concept.pop("_filters", {}) or {}
                     from glyphh.core.types import Concept as _Concept
                     name = concept.get("name", "query")
                     attrs = concept.get("attributes", concept)
@@ -690,8 +668,8 @@ class QueryService:
                 if non_temporal:
                     from glyphh.core.ops import bundle
                     query_arr = bundle(non_temporal)
-                    return query_arr.astype(float).tolist()
-                return glyph.global_cortex.data.astype(float).tolist()
+                    return query_arr.astype(float).tolist(), query_filters
+                return glyph.global_cortex.data.astype(float).tolist(), query_filters
 
             # No custom encoder — fail clean
             model_label = f"{org_id}/{model_id}" if org_id else "unknown"
@@ -753,7 +731,7 @@ class QueryService:
         
         async with self._session_factory() as session:
             storage = GlyphStorage(session)
-            claim_embedding = await self._encode_query(loaded_model.encoder, claim, org_id=org_id, model_id=model_id)
+            claim_embedding, _ = await self._encode_query(loaded_model.encoder, claim, org_id=org_id, model_id=model_id)
             
             results = await storage.similarity_search(
                 org_id=org_id,

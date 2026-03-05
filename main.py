@@ -218,14 +218,6 @@ def _is_allowed_origin(origin: str) -> bool:
     return False
 
 
-# Static files for web UI
-from pathlib import Path as _Path
-from fastapi.staticfiles import StaticFiles
-
-_web_static = _Path(__file__).resolve().parent / "web" / "static"
-if _web_static.is_dir():
-    app.mount("/static", StaticFiles(directory=str(_web_static)), name="static")
-
 # Import and include routers
 from api.routes import (
     health_router,
@@ -233,14 +225,11 @@ from api.routes import (
     listeners_router,
     tokens_router,
     setup_router,
-    web_router,
 )
 
 app.include_router(health_router)
 app.include_router(setup_router)
 app.include_router(tokens_router)
-# Web UI routes (login, dashboard) — before org_scoped to avoid catch-all conflicts
-app.include_router(web_router)
 # listeners_router must come before org_scoped_router (more specific prefix)
 app.include_router(listeners_router)
 app.include_router(org_scoped_router)

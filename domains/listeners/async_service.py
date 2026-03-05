@@ -868,8 +868,17 @@ class AsyncListenerService:
                             # Encode using the SDK encoder
                             glyph = encoder.encode(concept)
                             
-                            # Extract embedding from glyph
-                            if hasattr(glyph, 'cortex') and hasattr(glyph.cortex, 'data'):
+                            # Extract embedding from glyph, excluding _temporal layer
+                            # so similarity scores are deterministic across ingestion times.
+                            from glyphh.core.ops import bundle as _bundle
+                            _non_temporal = [
+                                layer.cortex.data
+                                for name, layer in glyph.layers.items()
+                                if name != "_temporal" and hasattr(layer, "cortex") and layer.cortex is not None
+                            ] if hasattr(glyph, 'layers') and glyph.layers else []
+                            if _non_temporal:
+                                embedding = _bundle(_non_temporal)
+                            elif hasattr(glyph, 'cortex') and hasattr(glyph.cortex, 'data'):
                                 embedding = glyph.cortex.data
                             elif hasattr(glyph, 'global_cortex') and hasattr(glyph.global_cortex, 'data'):
                                 embedding = glyph.global_cortex.data
@@ -883,8 +892,8 @@ class AsyncListenerService:
                             )
                             
                             # Store with original record as metadata (user's format)
-                            # Include temporal_value from concept metadata for edge creation
-                            concept_text = record.get("concept_text") or json.dumps(record)
+                            # Use concept name (composite key from key_part roles) as display text
+                            concept_text = concept.name
                             glyph_metadata = dict(record)  # Copy original flat format
                             if concept.metadata.get("temporal_value") is not None:
                                 glyph_metadata["temporal_value"] = concept.metadata["temporal_value"]

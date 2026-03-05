@@ -64,10 +64,13 @@ def auth_status():
 def handle_auth(func: str | None, args: str = ""):
     """Route auth subcommands from the interactive shell."""
     if func == "login":
-        auth_login.invoke(click.Context(auth_login))
+        ctx = click.Context(auth_login)
+        ctx.invoke(auth_login)
     elif func == "logout":
-        auth_logout.invoke(click.Context(auth_logout))
+        ctx = click.Context(auth_logout)
+        ctx.invoke(auth_logout)
     elif func == "status":
-        auth_status.invoke(click.Context(auth_status))
+        ctx = click.Context(auth_status)
+        ctx.invoke(auth_status)
     else:
         click.secho("  usage: auth login | auth logout | auth status", fg=theme.MUTED)

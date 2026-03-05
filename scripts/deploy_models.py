@@ -10,6 +10,7 @@ Called from main.py lifespan. No .glyphh files needed.
 
 import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -182,7 +183,19 @@ async def deploy_model_to_db(
                     metadata=metadata,
                 )
                 glyph = encoder.encode(concept)
-                embedding = glyph.global_cortex.data.astype(float).tolist()
+                # Exclude _temporal layer from stored embedding — temporal
+                # uses datetime.now() which changes every deploy, making
+                # similarity scores non-deterministic. Matches _encode_query().
+                from glyphh.core.ops import bundle
+                non_temporal = [
+                    layer.cortex.data
+                    for name, layer in glyph.layers.items()
+                    if name != "_temporal" and hasattr(layer, "cortex") and layer.cortex is not None
+                ]
+                if non_temporal:
+                    embedding = bundle(non_temporal).astype(float).tolist()
+                else:
+                    embedding = glyph.global_cortex.data.astype(float).tolist()
 
                 glyph_response = await storage.create_glyph(
                     org_id=org_id,
@@ -333,7 +346,7 @@ async def register_model_encoders(
     - similarity_calculator
     - encode_query_fn
     """
-    from domains.models.loader import discover_models
+    from domains.models.loader import discover_models, load_model as load_model_def
     from glyphh.encoder import Encoder
     from domains.models.manager import LoadedModel as ManagerLoadedModel
     from shared.sdk_adapter import get_sdk_adapter
@@ -368,9 +381,9 @@ async def register_model_encoders(
             org_id = "custom"
         model_id = loaded.model_id
 
-        # Skip if already registered
-        existing = await model_manager.get_model(org_id, model_id)
-        if existing is not None:
+        # Skip if already registered in memory (don't use get_model — it
+        # triggers _load_from_db which may restore without encode_query_fn)
+        if (org_id, model_id) in model_manager._models:
             continue
 
         try:

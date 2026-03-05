@@ -113,3 +113,30 @@ async def async_data_load(
         status="queued",
         total_records=len(request.records),
     )
+
+
+@router.get("/jobs/{job_id}")
+async def get_job_status(
+    org_id: str,
+    model_id: str,
+    job_id: UUID,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Get job progress. Polled by the dashboard dropzone."""
+    from fastapi import HTTPException
+
+    manager = get_job_manager()
+    job = manager.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return {
+        "job_id": str(job.id),
+        "status": "completed" if job.status.value == "complete" else job.status.value,
+        "processed": job.processed_count,
+        "encoded": job.encoded_count,
+        "failed": job.failed_count,
+        "total": job.total_records,
+        "progress": job.progress,
+        "error": job.error_message,
+    }

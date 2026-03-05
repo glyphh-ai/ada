@@ -116,6 +116,12 @@ class MCPServer:
                             "type": "boolean",
                             "description": "Include translation details in response",
                             "default": False
+                        },
+                        "stage": {
+                            "type": "string",
+                            "description": "Query stage mode: 'auto' (full two-stage), 'patterns' (Stage 1 exemplar match only), 'data' (Stage 2 data search only)",
+                            "enum": ["auto", "patterns", "data"],
+                            "default": "auto"
                         }
                     },
                     "required": ["org_id", "model_id", "query"]
@@ -287,6 +293,8 @@ class MCPServer:
         model_id = arguments["model_id"]
         query = arguments["query"]
         debug = arguments.get("debug", False)
+        stage = arguments.get("stage", "auto")
+        confirmed = arguments.get("confirmed", False)
 
         # Send initial progress if token provided
         if progress_handler and progress_token:
@@ -346,6 +354,8 @@ class MCPServer:
             model_id=model_id,
             query=query,
             debug=debug,
+            stage=stage,
+            confirmed=confirmed,
         )
 
         if progress_handler and progress_token:
@@ -415,29 +425,45 @@ class MCPServer:
                 GQLError,
             )
             from domains.gql.storage import DatabaseGlyphStorage
+            from domains.models.storage import GlyphStorage
             from shared.similarity_service import SimilarityService
 
-            # Fetch glyphs with embeddings from database
-            db_glyphs, embeddings = await self._query_service.list_glyphs_with_embeddings(
-                org_id=org_id,
-                model_id=model_id,
-                limit=10000,
-            )
+            # Fetch cortex + hierarchical embeddings in one session
+            async with self._query_service._session_factory() as session:
+                db_storage = GlyphStorage(session)
 
-            logger.info(f"Fetched {len(db_glyphs)} glyphs with {len(embeddings)} embeddings from database")
+                db_glyphs, embeddings = await db_storage.list_glyphs_with_embeddings(
+                    org_id=org_id,
+                    model_id=model_id,
+                    limit=10000,
+                )
+
+                # Fetch layer/segment vectors for AT LAYER queries
+                glyph_ids = [g.id for g in db_glyphs]
+                hierarchical = await db_storage.get_hierarchical_embeddings(
+                    org_id=org_id,
+                    model_id=model_id,
+                    glyph_ids=glyph_ids,
+                )
+
+            logger.info(
+                f"Fetched {len(db_glyphs)} glyphs with {len(embeddings)} cortex "
+                f"and {len(hierarchical)} hierarchical embeddings from database"
+            )
 
             # Create SimilarityService for similarity computations
             similarity_service = SimilarityService(
                 similarity_calculator=getattr(loaded_model, 'similarity_calculator', None)
             )
 
-            # Create DatabaseGlyphStorage
+            # Create DatabaseGlyphStorage with hierarchical vectors
             storage = DatabaseGlyphStorage(
                 org_id=org_id,
                 model_id=model_id,
                 glyphs=db_glyphs,
                 embeddings=embeddings,
                 similarity_service=similarity_service,
+                hierarchical_embeddings=hierarchical,
             )
 
             logger.info(f"GQL context built with {len(db_glyphs)} glyphs from database using DatabaseGlyphStorage")

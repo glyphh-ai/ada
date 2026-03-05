@@ -316,12 +316,47 @@ class FactTreeBuilder:
             value=exemplar_match.get("concept_text", ""),
         )
 
-        # Copy Stage 2 data results into the standard "results" path
+        # Copy Stage 2 data results into the standard "results" path.
+        # The GQL executor merges plan results with description like
+        # "Found N similar glyphs" and stores matches as a list in value.
+        # Filter out the reference exemplar and any other pattern glyphs —
+        # Stage 2 should only return actual data records.
+        exclude_id = exemplar_match.get("glyph_id", "")
+        has_data_results = False
         try:
             s2_json = data_results.to_json() if hasattr(data_results, "to_json") else {}
             match_idx = 1
             for child in s2_json.get("children", []):
-                if child.get("description") == "results":
+                desc = child.get("description", "")
+                # Match both QueryService ("results") and GQL plan ("Found N ...")
+                if desc == "results" or desc.startswith("Found "):
+                    # GQL plan stores results as [{id, score, concept_text, metadata}]
+                    value_list = child.get("value")
+                    if isinstance(value_list, list):
+                        for item in value_list:
+                            glyph_id = item.get("id", "")
+                            meta = item.get("metadata") or {}
+                            # Skip the reference exemplar and any pattern glyphs
+                            if glyph_id == exclude_id:
+                                continue
+                            if meta.get("record_type") == "pattern":
+                                continue
+                            score = item.get("score", 0.0)
+                            concept = item.get("concept_text", glyph_id)
+                            fact_tree.add_fact(
+                                path=["results", f"match_{match_idx}"],
+                                description=f"Match {match_idx}",
+                                value={
+                                    "glyph_id": glyph_id,
+                                    "concept_text": concept,
+                                    "similarity_score": score,
+                                    "final_score": score,
+                                    "metadata": meta,
+                                },
+                            )
+                            match_idx += 1
+                            has_data_results = True
+                    # Also handle child nodes (from QueryService path)
                     for match_node in child.get("children", []):
                         fact_tree.add_fact(
                             path=["results", f"match_{match_idx}"],
@@ -330,8 +365,25 @@ class FactTreeBuilder:
                             data_context=match_node.get("data_context"),
                         )
                         match_idx += 1
+                        has_data_results = True
         except Exception:
             pass
+
+        # If no Stage 2 data results, include the matched exemplar itself
+        # (pattern-only models without gql_query still return the match).
+        if not has_data_results:
+            exemplar_meta = exemplar_match.get("metadata") or {}
+            fact_tree.add_fact(
+                path=["results", "match_1"],
+                description="Match 1",
+                value={
+                    "glyph_id": exemplar_match.get("glyph_id", ""),
+                    "concept_text": exemplar_match.get("concept_text", ""),
+                    "similarity_score": exemplar_match.get("score", 0.0),
+                    "final_score": exemplar_match.get("score", 0.0),
+                    "metadata": exemplar_meta,
+                },
+            )
 
         # Metadata — includes exemplar context for reference
         exemplar_metadata = exemplar_match.get("metadata") or {}

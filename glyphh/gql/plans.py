@@ -79,12 +79,16 @@ class SimilaritySearchPlan(ExecutionPlan):
         
         fact_tree = FactTree()
         
-        # Get target vector
+        # Get target vector (use scoped embedding when AT LAYER / AT SEGMENT)
         if self.target_vector is not None:
             search_vector = self.target_vector
         elif self.target_glyph_id:
-            # Use storage abstraction to get embedding
-            search_vector = context.get_embedding(self.target_glyph_id)
+            if self.scope_layer or self.scope_segment:
+                search_vector = context.get_embedding_for_scope(
+                    self.target_glyph_id, layer=self.scope_layer, segment=self.scope_segment
+                )
+            else:
+                search_vector = context.get_embedding(self.target_glyph_id)
             if search_vector is None:
                 raise ValueError(f"No embedding found for target glyph: {self.target_glyph_id}")
         else:
@@ -100,13 +104,13 @@ class SimilaritySearchPlan(ExecutionPlan):
                 )
             else:
                 compare_vector = context.get_embedding(glyph_id)
-            
+
             if compare_vector is None:
                 continue
-            
+
             # Compute similarity
             score = context.compute_similarity(search_vector, compare_vector)
-            
+
             if score >= self.threshold:
                 results.append({
                     "glyph_id": glyph_id,
@@ -127,11 +131,22 @@ class SimilaritySearchPlan(ExecutionPlan):
         # Apply limit AFTER filtering
         results = results[:self.limit]
         
-        # Build fact tree
+        # Build fact tree with full glyph metadata
+        result_values = []
+        for r in results:
+            glyph = r.get("glyph")
+            metadata = getattr(glyph, "metadata", None) or {}
+            result_values.append({
+                "id": r["glyph_id"],
+                "score": r["score"],
+                "concept_text": getattr(glyph, "concept_text", r["glyph_id"]),
+                "metadata": metadata,
+            })
+
         fact_tree.add_fact(
             path=["results"],
             description=f"Found {len(results)} similar glyphs",
-            value=[{"id": r["glyph_id"], "score": r["score"]} for r in results],
+            value=result_values,
             data_context={
                 "threshold": self.threshold,
                 "limit": self.limit,

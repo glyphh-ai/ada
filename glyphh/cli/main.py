@@ -10,7 +10,6 @@ import click
 from .banner import print_banner
 from .commands.auth import auth_group
 from .commands.model import model_group
-from .commands.catalog import catalog_group
 from .commands.dev import dev_group
 from .commands.chat import chat_command
 from .commands.serve import serve_command
@@ -34,13 +33,12 @@ except Exception:
 def cli(ctx):
     """Glyphh — deterministic AI runtime. Run 'glyphh <command> --help' for details."""
     if ctx.invoked_subcommand is None:
-        print_banner()
-        click.echo(ctx.get_help())
+        from .shell import shell
+        ctx.invoke(shell)
 
 
 cli.add_command(auth_group)
 cli.add_command(model_group)
-cli.add_command(catalog_group)
 cli.add_command(dev_group)
 cli.add_command(chat_command)
 cli.add_command(serve_command)

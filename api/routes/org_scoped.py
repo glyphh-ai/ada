@@ -16,7 +16,6 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from domains.auth.service import AuthService
@@ -384,32 +383,59 @@ async def list_data(
     model_id: str,
     limit: int = 20,
     offset: int = 0,
+    stage: str = "auto",
     current_user: AuthenticatedUser = Depends(validate_org_access),
 ) -> Dict[str, Any]:
-    """List glyphs stored for this model with pagination."""
+    """List glyphs stored for this model with pagination.
+
+    stage param controls filtering:
+      auto     — all glyphs (patterns + data)
+      patterns — only exemplar patterns (record_type == 'pattern')
+      data     — only user-loaded data (record_type != 'pattern')
+    """
     from infrastructure.database import async_session_maker
     from domains.models.storage import GlyphStorage
+    from domains.models.db_models import Glyph
+    from sqlalchemy import select, func
 
     async with async_session_maker() as session:
-        storage = GlyphStorage(session)
-        count = await storage.count_glyphs(org_id, model_id)
-        glyphs = await storage.list_glyphs(org_id, model_id, limit=limit, offset=offset)
+        # Fetch raw SQLAlchemy objects (not Pydantic) to access embedding + glyph_metadata
+        result = await session.execute(
+            select(Glyph).where(
+                Glyph.org_id == org_id, Glyph.model_id == model_id
+            ).order_by(Glyph.created_at.desc())
+        )
+        all_glyphs = result.scalars().all()
 
-    return {
-        "total": count,
-        "limit": limit,
-        "offset": offset,
-        "glyphs": [
+        # Filter by stage
+        if stage == "patterns":
+            glyphs = [g for g in all_glyphs if _is_pattern_glyph(g)]
+        elif stage == "data":
+            glyphs = [g for g in all_glyphs if not _is_pattern_glyph(g)]
+        else:
+            glyphs = all_glyphs
+
+        total = len(glyphs)
+        page = glyphs[offset:offset + limit]
+
+        glyph_list = [
             {
                 "id": str(g.id),
-                "concept_text": g.concept_text[:200] if g.concept_text else "",
+                "concept_text": (g.concept_text or str(g.id))[:200],
                 "node_type": (g.glyph_metadata or {}).get("node_type", ""),
+                "record_type": (g.glyph_metadata or {}).get("record_type", "data"),
                 "has_embedding": g.embedding is not None,
                 "vector_dim": len(g.embedding) if g.embedding else 0,
                 "created_at": g.created_at.isoformat() + "Z" if g.created_at else None,
             }
-            for g in glyphs
-        ],
+            for g in page
+        ]
+
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "glyphs": glyph_list,
     }
 
 
@@ -458,176 +484,9 @@ async def clear_data(
     }
 
 
-# ── Viewer Data Endpoint ──────────────────────────────────────────────────────
 
-# Edge type groupings for the 3D viewer
-_SEMANTIC_EDGE_TYPES = {"similarity", "contrast", "analogy"}
-_NEURAL_EDGE_TYPES = {"composition"}
-_HIERARCHY_EDGE_TYPES = {"precedes", "follows", "causes", "prevents"}
-
-
-def _threshold_to_bits(embedding) -> list:
-    """Convert float vector to boolean cortex bits (threshold at 0)."""
-    if not embedding:
-        return []
-    return [v > 0 for v in embedding]
-
-
-@router.get("/viewer/data")
-async def viewer_data(
-    org_id: str,
-    model_id: str,
-    limit: int = 200,
-    current_user: AuthenticatedUser = Depends(validate_org_access),
-) -> Dict[str, Any]:
-    """Viewer data: glyphs with cortex bits, edges grouped by type, layer config.
-
-    Returns the data structure expected by the 3D GlyphViewer:
-    - glyphs[].name, .node_type, .semantic, .layers[].cortex (boolean[])
-    - edges.semantic[], .neural[], .hierarchy[] with source/target names + weight
-    - roles_config with layer names
-    """
-    from infrastructure.database import async_session_maker
-    from domains.models.db_models import Glyph, GlyphVector, Edge as EdgeModel
-    from sqlalchemy import select
-
-    async with async_session_maker() as session:
-        # 1. Fetch glyphs with embeddings
-        result = await session.execute(
-            select(Glyph).where(
-                Glyph.org_id == org_id,
-                Glyph.model_id == model_id,
-            ).order_by(Glyph.created_at.desc()).limit(limit)
-        )
-        db_glyphs = result.scalars().all()
-
-        if not db_glyphs:
-            return {
-                "glyphs": [],
-                "edges": {"semantic": [], "neural": [], "hierarchy": []},
-                "roles_config": None,
-            }
-
-        glyph_ids = [g.id for g in db_glyphs]
-        glyph_id_to_name = {}
-        for g in db_glyphs:
-            name = (g.concept_text or str(g.id))[:200]
-            glyph_id_to_name[g.id] = name
-
-        # 2. Fetch layer-level vectors for cortex bits per layer
-        vec_result = await session.execute(
-            select(GlyphVector).where(
-                GlyphVector.org_id == org_id,
-                GlyphVector.model_id == model_id,
-                GlyphVector.glyph_id.in_(glyph_ids),
-                GlyphVector.level == "layer",
-            )
-        )
-        glyph_vectors = vec_result.scalars().all()
-
-        # Group vectors by glyph_id and collect layer paths
-        vectors_by_glyph: Dict[str, Dict[str, list]] = {}
-        layer_paths: set = set()
-        for v in glyph_vectors:
-            gid = str(v.glyph_id)
-            if gid not in vectors_by_glyph:
-                vectors_by_glyph[gid] = {}
-            vectors_by_glyph[gid][v.path] = v.embedding
-            layer_paths.add(v.path)
-
-        sorted_paths = sorted(layer_paths)
-        path_to_index = {p: i + 1 for i, p in enumerate(sorted_paths)}
-
-        # 3. Fetch all edges for this model
-        edge_result = await session.execute(
-            select(EdgeModel).where(
-                EdgeModel.org_id == org_id,
-                EdgeModel.model_id == model_id,
-            ).limit(5000)
-        )
-        db_edges = edge_result.scalars().all()
-
-        edges_semantic = []
-        edges_neural = []
-        edges_hierarchy = []
-
-        for e in db_edges:
-            src_name = glyph_id_to_name.get(e.source_glyph_id)
-            tgt_name = glyph_id_to_name.get(e.target_glyph_id)
-            if not src_name or not tgt_name:
-                continue
-            edge_dict = {"source": src_name, "target": tgt_name, "weight": e.weight or 1.0}
-            if e.edge_type in _SEMANTIC_EDGE_TYPES:
-                edges_semantic.append(edge_dict)
-            elif e.edge_type in _NEURAL_EDGE_TYPES:
-                edges_neural.append(edge_dict)
-            elif e.edge_type in _HIERARCHY_EDGE_TYPES:
-                edges_hierarchy.append(edge_dict)
-
-        # 4. Build glyph response with cortex bits
-        glyphs_response = []
-        for g in db_glyphs:
-            name = glyph_id_to_name[g.id]
-            metadata = g.glyph_metadata or {}
-            gid = str(g.id)
-
-            # Build layers: index 0 = main embedding, 1+ = layer-level vectors
-            layers = []
-            if g.embedding:
-                layers.append({"index": 0, "cortex": _threshold_to_bits(g.embedding)})
-            if gid in vectors_by_glyph:
-                for path, emb in vectors_by_glyph[gid].items():
-                    idx = path_to_index.get(path, 1)
-                    layers.append({"index": idx, "cortex": _threshold_to_bits(emb)})
-
-            glyphs_response.append({
-                "name": name,
-                "node_type": metadata.get("node_type", "concept"),
-                "semantic": {
-                    "type": metadata.get("semantic_type", metadata.get("type", "")),
-                    "category": metadata.get("category", ""),
-                },
-                "layers": layers,
-                "metadata": metadata,
-            })
-
-        # 5. Build roles config from layer paths
-        roles_config = None
-        layer_names = [{"name": "Global", "index": 0}]
-        if sorted_paths:
-            layer_names += [
-                {"name": p.replace("_", " ").title(), "index": path_to_index[p]}
-                for p in sorted_paths
-            ]
-        if len(layer_names) > 1:
-            roles_config = {"layers": layer_names}
-
-    return {
-        "glyphs": glyphs_response,
-        "edges": {
-            "semantic": edges_semantic,
-            "neural": edges_neural,
-            "hierarchy": edges_hierarchy,
-        },
-        "roles_config": roles_config,
-    }
-
-
-# ── Dashboard UI ──────────────────────────────────────────────────────────────
-
-@router.get("/chat", response_class=HTMLResponse, include_in_schema=False)
-async def chat_ui(org_id: str, model_id: str):
-    """3-panel dashboard: glyphs + chat/GQL + viewer/results."""
-    from api.routes.web import _jinja_env, _LOGO_B64, _FAVICON_B64, _get_platform_url
-
-    template = _jinja_env.get_template("dashboard.html")
-    html = template.render(
-        org_id=org_id,
-        model_id=model_id,
-        deployment_mode=settings.deployment_mode,
-        platform_url=_get_platform_url(),
-        logo_b64=_LOGO_B64,
-        favicon_b64=_FAVICON_B64,
-    )
-    return HTMLResponse(content=html)
+def _is_pattern_glyph(glyph) -> bool:
+    """Check if glyph is a deployed exemplar pattern (not user-loaded data)."""
+    meta = glyph.glyph_metadata or {}
+    return meta.get("record_type") == "pattern"
 
