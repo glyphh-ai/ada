@@ -321,6 +321,8 @@ class MCPServer:
         # and min_gap from config for gap-based disambiguation.
         min_gap = 0.03  # default; overridden by model's disambiguation.min_gap
         similarity_threshold = 0.5  # default; overridden by model's similarity.threshold
+        cognitive_loop_enabled = False
+        cognitive_loop_config: dict = {}
         try:
             import yaml
             cfg_path = None
@@ -332,6 +334,14 @@ class MCPServer:
                 _cfg = yaml.safe_load(cfg_path.read_text()) or {}
                 min_gap = _cfg.get("disambiguation", {}).get("min_gap", min_gap)
                 similarity_threshold = _cfg.get("similarity", {}).get("threshold", similarity_threshold)
+                # Cognitive loop: optional per-model
+                cl = _cfg.get("cognitive_loop", False)
+                if isinstance(cl, dict):
+                    cognitive_loop_enabled = cl.get("enabled", False)
+                    cognitive_loop_config = cl
+                elif cl:
+                    cognitive_loop_enabled = True
+                    cognitive_loop_config = {}
         except Exception:
             pass
 
@@ -340,6 +350,8 @@ class MCPServer:
             confidence_threshold=similarity_threshold,
             assess_query_fn=getattr(loaded_model, "assess_query_fn", None),
             min_gap=min_gap,
+            cognitive_loop_enabled=cognitive_loop_enabled,
+            cognitive_loop_config=cognitive_loop_config,
         )
 
         if progress_handler and progress_token:

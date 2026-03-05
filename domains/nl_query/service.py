@@ -302,6 +302,8 @@ class NLQueryService:
         auto_schema_matcher: Optional['AutoSchemaMatcher'] = None,
         assess_query_fn: Optional[Any] = None,
         min_gap: float = 0.03,
+        cognitive_loop_enabled: bool = False,
+        cognitive_loop_config: Optional[Dict] = None,
     ):
         """
         Initialize the NL Query Service.
@@ -318,6 +320,11 @@ class NLQueryService:
             min_gap: Minimum score gap between top-1 and top-2 similarity results
                      for a DONE response.  Queries where all top results cluster
                      within this band return ASK for disambiguation.
+            cognitive_loop_enabled: If True, route queries through CognitiveLoop
+                                   after similarity search (adds memory, slot
+                                   extraction, confidence blending).
+            cognitive_loop_config: Config dict for CognitiveLoop (dimension,
+                                  confidence_threshold, etc.).
         """
         self.query_service = query_service
         self.confidence_threshold = confidence_threshold
@@ -325,6 +332,8 @@ class NLQueryService:
         self._auto_schema_matcher = auto_schema_matcher
         self._assess_query_fn = assess_query_fn
         self._min_gap = min_gap
+        self._cognitive_loop_enabled = cognitive_loop_enabled
+        self._cognitive_loop_config = cognitive_loop_config or {}
         # Cache for Stage 2 GQL storage per model — avoids reloading all
         # glyph embeddings on every request.  Key: (org_id, model_id).
         self._gql_storage_cache: Dict[tuple, tuple] = {}  # (org, model) → (storage, timestamp)
@@ -674,6 +683,15 @@ class NLQueryService:
 
             elapsed_ms = (time.time() - start_time) * 1000
 
+            # Cognitive loop path — if enabled, route through CognitiveLoop
+            # instead of the default gap analysis / threshold / GQL pipeline.
+            if self._cognitive_loop_enabled:
+                top_matches = _extract_top_matches(fact_tree, n=5)
+                return self._execute_cognitive_loop(
+                    org_id, model_id, query, fact_tree, top_matches,
+                    start_time, debug,
+                )
+
             # Step 1b: Gap analysis — if top results cluster within min_gap,
             # the query is ambiguous.  Return ASK with the top candidates.
             # Skip when confirmed=True (user already picked from disambiguation).
@@ -817,6 +835,180 @@ class NLQueryService:
             ),
         )
     
+    # ------------------------------------------------------------------
+    # Cognitive Loop integration
+    # ------------------------------------------------------------------
+
+    # Module-level cache: persistent across requests for episodic memory
+    _cognitive_loop_cache: Dict[tuple, Any] = {}
+
+    def _execute_cognitive_loop(
+        self,
+        org_id: str,
+        model_id: str,
+        query: str,
+        similarity_tree: Any,
+        top_matches: list[dict],
+        start_time: float,
+        debug: bool,
+    ) -> NLQueryResult:
+        """Route query through CognitiveLoop using pre-computed similarity."""
+        from shared.precomputed_scorer import PrecomputedScorer
+        from glyphh.cognitive import CognitiveLoop
+
+        scorer = PrecomputedScorer(top_matches)
+        loop = self._get_or_create_loop(org_id, model_id, scorer)
+
+        step_result = loop.step(query)
+
+        elapsed_ms = (time.time() - start_time) * 1000
+        return self._step_result_to_nl_result(
+            step_result, similarity_tree, top_matches, elapsed_ms, debug,
+        )
+
+    def _get_or_create_loop(
+        self,
+        org_id: str,
+        model_id: str,
+        scorer: Any,
+    ) -> Any:
+        """Get cached CognitiveLoop or create a new one."""
+        from glyphh.cognitive import CognitiveLoop
+
+        key = (org_id, model_id)
+        if key not in NLQueryService._cognitive_loop_cache:
+            cfg = self._cognitive_loop_config
+            loop = CognitiveLoop(
+                dimension=cfg.get("dimension", 2000),
+                confidence_threshold=cfg.get("confidence_threshold", 0.25),
+                model_scorer=scorer,
+            )
+            # Build function definitions from model's stored exemplars
+            func_defs = self._build_func_defs_sync(org_id, model_id)
+            loop.begin(functions=func_defs)
+            NLQueryService._cognitive_loop_cache[key] = loop
+            logger.info(
+                f"CognitiveLoop created for {org_id}/{model_id} "
+                f"with {len(func_defs)} functions"
+            )
+        else:
+            loop = NLQueryService._cognitive_loop_cache[key]
+            # Update scorer with fresh pre-computed results for this query
+            if hasattr(loop, '_classifier') and loop._classifier is not None:
+                loop._classifier._scorer = scorer
+
+        return loop
+
+    def _build_func_defs_sync(self, org_id: str, model_id: str) -> list[dict]:
+        """Build function definitions from model manager's loaded model."""
+        import asyncio
+
+        async def _load():
+            model = await self.query_service._model_manager.get_model(org_id, model_id)
+            if not model or not model.model_path:
+                return []
+            from pathlib import Path
+            import json
+            exemplars_path = Path(model.model_path) / "data" / "exemplars.jsonl"
+            if not exemplars_path.exists():
+                return []
+            func_defs = []
+            seen: set = set()
+            with open(exemplars_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    entry = json.loads(line)
+                    ak = entry.get("action_key", "") or entry.get("name", "")
+                    if ak and ak not in seen:
+                        seen.add(ak)
+                        func_defs.append({
+                            "name": ak,
+                            "description": entry.get("action_name", ak),
+                            "parameters": entry.get("configured_props", {}),
+                        })
+            return func_defs
+
+        # We're called from a sync context inside an async event loop.
+        # Use the running loop to schedule the coroutine.
+        try:
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, _load())
+                return future.result(timeout=10)
+        except Exception as e:
+            logger.warning(f"Failed to load func_defs: {e}")
+            return []
+
+    def _step_result_to_nl_result(
+        self,
+        step: Any,
+        similarity_tree: Any,
+        top_matches: list[dict],
+        elapsed_ms: float,
+        debug: bool,
+    ) -> NLQueryResult:
+        """Convert CognitiveLoop StepResult → NLQueryResult."""
+        if step.action == "CALL":
+            # Build DONE response
+            func_name = list(step.calls[0].keys())[0] if step.calls else None
+            match_detail = _extract_top_match_detail(similarity_tree)
+
+            # If cognitive loop resolved to a different function than top-1,
+            # try to find it in the similarity tree
+            if func_name and match_detail and match_detail.get("concept_text") != func_name:
+                for m in top_matches:
+                    if m["concept_text"] == func_name:
+                        match_detail = {
+                            "concept_text": func_name,
+                            "score": m["score"],
+                            "glyph_id": m.get("glyph_id"),
+                            "metadata": m.get("metadata", {}),
+                        }
+                        break
+
+            result_tree = FactTreeBuilder.build_two_stage_result(
+                exemplar_match=match_detail,
+                data_results=None,
+                gql_query=None,
+                total_query_time_ms=elapsed_ms,
+            )
+            return NLQueryResult(
+                state=ResponseState.DONE,
+                fact_tree=result_tree,
+                query_type="similarity_search",
+                match_method="cognitive_loop",
+                confidence=step.confidence,
+                query_time_ms=elapsed_ms,
+                translated_query={"signals": step.signals} if debug else None,
+            )
+        else:
+            # ASK response
+            disambiguation = []
+            # Use top similarity matches as disambiguation options
+            for m in top_matches[:3]:
+                disambiguation.append({
+                    "intent": m["concept_text"],
+                    "confidence": m["score"],
+                    "suggestion": f"{m['concept_text']} ({m['score']:.0%} match)",
+                })
+
+            return NLQueryResult(
+                state=ResponseState.ASK,
+                query_type="similarity_search",
+                match_method="cognitive_loop",
+                confidence=step.confidence,
+                query_time_ms=elapsed_ms,
+                ask=AskPayload(
+                    question="Could not confidently match your request.",
+                    missing_slots=step.missing if hasattr(step, 'missing') else [],
+                    disambiguation_options=disambiguation,
+                ),
+                translated_query={"signals": step.signals} if debug else None,
+            )
+
     async def _execute_data_stage(
         self,
         org_id: str,
