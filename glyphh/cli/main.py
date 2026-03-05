@@ -25,7 +25,7 @@ try:
     from importlib.metadata import version as _pkg_version
     _version = _pkg_version("glyphh")
 except Exception:
-    _version = "0.7.1"
+    _version = "0.8.9"
 
 @click.group(invoke_without_command=True)
 @click.version_option(version=_version, prog_name="glyphh")
