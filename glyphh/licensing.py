@@ -26,7 +26,7 @@ LICENSE_FILE = Path.home() / ".glyphh" / "license.json"
 # Override at runtime via GLYPHH_LICENSE_PUBLIC_KEY env var.
 _DEFAULT_PUBLIC_KEY_PEM = """\
 -----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAPlaceholderKeyReplaceWithRealKeyFromGen=
+MCowBQYDK2VwAyEA9bkHfSlc2ZGuCOAzXnZW3xMQtuHkR/7lA0PT+B/9pyw=
 -----END PUBLIC KEY-----
 """
 
