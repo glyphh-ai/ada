@@ -178,7 +178,7 @@ class GlyphStorage:
             values["embedding"] = embedding
         
         if metadata is not None:
-            values["metadata"] = metadata
+            values["glyph_metadata"] = metadata
         
         result = await self._session.execute(
             update(Glyph)

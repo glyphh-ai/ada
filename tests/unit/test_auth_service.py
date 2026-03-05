@@ -5,7 +5,7 @@ Unit tests for AuthService.
 import pytest
 import jwt
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 from domains.auth.service import AuthService, User, Permission
 from shared.exceptions import AuthenticationException, AuthorizationException
@@ -25,10 +25,30 @@ class TestAuthService:
     
     @pytest.fixture
     def auth_service(self, mock_settings):
-        """Create AuthService instance for testing."""
+        """Create AuthService instance for testing (no DB session)."""
         with patch("domains.auth.service.get_settings", return_value=mock_settings):
             return AuthService(session=None)
-    
+
+    @pytest.fixture
+    def mock_session(self):
+        """Create a mock async session that returns a valid token."""
+        session = AsyncMock()
+        db_token = MagicMock()
+        db_token.id = "test_token_id"
+        db_token.org_id = "test_org"
+        db_token.permissions = ["read", "write"]
+        db_token.expires_at = datetime.utcnow() + timedelta(hours=1)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = db_token
+        session.execute = AsyncMock(return_value=mock_result)
+        return session
+
+    @pytest.fixture
+    def db_auth_service(self, mock_settings, mock_session):
+        """Create AuthService with mock database session."""
+        with patch("domains.auth.service.get_settings", return_value=mock_settings):
+            return AuthService(session=mock_session)
+
     @pytest.fixture
     def local_settings(self):
         settings = MagicMock()
@@ -68,11 +88,11 @@ class TestAuthService:
         return jwt.encode(payload, "test_secret_key", algorithm="HS256")
     
     @pytest.mark.asyncio
-    async def test_validate_token_success(self, auth_service, valid_token):
-        """Test successful token validation."""
-        user = await auth_service.validate_token(valid_token)
-        
-        assert user.user_id == "test_user"
+    async def test_validate_token_success(self, db_auth_service, valid_token):
+        """Test successful token validation via database lookup."""
+        user = await db_auth_service.validate_token(valid_token)
+
+        assert user.user_id == "token:test_token_id"
         assert user.can_read("test_org")
         assert user.can_write("test_org")
     
@@ -114,27 +134,32 @@ class TestAuthService:
         assert user.is_admin("any_org")
     
     @pytest.mark.asyncio
-    async def test_check_access_allowed(self, auth_service, valid_token):
+    async def test_check_access_allowed(self, auth_service):
         """Test access check when allowed."""
-        user = await auth_service.validate_token(valid_token)
-        
-        # Should not raise
+        user = User(
+            user_id="test_user",
+            org_permissions={"test_org": {Permission.READ, Permission.WRITE}},
+        )
         result = await auth_service.check_access(user, "test_org", "some_model", "read")
         assert result is True
-    
+
     @pytest.mark.asyncio
-    async def test_check_access_denied(self, auth_service, valid_token):
+    async def test_check_access_denied(self, auth_service):
         """Test access check when denied (wrong org)."""
-        user = await auth_service.validate_token(valid_token)
-        
+        user = User(
+            user_id="test_user",
+            org_permissions={"test_org": {Permission.READ, Permission.WRITE}},
+        )
         with pytest.raises(AuthorizationException):
             await auth_service.check_access(user, "other_org", "some_model", "read")
-    
+
     @pytest.mark.asyncio
-    async def test_check_access_admin_denied(self, auth_service, valid_token):
+    async def test_check_access_admin_denied(self, auth_service):
         """Test admin access check when user only has read/write."""
-        user = await auth_service.validate_token(valid_token)
-        
+        user = User(
+            user_id="test_user",
+            org_permissions={"test_org": {Permission.READ, Permission.WRITE}},
+        )
         with pytest.raises(AuthorizationException):
             await auth_service.check_access(user, "test_org", "some_model", "admin")
 

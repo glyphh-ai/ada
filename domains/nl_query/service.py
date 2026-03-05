@@ -852,7 +852,12 @@ class NLQueryService:
         start_time: float,
         debug: bool,
     ) -> NLQueryResult:
-        """Route query through CognitiveLoop using pre-computed similarity."""
+        """Route query through CognitiveLoop using pre-computed similarity.
+
+        Safety: even when the loop says CALL, apply gap analysis as a
+        secondary check.  If the similarity gap is too narrow, override
+        the loop's decision and return ASK instead.
+        """
         from shared.precomputed_scorer import PrecomputedScorer
         from glyphh.cognitive import CognitiveLoop
 
@@ -860,6 +865,33 @@ class NLQueryService:
         loop = self._get_or_create_loop(org_id, model_id, scorer)
 
         step_result = loop.step(query)
+
+        # Safety gate: if loop says CALL but similarity gap is too narrow,
+        # override to ASK — UNLESS the loop has strong episodic memory
+        # (recall hit).  Recalled patterns were previously confirmed correct,
+        # so the gap doesn't matter — trust the memory.
+        if step_result.action == "CALL" and len(top_matches) >= 2:
+            gap = top_matches[0]["score"] - top_matches[1]["score"]
+            has_recall = bool(step_result.signals.get("recall"))
+            if gap < self._min_gap and not has_recall:
+                logger.info(
+                    f"Cognitive loop CALL overridden to ASK: "
+                    f"gap {gap:.3f} < min_gap {self._min_gap:.3f}"
+                )
+                step_result = type(step_result)(
+                    action="ASK",
+                    missing=["Narrow gap between top matches"],
+                    confidence=step_result.confidence,
+                    signals=step_result.signals,
+                )
+
+        # Auto-confirm successful CALLs for Hebbian reinforcement.
+        # This strengthens the recalled idea so future queries benefit.
+        if step_result.action == "CALL":
+            try:
+                loop.confirm(True)
+            except Exception:
+                pass
 
         elapsed_ms = (time.time() - start_time) * 1000
         return self._step_result_to_nl_result(
