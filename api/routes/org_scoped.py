@@ -150,7 +150,7 @@ async def list_mcp_tools(
     mcp_server: MCPServer = Depends(get_mcp_server),
     current_user: AuthenticatedUser = Depends(validate_token_access),
 ) -> Dict[str, Any]:
-    return {"tools": mcp_server.get_tools_list()}
+    return {"tools": await mcp_server.get_tools_list(org_id, model_id)}
 
 
 # Model Lifecycle Endpoints

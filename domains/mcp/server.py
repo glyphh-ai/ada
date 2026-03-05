@@ -75,13 +75,13 @@ class MCPResponse:
 class MCPServer:
     """
     MCP Server for Glyphh Runtime.
-    
-    Exposes two tools: nl_query and gql_query.
-    - nl_query: NL text → NLQueryService → stored procedure match → QueryService → HDC Engine
-    - gql_query: raw GQL → QueryService → HDC Engine
-    Both tools return the same output shape: {state, fact_tree, confidence, match_method}
+
+    Core tools (all models): nl_query, gql_query
+    Optional tools (config-driven):
+      - confirm:  when cognitive_loop.enabled = true
+      - execute:  when execute.provider is set
     """
-    
+
     def __init__(
         self,
         query_service: QueryService,
@@ -154,15 +154,125 @@ class MCPServer:
                     "required": ["org_id", "model_id", "query"]
                 }
             ),
+            "confirm": MCPToolSchema(
+                name="confirm",
+                description=(
+                    "Confirm or correct the last nl_query result. "
+                    "Call after executing a DONE action (was_correct=true) "
+                    "or after resolving an ASK (was_correct=false, correct_action=...)."
+                    " Enables episodic memory: confirmed patterns route faster over time."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "org_id": {
+                            "type": "string",
+                            "description": "Organization ID",
+                        },
+                        "model_id": {
+                            "type": "string",
+                            "description": "Model ID",
+                        },
+                        "was_correct": {
+                            "type": "boolean",
+                            "description": "True if the DONE result was correct, false if not",
+                        },
+                        "correct_action": {
+                            "type": "string",
+                            "description": "The correct action key (required when was_correct=false)",
+                        },
+                    },
+                    "required": ["org_id", "model_id", "was_correct"],
+                },
+            ),
+            "execute": MCPToolSchema(
+                name="execute",
+                description=(
+                    "Execute an action via the model's configured provider "
+                    "(e.g. Pipedream Connect). Pass the action_key from a "
+                    "DONE nl_query result along with the required props."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "org_id": {
+                            "type": "string",
+                            "description": "Organization ID",
+                        },
+                        "model_id": {
+                            "type": "string",
+                            "description": "Model ID",
+                        },
+                        "action_key": {
+                            "type": "string",
+                            "description": "Action component key from nl_query result",
+                        },
+                        "props": {
+                            "type": "object",
+                            "description": "Configured properties for the action",
+                            "default": {},
+                        },
+                        "external_user_id": {
+                            "type": "string",
+                            "description": "Your end-user's ID (for provider auth)",
+                        },
+                    },
+                    "required": [
+                        "org_id", "model_id", "action_key", "external_user_id",
+                    ],
+                },
+            ),
         }
     
+    async def _load_model_config(self, org_id: str, model_id: str) -> dict:
+        """Load a model's config.yaml (cached per request)."""
+        try:
+            loaded_model = await self._query_service._model_manager.get_model(
+                org_id, model_id,
+            )
+            if not loaded_model or not loaded_model.model_path:
+                return {}
+            import yaml
+            from pathlib import Path as _Path
+            mp = _Path(loaded_model.model_path)
+            cfg_path = (mp if mp.is_dir() else mp.parent) / "config.yaml"
+            if cfg_path.exists():
+                return yaml.safe_load(cfg_path.read_text()) or {}
+        except Exception:
+            pass
+        return {}
+
     def get_tool_schemas(self) -> List[MCPToolSchema]:
         """Return MCP tool schemas for all exposed tools."""
         return list(self._tools.values())
-    
-    def get_tools_list(self) -> List[Dict[str, Any]]:
-        """Return tools list in MCP format."""
-        return [tool.to_dict() for tool in self._tools.values()]
+
+    async def get_tools_list(
+        self, org_id: str = "", model_id: str = "",
+    ) -> List[Dict[str, Any]]:
+        """Return tools list in MCP format, filtered by model config.
+
+        - nl_query, gql_query: always included
+        - confirm: included when cognitive_loop.enabled = true
+        - execute: included when execute.provider is set
+        """
+        cfg = await self._load_model_config(org_id, model_id) if org_id else {}
+
+        # Determine which optional tools are enabled
+        cl = cfg.get("cognitive_loop", False)
+        has_cognitive = (
+            (isinstance(cl, dict) and cl.get("enabled", False)) or
+            (not isinstance(cl, dict) and bool(cl))
+        )
+        has_execute = bool(cfg.get("execute", {}).get("provider"))
+
+        tools = []
+        for name, schema in self._tools.items():
+            if name == "confirm" and not has_cognitive:
+                continue
+            if name == "execute" and not has_execute:
+                continue
+            tools.append(schema.to_dict())
+        return tools
 
     async def handle_tool_call(
         self,
@@ -532,5 +642,99 @@ class MCPServer:
                 "query_type": "gql",
                 "error": str(e),
             }
-    
-    
+
+    async def _handle_confirm(
+        self,
+        arguments: Dict[str, Any],
+        user: User,
+        progress_handler: Optional[MCPProgressHandler] = None,
+        progress_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Confirm or correct the last nl_query result for episodic memory.
+
+        When was_correct=True:  strengthens the recalled idea (Hebbian reinforcement).
+        When was_correct=False: stores a correction so future similar queries route correctly.
+        """
+        from domains.nl_query.service import NLQueryService
+
+        org_id = arguments["org_id"]
+        model_id = arguments["model_id"]
+        was_correct = arguments["was_correct"]
+        correct_action = arguments.get("correct_action")
+
+        if not was_correct and not correct_action:
+            return {
+                "state": "ERROR",
+                "error": "correct_action is required when was_correct=false",
+            }
+
+        result = NLQueryService.confirm_last(
+            org_id, model_id, was_correct, correct_action,
+        )
+        return result
+
+    async def _handle_execute(
+        self,
+        arguments: Dict[str, Any],
+        user: User,
+        progress_handler: Optional[MCPProgressHandler] = None,
+        progress_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Execute an action via the model's configured provider.
+
+        Loads the provider from model config (execute.provider), then
+        calls provider.execute(action_key, props, external_user_id).
+        """
+        from shared.providers import get_provider
+
+        org_id = arguments["org_id"]
+        model_id = arguments["model_id"]
+        action_key = arguments["action_key"]
+        props = arguments.get("props", {})
+        external_user_id = arguments["external_user_id"]
+
+        # Load model config to get execute section
+        cfg = await self._load_model_config(org_id, model_id)
+        execute_config = cfg.get("execute", {})
+        if not execute_config.get("provider"):
+            return {
+                "state": "ERROR",
+                "error": f"Model {org_id}/{model_id} has no execute provider configured",
+            }
+
+        if progress_handler and progress_token:
+            await progress_handler.notify(
+                progress_token,
+                progress=30,
+                message=f"Executing {action_key}...",
+            )
+
+        try:
+            provider = get_provider(org_id, model_id, execute_config)
+            result = await provider.execute(
+                action_key=action_key,
+                props=props,
+                external_user_id=external_user_id,
+            )
+        except ValueError as e:
+            return {"state": "ERROR", "error": str(e)}
+        except Exception as e:
+            logger.error(f"Execute failed: {e}", exc_info=True)
+            return {"state": "ERROR", "error": f"Execution failed: {e}"}
+
+        if progress_handler and progress_token:
+            await progress_handler.notify(
+                progress_token, progress=100, message="Complete",
+            )
+
+        return {
+            "state": "DONE" if result.get("success") else "ERROR",
+            "provider": execute_config["provider"],
+            "action_key": action_key,
+            "result": result,
+            "confidence": 1.0,
+            "match_method": "execute",
+            "query_type": "execute",
+        }
+
+

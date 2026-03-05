@@ -842,6 +842,52 @@ class NLQueryService:
     # Module-level cache: persistent across requests for episodic memory
     _cognitive_loop_cache: Dict[tuple, Any] = {}
 
+    @staticmethod
+    def confirm_last(
+        org_id: str,
+        model_id: str,
+        was_correct: bool,
+        correct_action: str | None = None,
+    ) -> dict:
+        """Confirm or correct the last cognitive loop step.
+
+        Called from the ``confirm`` MCP tool.  Operates on the cached
+        CognitiveLoop for (org_id, model_id).
+
+        - was_correct=True  → Hebbian reinforcement (strengthen recalled idea)
+        - was_correct=False → store correction as new idea for future recall
+        """
+        key = (org_id, model_id)
+        loop = NLQueryService._cognitive_loop_cache.get(key)
+        if loop is None:
+            return {
+                "state": "ERROR",
+                "error": (
+                    f"No CognitiveLoop for {org_id}/{model_id}. "
+                    "Send an nl_query first."
+                ),
+            }
+
+        try:
+            correct_outcome = None
+            if not was_correct and correct_action:
+                correct_outcome = [{correct_action: {}}]
+
+            loop.confirm(was_correct, correct_outcome)
+
+            ideas_count = loop.idea_space.size
+            return {
+                "state": "DONE",
+                "confirmed": was_correct,
+                "correct_action": correct_action,
+                "ideas_stored": ideas_count,
+                "match_method": "cognitive_loop",
+                "confidence": 1.0,
+            }
+        except Exception as e:
+            logger.error(f"confirm_last error: {e}", exc_info=True)
+            return {"state": "ERROR", "error": str(e)}
+
     def _execute_cognitive_loop(
         self,
         org_id: str,
@@ -864,32 +910,58 @@ class NLQueryService:
         scorer = PrecomputedScorer(top_matches)
         loop = self._get_or_create_loop(org_id, model_id, scorer)
 
+        # Stateless MCP queries: reset per-query context so idea vectors
+        # are consistent across calls and temporal decay doesn't kill
+        # recall across independent queries.
+        loop._recent_actions = []
+        loop._turn = 0
+        loop.idea_space._turn = 0
+
         step_result = loop.step(query)
 
         # Safety gate: if loop says CALL but similarity gap is too narrow,
-        # override to ASK — UNLESS the loop has strong episodic memory
-        # (recall hit).  Recalled patterns were previously confirmed correct,
-        # so the gap doesn't matter — trust the memory.
+        # override to ASK — UNLESS episodic memory confirms the top-1.
+        # "Confirms" = recalled idea labels the same function as current
+        # top-1 (raw cosine > 0.25 already gated by IdeaSpace.recall).
+        passed_gap_gate = True
         if step_result.action == "CALL" and len(top_matches) >= 2:
             gap = top_matches[0]["score"] - top_matches[1]["score"]
-            has_recall = bool(step_result.signals.get("recall"))
-            if gap < self._min_gap and not has_recall:
-                logger.info(
-                    f"Cognitive loop CALL overridden to ASK: "
-                    f"gap {gap:.3f} < min_gap {self._min_gap:.3f}"
-                )
-                step_result = type(step_result)(
-                    action="ASK",
-                    missing=["Narrow gap between top matches"],
-                    confidence=step_result.confidence,
-                    signals=step_result.signals,
-                )
+            if gap < self._min_gap:
+                recall_confirms = False
+                recall_signal = step_result.signals.get("recall", [])
+                if recall_signal:
+                    recalled_label = recall_signal[0][0]
+                    current_top = top_matches[0]["concept_text"]
+                    recall_confirms = (recalled_label == current_top)
+                if not recall_confirms:
+                    passed_gap_gate = False
+                    logger.info(
+                        f"Cognitive loop CALL overridden to ASK: "
+                        f"gap {gap:.3f} < min_gap {self._min_gap:.3f}"
+                    )
+                    step_result = type(step_result)(
+                        action="ASK",
+                        missing=["Narrow gap between top matches"],
+                        confidence=step_result.confidence,
+                        signals=step_result.signals,
+                    )
 
-        # Auto-confirm successful CALLs for Hebbian reinforcement.
-        # This strengthens the recalled idea so future queries benefit.
-        if step_result.action == "CALL":
+        # Auto-store successful CALLs that passed the gap gate as ideas.
+        # This enables future recall for similar queries.
+        # NOTE: We do NOT auto-confirm here — the LLM should call the
+        # `confirm` MCP tool after verifying the result was correct.
+        if step_result.action == "CALL" and passed_gap_gate:
             try:
-                loop.confirm(True)
+                idea_vec = getattr(loop, '_last_step_idea_vec', None)
+                if idea_vec is not None:
+                    outcome = step_result.calls if step_result.calls else []
+                    label = (
+                        list(outcome[0].keys())[0]
+                        if outcome else "unknown"
+                    )
+                    loop.idea_space.store(
+                        idea_vec, outcome, strength=1.0, label=label,
+                    )
             except Exception:
                 pass
 
