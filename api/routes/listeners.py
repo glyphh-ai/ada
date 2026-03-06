@@ -105,7 +105,6 @@ async def async_data_load(
         model_id=model_id,
         records=request.records,
         batch_size=request.batch_size or 50,
-        plan_slug=current_user.plan,
     )
 
     return AsyncDataLoadResponse(

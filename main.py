@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse
 from infrastructure.config import get_settings, validate_settings
 from infrastructure.database import init_db, close_db, async_session_maker
 from shared.exceptions import GlyphhRuntimeException
-from glyphh.licensing import load_license
+from glyphh.licensing import load_license, set_current_license
 from shared.middleware import (
     CorrelationIDMiddleware,
     LoggingMiddleware,
@@ -74,6 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Load license (determines tier and limits)
     license_info = load_license()
     app.state.license = license_info
+    set_current_license(license_info)
     logger.info(f"License: tier={license_info.tier}, org={license_info.org_id}")
 
     await init_db()

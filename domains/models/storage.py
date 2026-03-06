@@ -55,11 +55,10 @@ class GlyphStorage:
         embedding: List[float],
         metadata: Optional[Dict[str, Any]] = None,
         glyph_id: Optional[UUID] = None,
-        plan_slug: str = "free",
     ) -> CreateGlyphResponse:
         """
         Store a new glyph in the database.
-        
+
         Args:
             org_id: Organization ID
             model_id: Model ID
@@ -67,11 +66,11 @@ class GlyphStorage:
             embedding: Vector embedding (768-dim)
             metadata: Optional metadata dict
             glyph_id: Optional UUID (generated if not provided)
-            plan_slug: User's plan slug for limit enforcement
         """
-        # Check plan-based glyph limit
-        from shared.plan_limits import get_max_glyphs_per_model
-        max_glyphs = get_max_glyphs_per_model(plan_slug)
+        # Check license-based glyph limit
+        from glyphh.licensing import get_current_license
+        license_info = get_current_license()
+        max_glyphs = license_info.max_glyphs_per_model
         if max_glyphs >= 0:
             current_count = await self.count_glyphs(org_id, model_id)
             if current_count >= max_glyphs:
@@ -81,8 +80,11 @@ class GlyphStorage:
                     resource="glyphs",
                     limit=max_glyphs,
                     current=current_count,
-                    message=f"Plan limit reached: {plan_slug} allows {max_glyphs} glyphs per model. "
-                            f"Upgrade your plan for more capacity."
+                    message=(
+                        f"Glyph limit reached: {license_info.tier} tier allows "
+                        f"{max_glyphs:,} glyphs per model (current: {current_count:,}). "
+                        f"Upgrade your plan for more capacity."
+                    ),
                 )
 
         # Validate embedding dimension against runtime max

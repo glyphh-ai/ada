@@ -75,6 +75,13 @@ async def bootstrap_setup(
 
     org_id = claims.get("org_id", "default")
 
+    # Update the runtime's loaded license to match the pushed tier
+    from glyphh.licensing import set_current_license, _claims_to_license_info
+    license_info = _claims_to_license_info(claims)
+    set_current_license(license_info)
+    request.app.state.license = license_info
+    logger.info(f"License updated via /setup: tier={license_info.tier}, org={org_id}")
+
     # Revoke existing admin tokens for this org (last auth wins)
     result = await db.execute(
         select(Token).where(Token.org_id == org_id, Token.status == "active")

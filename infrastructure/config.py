@@ -16,7 +16,7 @@ from pydantic_settings import BaseSettings
 class TierConfig:
     """Resolved plan limits for the authenticated user/deployment."""
 
-    tier: str                   # "free" | "developer" | "team" | "enterprise"
+    tier: str                   # "free" | "advanced" | "pro" | "enterprise"
     max_models: int             # -1 = unlimited
     max_glyphs_per_model: int   # -1 = unlimited
     rate_limit_per_minute: int  # -1 = unlimited
@@ -31,16 +31,16 @@ class TierConfig:
         )
 
     @classmethod
-    def developer(cls) -> "TierConfig":
+    def advanced(cls) -> "TierConfig":
         return cls(
-            tier="developer", max_models=10, max_glyphs_per_model=250_000,
+            tier="advanced", max_models=10, max_glyphs_per_model=250_000,
             rate_limit_per_minute=300, allow_commercial=True, allow_external_db=True,
         )
 
     @classmethod
-    def team(cls) -> "TierConfig":
+    def pro(cls) -> "TierConfig":
         return cls(
-            tier="team", max_models=-1, max_glyphs_per_model=-1,
+            tier="pro", max_models=-1, max_glyphs_per_model=-1,
             rate_limit_per_minute=1_000, allow_commercial=True, allow_external_db=True,
         )
 
@@ -56,10 +56,10 @@ class TierConfig:
         """Resolve tier from JWT claims. Named tier sets the baseline; individual
         claim overrides allow custom plans without new tier names."""
         tier = payload.get("tier", "free")
-        if tier == "developer":
-            base = cls.developer()
-        elif tier == "team":
-            base = cls.team()
+        if tier == "advanced":
+            base = cls.advanced()
+        elif tier == "pro":
+            base = cls.pro()
         elif tier == "enterprise":
             base = cls.enterprise()
         else:

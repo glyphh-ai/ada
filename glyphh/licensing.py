@@ -136,6 +136,20 @@ class LicenseInfo:
 # Tier presets
 FREE_TIER = LicenseInfo()
 
+# Module-level license cache (set once at startup, read by storage/deploy/auth)
+_current_license: Optional[LicenseInfo] = None
+
+
+def set_current_license(license_info: LicenseInfo) -> None:
+    """Set the current license (called once at startup from main.py lifespan)."""
+    global _current_license
+    _current_license = license_info
+
+
+def get_current_license() -> LicenseInfo:
+    """Get the current license. Returns FREE_TIER if not set."""
+    return _current_license or FREE_TIER
+
 _TIER_DEFAULTS = {
     "free": {"max_models": 3, "max_glyphs_per_model": 10_000, "rate_limit_per_minute": 60},
     "advanced": {"max_models": 10, "max_glyphs_per_model": 250_000, "rate_limit_per_minute": 300},

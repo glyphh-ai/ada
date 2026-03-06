@@ -165,14 +165,15 @@ async def get_current_user(
     """
     settings = get_settings()
 
-    # Local mode: skip auth
+    # Local mode: skip auth, use license tier for plan
     if settings.deployment_mode == "local":
+        from glyphh.licensing import get_current_license
         path_org_id = request.path_params.get("org_id", "local-dev-org")
         return AuthenticatedUser(
             user_id="local-dev-user",
             org_id=path_org_id,
             role="admin",
-            plan="pro",
+            plan=get_current_license().tier,
         )
 
     if credentials is None:
@@ -197,13 +198,15 @@ async def require_token(
     """
     settings = get_settings()
 
+    # Local mode: skip auth, use license tier for plan
     if settings.deployment_mode == "local":
+        from glyphh.licensing import get_current_license
         path_org_id = request.path_params.get("org_id", "local-dev-org")
         return AuthenticatedUser(
             user_id="local-dev-user",
             org_id=path_org_id,
             role="admin",
-            plan="pro",
+            plan=get_current_license().tier,
         )
 
     if credentials is None:

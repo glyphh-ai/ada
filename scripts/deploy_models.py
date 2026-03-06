@@ -124,6 +124,18 @@ async def deploy_model_to_db(
 
     manifest_version = loaded.manifest.version or ""
 
+    # Check license limits before deployment
+    from glyphh.licensing import get_current_license
+    license_info = get_current_license()
+    max_glyphs = license_info.max_glyphs_per_model
+    if max_glyphs >= 0 and len(entries) > max_glyphs:
+        logger.warning(
+            f"Model {model_id} has {len(entries):,} entries but "
+            f"{license_info.tier} tier allows {max_glyphs:,} per model. "
+            f"Deploying first {max_glyphs:,} entries."
+        )
+        entries = entries[:max_glyphs]
+
     # Check if already deployed with same version and count
     async with session_factory() as session:
         storage = GlyphStorage(session)
@@ -203,7 +215,6 @@ async def deploy_model_to_db(
                     concept_text=concept_text,
                     embedding=embedding,
                     metadata={**metadata, "record_type": "pattern"},
-                    plan_slug="pro",  # auto-deploy bypasses plan limits
                 )
 
                 # Store hierarchical vectors (layer, segment, role)

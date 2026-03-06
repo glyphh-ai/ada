@@ -726,20 +726,18 @@ class AsyncListenerService:
         model_id: str,
         records: List[Dict[str, Any]],
         batch_size: int = DEFAULT_BATCH_SIZE,
-        plan_slug: str = "free",
     ) -> UUID:
         """
         Start async data load. Returns job_id immediately.
-        
+
         Processing happens in background task (Requirement 7.2).
-        
+
         Args:
             org_id: Organization ID
             model_id: Model ID
             records: List of records in hierarchical format matching encoder config
             batch_size: Records per batch (default 50)
-            plan_slug: User's plan slug for glyph limit enforcement
-            
+
         Returns:
             Job UUID for tracking progress
         """
@@ -748,10 +746,10 @@ class AsyncListenerService:
             model_id=model_id,
             total_records=len(records),
         )
-        
+
         # Start background processing
         asyncio.create_task(
-            self._process_records(job.id, org_id, model_id, records, batch_size, plan_slug),
+            self._process_records(job.id, org_id, model_id, records, batch_size),
             name=f"data_load_{job.id}"
         )
         
@@ -765,7 +763,6 @@ class AsyncListenerService:
         model_id: str,
         records: List[Dict[str, Any]],
         batch_size: int,
-        plan_slug: str = "free",
     ) -> None:
         """Process records in batches with progress updates.
         
@@ -904,7 +901,6 @@ class AsyncListenerService:
                                 concept_text=concept_text,
                                 embedding=embedding_list,
                                 metadata=glyph_metadata,
-                                plan_slug=plan_slug,
                             )
                             
                             # Extract and store hierarchical vectors

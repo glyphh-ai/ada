@@ -8,6 +8,7 @@ docker-compose.yml will auto-mount the current directory as a custom model
 so the runtime deploys it on startup.
 """
 
+import json
 import click
 import shutil
 import yaml
@@ -35,6 +36,44 @@ def _detect_model_dir(directory: Path) -> str | None:
     except Exception:
         pass
     return None
+
+
+def _inject_license_env(compose_text: str) -> tuple[str, str | None]:
+    """Inject GLYPHH_LICENSE env var from host license file if it exists.
+
+    Returns (compose_text, tier) — tier is None if no license injected.
+    """
+    from glyphh.licensing import LICENSE_FILE
+    if not LICENSE_FILE.exists():
+        return compose_text, None
+
+    try:
+        data = json.loads(LICENSE_FILE.read_text())
+        token = data.get("token", "")
+        if not token:
+            return compose_text, None
+    except Exception:
+        return compose_text, None
+
+    # Try to extract tier from the JWT payload (unverified, just for display)
+    tier = None
+    try:
+        import base64
+        payload_b64 = token.split(".")[1]
+        # Pad base64
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        tier = payload.get("tier")
+    except Exception:
+        pass
+
+    # Add the license env var to the runtime service environment
+    license_line = f"      - GLYPHH_LICENSE={token}"
+    compose_text = compose_text.replace(
+        "      - LOG_LEVEL=${LOG_LEVEL:-INFO}",
+        f"      - LOG_LEVEL=${{LOG_LEVEL:-INFO}}\n{license_line}",
+    )
+    return compose_text, tier
 
 
 def _inject_model_volume(compose_text: str, model_id: str) -> str:
@@ -67,6 +106,7 @@ def docker_init(force: bool):
     """
     dest = Path.cwd()
     model_id = _detect_model_dir(dest)
+    injected_tier = None
 
     for filename in FILES:
         target = dest / filename
@@ -82,11 +122,20 @@ def docker_init(force: bool):
         if filename == "docker-compose.yml" and model_id:
             content = _inject_model_volume(content, model_id)
 
+        # Inject license env var if the user has one
+        if filename == "docker-compose.yml":
+            content, injected_tier = _inject_license_env(content)
+
         target.write_text(content)
         click.secho(f"  ✓ {filename}", fg=theme.SUCCESS)
 
     if model_id:
         click.secho(f"  ✓ Detected model: {model_id} (will auto-deploy)", fg=theme.SUCCESS)
+    if injected_tier:
+        click.secho(f"  ✓ License injected ({injected_tier} tier)", fg=theme.SUCCESS)
+    elif injected_tier is None and model_id:
+        click.secho("  ⓘ No license found — runtime will use free tier (10K glyphs/model)", fg=theme.MUTED)
+        click.secho("    Run 'glyphh auth login' then re-run 'glyphh docker init' to inject your license", fg=theme.MUTED)
 
     click.echo()
     click.secho("  Ready. Run:", fg=theme.TEXT)
