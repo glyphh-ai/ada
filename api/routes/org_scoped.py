@@ -174,10 +174,23 @@ async def mcp_endpoint(
     arguments["org_id"] = org_id
     arguments["model_id"] = model_id
 
+    # Auth already validated by validate_token_access — pass pre-validated
+    # user to skip MCP's internal double-auth.
+    from domains.auth.service import User, Permission
+    perms = {Permission.READ, Permission.WRITE}
+    if current_user.role == "admin":
+        perms.add(Permission.ADMIN)
+    pre_user = User(
+        user_id=current_user.user_id,
+        org_id=current_user.org_id,
+        org_permissions={org_id: perms},
+    )
+
     response = await mcp_server.handle_tool_call(
         tool_name=tool_name,
         arguments=arguments,
         auth_token=credentials.credentials if credentials else "",
+        pre_authenticated_user=pre_user,
     )
 
     return response.to_dict()

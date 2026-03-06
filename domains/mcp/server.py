@@ -281,27 +281,32 @@ class MCPServer:
         auth_token: str,
         progress_token: Optional[str] = None,
         send_notification: NotificationSender = None,
+        pre_authenticated_user: Any = None,
     ) -> MCPResponse:
         """
         Handle MCP tool invocation with authentication and optional progress.
-        
+
         Args:
             tool_name: Name of the tool to invoke
             arguments: Tool arguments
             auth_token: Authentication token
             progress_token: Optional MCP progress token for long-running ops
             send_notification: Optional async function to send notifications
+            pre_authenticated_user: Skip internal auth if already validated by route
         """
         start_time = datetime.utcnow()
-        
+
         # Create progress handler if token provided
         progress_handler = None
         if progress_token and send_notification:
             progress_handler = MCPProgressHandler(send_notification)
-        
+
         try:
-            # Authenticate
-            user = await self._auth_service.validate_token(auth_token)
+            # Authenticate (skip if already validated by FastAPI dependency)
+            if pre_authenticated_user is not None:
+                user = pre_authenticated_user
+            else:
+                user = await self._auth_service.validate_token(auth_token)
             
             # Validate tool exists
             if tool_name not in self._tools:
