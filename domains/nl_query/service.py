@@ -764,12 +764,20 @@ class NLQueryService:
                 match_meta = match_detail.get("metadata", {})
                 glyph_id = match_detail["glyph_id"]
 
-                # Always try to resolve a GQL template — covers:
-                #   per-exemplar gql_query, per-exemplar gql_id → gql.json,
-                #   config.yaml gql_query_default → gql.json or inline
-                gql_template = await self._resolve_gql_template(
-                    org_id, model_id, match_meta,
+                # Skip Stage 2 for pattern records that have no per-exemplar
+                # GQL query.  Pattern records ARE the final answer — running
+                # the config-level gql_query_default against them would load
+                # every glyph into memory for no benefit.
+                is_pattern = match_meta.get("record_type") == "pattern"
+                has_own_gql = bool(
+                    match_meta.get("gql_query") or match_meta.get("gql_id")
                 )
+
+                gql_template = None
+                if not is_pattern or has_own_gql:
+                    gql_template = await self._resolve_gql_template(
+                        org_id, model_id, match_meta,
+                    )
 
                 if gql_template:
                     try:
