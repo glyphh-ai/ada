@@ -216,13 +216,34 @@ def register_runtime() -> bool:
     hostname = platform.node() or "unknown"
     name = f"{hostname}-{machine_id[:8]}"
 
-    # Check if already registered AND has a license
+    # Check if already registered
     config = _load_config()
-    if config.get("runtime_id"):
+    existing_id = config.get("runtime_id")
+
+    if existing_id:
         from glyphh.licensing import LICENSE_FILE
         if LICENSE_FILE.exists():
             return True
-        # Registered but missing license — re-register to fetch it
+
+        # Registered but missing license — fetch it (don't create a new runtime)
+        try:
+            with httpx.Client(timeout=15) as client:
+                res = client.get(
+                    f"{api_url}/runtimes/{existing_id}/license",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if res.status_code == 200:
+                    license_info = res.json()
+                    jwt_token = license_info.get("token")
+                    if jwt_token:
+                        from glyphh.licensing import save_license_token
+                        save_license_token(jwt_token)
+                        tier = license_info.get("tier", "free")
+                        click.secho(f"  License refreshed ({tier} tier)", fg=theme.MUTED)
+                        return True
+                # If fetch failed (404 = deleted on platform), fall through to create
+        except Exception:
+            pass
 
     try:
         with httpx.Client(timeout=15) as client:
