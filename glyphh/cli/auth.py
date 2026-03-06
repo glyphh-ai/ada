@@ -69,14 +69,18 @@ def save_session(access_token: str, refresh_token: str, user: dict):
 
 
 def clear_session():
-    """Remove stored auth data, runtime registration, and license."""
+    """Remove stored auth data and runtime token.
+
+    Keeps runtime_id and runtime_name — those are machine-level
+    registrations that count toward the org's plan limit. Deleting
+    them causes a new registration on every login cycle.
+    """
     config = _load_config()
-    for key in ("access_token", "refresh_token", "user", "runtime_id",
-                "runtime_name", "runtime_token"):
+    for key in ("access_token", "refresh_token", "user", "runtime_token"):
         config.pop(key, None)
     _save_config(config)
 
-    # Remove stale license file so re-login fetches a fresh one
+    # Remove license file so re-login fetches a fresh one
     from glyphh.licensing import LICENSE_FILE
     if LICENSE_FILE.exists():
         try:
