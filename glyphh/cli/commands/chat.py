@@ -41,6 +41,8 @@ except ImportError:
     def _setup_history() -> None: pass   # noqa: E704
     def _save_history() -> None: pass    # noqa: E704
 
+import time
+
 from .. import theme
 from ..config import resolve_runtime_url, resolve_runtime_token
 
@@ -48,6 +50,8 @@ from ..config import resolve_runtime_url, resolve_runtime_token
 # ── Defaults ────────────────────────────────────────────────────────────────
 
 _LOCAL_ORG   = "local-dev-org"
+_READY_POLL_INTERVAL = 2  # seconds between readiness checks
+_READY_TIMEOUT = 120      # max seconds to wait for model deployment
 
 
 # ── Context resolution ───────────────────────────────────────────────────────
@@ -99,6 +103,71 @@ def _resolve_context(model_id_override=None, url_override=None, token_override=N
         "headers": headers,
         "local": org_id == _LOCAL_ORG and not token,
     }
+
+
+# ── Readiness check ──────────────────────────────────────────────────────────
+
+def _wait_for_ready(ctx) -> bool:
+    """Check if the runtime and model are ready. Wait with a spinner if deploying.
+
+    Returns True if ready, False if timed out or unreachable.
+    """
+    import httpx
+
+    if not ctx.get("model_id"):
+        return True  # Will fail later with a clear message
+
+    ready_url = f"{ctx['runtime_url']}/{ctx['org_id']}/{ctx['model_id']}/ready"
+    health_url = f"{ctx['runtime_url']}/health"
+    deadline = time.time() + _READY_TIMEOUT
+    shown_waiting = False
+
+    while time.time() < deadline:
+        try:
+            with httpx.Client(timeout=5) as client:
+                res = client.get(ready_url, headers=ctx["headers"])
+
+            if res.status_code == 200:
+                data = res.json()
+                if data.get("ready"):
+                    if shown_waiting:
+                        click.secho("  Ready.", fg=theme.SUCCESS)
+                    return True
+
+                status = data.get("status", "unknown")
+                if not shown_waiting:
+                    click.secho(
+                        f"  Runtime is starting up ({status}). Waiting for model to deploy...",
+                        fg=theme.MUTED,
+                    )
+                    shown_waiting = True
+
+            elif res.status_code == 404:
+                # Model not deployed yet — runtime is up but model hasn't loaded
+                if not shown_waiting:
+                    click.secho(
+                        "  Waiting for model to deploy...",
+                        fg=theme.MUTED,
+                    )
+                    shown_waiting = True
+
+        except Exception:
+            # Runtime not reachable yet — check if Docker is even running
+            if not shown_waiting:
+                click.secho(
+                    "  Waiting for runtime to start...",
+                    fg=theme.MUTED,
+                )
+                shown_waiting = True
+
+        time.sleep(_READY_POLL_INTERVAL)
+
+    click.secho(
+        f"  Timed out waiting for model to be ready ({_READY_TIMEOUT}s). "
+        "Check: docker compose logs -f runtime",
+        fg=theme.ERROR,
+    )
+    return False
 
 
 # ── Result rendering ─────────────────────────────────────────────────────────
@@ -406,6 +475,9 @@ def chat_command(text, model_id, gql, url, token):
     """
     ctx = _resolve_context(model_id, url, token)
     tool = "gql_query" if gql else "nl_query"
+
+    if not _wait_for_ready(ctx):
+        return
 
     if text:
         _do_query(ctx, text, tool=tool)
