@@ -121,9 +121,24 @@ def _read_dev_port() -> Optional[int]:
         return None
 
 
+def _docker_runtime_available() -> bool:
+    """Check if a Docker runtime is likely running on port 8002.
+
+    Returns True if docker-compose.yml exists in CWD and port 8002 responds.
+    """
+    if not Path.cwd().joinpath("docker-compose.yml").exists():
+        return False
+    try:
+        import socket
+        with socket.create_connection(("localhost", 8002), timeout=0.3):
+            return True
+    except (OSError, ConnectionRefusedError):
+        return False
+
+
 def resolve_runtime_url(cli_override: Optional[str] = None) -> str:
     """Resolve the runtime URL using the priority chain:
-    CLI flag → RUNTIME_URL env → ~/.glyphh/config.json → dev server port → localhost default.
+    CLI flag → RUNTIME_URL env → ~/.glyphh/config.json → Docker on 8002 → dev server port → localhost default.
     """
     if cli_override:
         return cli_override.rstrip("/")
@@ -137,6 +152,10 @@ def resolve_runtime_url(cli_override: Optional[str] = None) -> str:
     stored_url = config.get("runtime_url", "").strip()
     if stored_url:
         return stored_url.rstrip("/")
+
+    # Docker runtime in CWD takes priority over dev server
+    if _docker_runtime_available():
+        return DEFAULT_RUNTIME_URL
 
     # Check if a dev server is running on a non-default port
     dev_port = _read_dev_port()

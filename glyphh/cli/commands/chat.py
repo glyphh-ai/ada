@@ -379,7 +379,12 @@ _STAGE_VALUES = ("auto", "patterns", "data")
 def _run_repl(ctx, tool="nl_query"):
     """Run the interactive chat REPL. Returns when the user exits."""
     model_label = ctx["model_id"] or "unknown"
-    mode_label  = "local" if ctx["local"] else ctx["org_id"]
+    if not ctx["local"]:
+        mode_label = ctx["org_id"]
+    elif ":8002" in ctx["runtime_url"]:
+        mode_label = "docker"
+    else:
+        mode_label = "local"
 
     click.echo()
     click.secho(
