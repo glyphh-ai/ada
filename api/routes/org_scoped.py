@@ -22,7 +22,8 @@ from domains.auth.service import AuthService
 from domains.mcp.server import MCPServer
 from domains.query.service import QueryService
 from infrastructure.config import get_settings
-from shared.auth import AuthenticatedUser, get_current_user, require_token
+from fastapi.security import HTTPAuthorizationCredentials
+from shared.auth import AuthenticatedUser, get_current_user, require_token, security
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/{org_id}/{model_id}", tags=["org-scoped"])
@@ -156,6 +157,7 @@ async def mcp_endpoint(
     request: Dict[str, Any],
     mcp_server: MCPServer = Depends(get_mcp_server),
     current_user: AuthenticatedUser = Depends(validate_token_access),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> Dict[str, Any]:
     """
     MCP endpoint for org-scoped model access.
@@ -175,7 +177,7 @@ async def mcp_endpoint(
     response = await mcp_server.handle_tool_call(
         tool_name=tool_name,
         arguments=arguments,
-        auth_token="",
+        auth_token=credentials.credentials if credentials else "",
     )
 
     return response.to_dict()
