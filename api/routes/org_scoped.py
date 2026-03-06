@@ -26,6 +26,7 @@ from shared.auth import AuthenticatedUser, get_current_user, require_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/{org_id}/{model_id}", tags=["org-scoped"])
+org_router = APIRouter(prefix="/{org_id}", tags=["org-scoped"])
 settings = get_settings()
 
 
@@ -93,6 +94,43 @@ async def get_mcp_server(
 
     return MCPServer(query_service, auth_service)
 
+
+
+@org_router.get("/models", response_model=dict)
+async def list_models(
+    org_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    """List all deployed models for an org."""
+    from glyphh.server import model_manager
+    from infrastructure.database import async_session_maker
+    from domains.models.db_models import ModelConfig
+    from domains.models.storage import GlyphStorage
+    from sqlalchemy import select
+
+    if current_user.org_id != "local-dev-org" and current_user.org_id != org_id:
+        raise HTTPException(status_code=403, detail="Organization mismatch")
+
+    # Query all model configs from DB for this org
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(ModelConfig).where(ModelConfig.org_id == org_id)
+        )
+        configs = result.scalars().all()
+
+        models = []
+        storage = GlyphStorage(session)
+        for cfg in configs:
+            count = await storage.count_glyphs(org_id, cfg.model_id)
+            models.append({
+                "model_id": cfg.model_id,
+                "name": cfg.meta_name or cfg.model_id,
+                "version": cfg.model_version or "—",
+                "glyphs": count,
+                "status": "active",
+            })
+
+    return {"models": models}
 
 
 class UndeployRequest(BaseModel):

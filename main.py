@@ -223,6 +223,7 @@ def _is_allowed_origin(origin: str) -> bool:
 from api.routes import (
     health_router,
     org_scoped_router,
+    org_level_router,
     listeners_router,
     tokens_router,
     setup_router,
@@ -233,6 +234,8 @@ app.include_router(setup_router)
 app.include_router(tokens_router)
 # listeners_router must come before org_scoped_router (more specific prefix)
 app.include_router(listeners_router)
+# org_level_router (/{org_id}/models) before org_scoped_router (/{org_id}/{model_id}/...)
+app.include_router(org_level_router)
 app.include_router(org_scoped_router)
 
 

@@ -33,8 +33,16 @@ def model_group():
 
 
 @model_group.command("list")
-def model_list():
-    """List local models found on disk."""
+@click.option("--remote", is_flag=True, help="List models deployed on the remote runtime.")
+def model_list(remote):
+    """List models. By default lists local models found on disk.
+
+    Use --remote to list models deployed on the runtime.
+    """
+    if remote:
+        _list_remote_models()
+        return
+
     models = discover_local_models()
     if not models:
         click.secho("  No models found in current directory.", fg=theme.MUTED)
@@ -63,6 +71,70 @@ def model_list():
             + click.style(path, fg=theme.TEXT_DIM)
         )
     click.echo()
+
+
+def _list_remote_models():
+    """Fetch and display models from the remote runtime."""
+    if not is_logged_in():
+        click.secho("  Not logged in. Run: glyphh auth login", fg=theme.ERROR)
+        return
+
+    runtime_url = resolve_runtime_url()
+    token = resolve_runtime_token()
+    org_id = resolve_org_id(runtime_url)
+    if not org_id:
+        click.secho("  No org_id in session. Run: glyphh auth login", fg=theme.ERROR)
+        return
+
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        import httpx
+        with httpx.Client(timeout=15) as client:
+            res = client.get(f"{runtime_url}/{org_id}/models", headers=headers)
+
+        if res.status_code != 200:
+            detail = res.text
+            try:
+                detail = res.json().get("detail", detail)
+            except Exception:
+                pass
+            click.secho(f"  Failed: {detail}", fg=theme.ERROR)
+            return
+
+        data = res.json()
+        models = data.get("models", [])
+        if not models:
+            click.secho("  No models deployed on runtime.", fg=theme.MUTED)
+            return
+
+        click.echo()
+        click.secho(f"  {runtime_url}", fg=theme.TEXT_DIM)
+        click.echo()
+        header = f"  {'MODEL ID':<20} {'NAME':<28} {'VERSION':<10} {'GLYPHS':<10} STATUS"
+        click.secho(header, fg=theme.TEXT_DIM)
+        click.secho("  " + "─" * 80, fg=theme.TEXT_DIM)
+
+        for m in models:
+            mid = m.get("model_id", "?")[:18]
+            name = (m.get("name") or mid)[:26]
+            ver = (m.get("version") or "—")[:8]
+            glyphs = str(m.get("glyphs", 0))
+            status = m.get("status", "—")
+
+            click.echo(
+                click.style(f"  {mid:<20} ", fg=theme.ACCENT)
+                + click.style(f"{name:<28} ", fg=theme.TEXT)
+                + click.style(f"{ver:<10} ", fg=theme.MUTED)
+                + click.style(f"{glyphs:<10} ", fg=theme.INFO)
+                + click.style(status, fg=theme.SUCCESS)
+            )
+        click.echo()
+
+    except Exception as e:
+        click.secho(f"  Could not connect to runtime: {e}", fg=theme.ERROR)
 
 
 @model_group.command("deploy")
@@ -785,8 +857,9 @@ def model_test(path, verbose, keyword):
 def handle_model(func: str | None, args: str = ""):
     """Route model subcommands from the interactive shell."""
     if func == "list":
+        remote = "--remote" in args or "-r" in args.split()
         ctx = click.Context(model_list)
-        ctx.invoke(model_list)
+        ctx.invoke(model_list, remote=remote)
     elif func == "deploy":
         ctx = click.Context(model_deploy)
         ctx.invoke(model_deploy, path=args.strip() or ".")
