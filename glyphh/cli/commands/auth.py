@@ -50,7 +50,23 @@ def auth_status():
         org_id = user.get("org_id", "—")
         click.echo()
         click.secho(f"  ● Logged in as {name}", fg=theme.SUCCESS)
-        click.secho(f"    Org: {org_id}", fg=theme.MUTED)
+        click.secho(f"    Org:     {org_id}", fg=theme.MUTED)
+
+        # Show license tier
+        from ...licensing import load_license
+        info = load_license()
+        if info.is_free and not info.license_id:
+            click.secho(f"    License: free (no license)", fg=theme.TEXT_DIM)
+        else:
+            glyphs = "unlimited" if info.max_glyphs_per_model == -1 else f"{info.max_glyphs_per_model:,}"
+            click.secho(f"    License: {info.tier} ({glyphs} glyphs/model)", fg=theme.MUTED)
+
+        # Show runtime registration
+        from ..auth import _load_config
+        config = _load_config()
+        if config.get("runtime_id"):
+            click.secho(f"    Runtime: {config['runtime_id'][:8]}…", fg=theme.MUTED)
+
         click.echo()
     else:
         click.echo()

@@ -156,6 +156,7 @@ def device_login() -> bool:
                     click.echo()
                     register_runtime()
                     bootstrap_runtime()
+                    _patch_docker_compose()
                     return True
 
                 if status == "expired":
@@ -189,6 +190,25 @@ def device_login() -> bool:
     except Exception as e:
         click.secho(f"  Login failed: {e}", fg=theme.ERROR)
         return False
+
+
+def _patch_docker_compose():
+    """If a docker-compose.yml exists in CWD without GLYPHH_LICENSE, inject it."""
+    compose = Path.cwd() / "docker-compose.yml"
+    if not compose.exists():
+        return
+
+    content = compose.read_text()
+    if "GLYPHH_LICENSE" in content:
+        return  # already has license
+
+    from .commands.docker import _inject_license_env
+    patched, tier = _inject_license_env(content)
+    if tier:
+        compose.write_text(patched)
+        click.echo()
+        click.secho(f"  License injected into docker-compose.yml ({tier} tier)", fg=theme.SUCCESS)
+        click.secho("  Restart Docker to apply: docker compose down -v && docker compose up -d --wait", fg=theme.MUTED)
 
 
 def _get_machine_id() -> str:
