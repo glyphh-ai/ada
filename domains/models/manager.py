@@ -707,14 +707,20 @@ class ModelManager:
 
         created_modules: list[str] = []
         try:
-            # Load all non-encoder .py files first as importable modules
+            # Load all non-encoder .py files first as importable modules.
+            # Skip build.py — it's a build-time script that imports from
+            # encoder.py (circular at this stage) and is never needed at runtime.
             for filename, source in sorted(source_files.items()):
-                if filename == "encoder.py" or not filename.endswith(".py"):
+                if filename in ("encoder.py", "build.py") or not filename.endswith(".py"):
                     continue
                 mod_name = filename[:-3]  # "intent.py" → "intent"
                 mod = types.ModuleType(mod_name)
                 mod.__file__ = f"<db:{filename}>"
-                exec(compile(source, f"<db:{filename}>", "exec"), mod.__dict__)
+                try:
+                    exec(compile(source, f"<db:{filename}>", "exec"), mod.__dict__)
+                except Exception as mod_err:
+                    logger.debug(f"Skipping {filename} during source restore: {mod_err}")
+                    continue
                 sys.modules[mod_name] = mod
                 created_modules.append(mod_name)
 
