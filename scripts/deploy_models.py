@@ -23,6 +23,21 @@ RUNTIME_ROOT = Path(__file__).parent.parent
 CUSTOM_MODELS_DIR = RUNTIME_ROOT / "custom_models"
 
 
+def _read_source_files(model_dir: Path) -> dict[str, str] | None:
+    """Read all .py source files from a model directory for DB storage."""
+    sources: dict[str, str] = {}
+    if not model_dir.is_dir():
+        return None
+    for py_file in sorted(model_dir.glob("*.py")):
+        if py_file.name.startswith("."):
+            continue
+        try:
+            sources[py_file.name] = py_file.read_text()
+        except Exception:
+            pass
+    return sources if sources else None
+
+
 def _extract_hierarchical_vectors(glyph) -> list[dict]:
     """Extract layer, segment, and role vectors from an encoded glyph."""
     vectors = []
@@ -240,6 +255,9 @@ async def deploy_model_to_db(
     if hasattr(loaded.encoder_config, "to_dict"):
         encoder_config_dict = loaded.encoder_config.to_dict()
 
+    # Read source files for DB restore (encode_query_fn, etc.)
+    source_files_dict = _read_source_files(model_dir) or None
+
     async with session_factory() as session:
         result = await session.execute(
             select(ModelConfig).where(
@@ -254,6 +272,7 @@ async def deploy_model_to_db(
             existing.meta_name = loaded.manifest.name
             existing.model_path = str(model_dir)
             existing.encoder_config = encoder_config_dict
+            existing.source_files = source_files_dict
             existing.updated_at = datetime.utcnow()
         else:
             config = ModelConfig(
@@ -265,6 +284,7 @@ async def deploy_model_to_db(
                 short_description=loaded.manifest.description,
                 long_description="",
                 encoder_config=encoder_config_dict,
+                source_files=source_files_dict,
             )
             session.add(config)
         await session.commit()

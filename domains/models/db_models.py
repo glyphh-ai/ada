@@ -285,7 +285,11 @@ class ModelConfig(Base):
     
     # Full encoder config for reconstructing the model without the .glyphh file
     encoder_config = Column(JSONType, nullable=True)
-    
+
+    # Python source files for restoring encode_query_fn from DB
+    # {"encoder.py": "...", "intent.py": "..."} — stored as text
+    source_files = Column(JSONType, nullable=True)
+
     # Similarity weights for each edge type
     similarity_weights = Column(JSONType, default=lambda: {
         "similarity": 1.0,

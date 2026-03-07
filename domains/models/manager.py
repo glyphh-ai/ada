@@ -219,7 +219,13 @@ class ModelManager:
         encoder_config_dict = None
         if hasattr(encoder_config, 'to_dict'):
             encoder_config_dict = encoder_config.to_dict()
-        
+
+        # Read source files for DB restore (ZIP unpack leaves .py files in parent dir)
+        source_files_dict: Optional[Dict[str, str]] = None
+        model_dir = path.parent if path.is_file() else path
+        if model_dir.is_dir():
+            source_files_dict = self._read_source_files(model_dir) or None
+
         # DB upsert first — if this fails, the old model stays intact in memory
         async with self._db_session_factory() as session:
             result = await session.execute(
@@ -238,6 +244,7 @@ class ModelManager:
                 existing.short_description = short_description
                 existing.long_description = long_description
                 existing.encoder_config = encoder_config_dict
+                existing.source_files = source_files_dict
                 existing.updated_at = datetime.utcnow()
             else:
                 config = ModelConfig(
@@ -250,6 +257,7 @@ class ModelManager:
                     short_description=short_description,
                     long_description=long_description,
                     encoder_config=encoder_config_dict,
+                    source_files=source_files_dict,
                 )
                 session.add(config)
             await session.commit()
@@ -398,6 +406,9 @@ class ModelManager:
         if hasattr(encoder_config, 'to_dict'):
             encoder_config_dict = encoder_config.to_dict()
 
+        # Read source files for DB restore
+        source_files_dict = self._read_source_files(model_dir)
+
         # DB upsert
         async with self._db_session_factory() as session:
             result = await session.execute(
@@ -416,6 +427,7 @@ class ModelManager:
                 existing.short_description = short_description
                 existing.long_description = ""
                 existing.encoder_config = encoder_config_dict
+                existing.source_files = source_files_dict or None
                 existing.updated_at = datetime.utcnow()
             else:
                 config = ModelConfig(
@@ -428,6 +440,7 @@ class ModelManager:
                     short_description=short_description,
                     long_description="",
                     encoder_config=encoder_config_dict,
+                    source_files=source_files_dict or None,
                 )
                 session.add(config)
             await session.commit()
@@ -567,10 +580,14 @@ class ModelManager:
             encoder = adapter.create_encoder(encoder_config)
             similarity_calculator = adapter.create_similarity_calculator()
             
-            # Try to load model fns from the model directory on disk
+            # Try to load model fns: stored source first, then disk fallback
             encode_query_fn = None
             assess_query_fn = None
-            if db_config.model_path:
+            if db_config.source_files:
+                encode_query_fn, assess_query_fn = self._load_model_fns_from_source(
+                    db_config.source_files
+                )
+            if encode_query_fn is None and db_config.model_path:
                 encode_query_fn, assess_query_fn = self._load_model_fns(db_config.model_path)
             
             class RestoredModel:
@@ -644,7 +661,75 @@ class ModelManager:
         """Backward-compat wrapper — returns only encode_query_fn."""
         encode_query_fn, _ = ModelManager._load_model_fns(model_path)
         return encode_query_fn
-    
+
+    @staticmethod
+    def _read_source_files(model_dir: Path) -> Dict[str, str]:
+        """Read all .py source files from a model directory for DB storage.
+
+        Returns a dict mapping filename to source text, e.g.
+        {"encoder.py": "...", "intent.py": "..."}.
+        """
+        sources: Dict[str, str] = {}
+        if not model_dir.is_dir():
+            return sources
+        for py_file in sorted(model_dir.glob("*.py")):
+            if py_file.name.startswith("."):
+                continue
+            try:
+                sources[py_file.name] = py_file.read_text()
+            except Exception:
+                pass
+        return sources
+
+    @staticmethod
+    def _load_model_fns_from_source(
+        source_files: Dict[str, str],
+    ) -> tuple[Optional[Any], Optional[Any]]:
+        """Load encode_query_fn and assess_query_fn from stored source code.
+
+        Creates temporary module objects so local imports work
+        (e.g., encoder.py can ``from intent import extract_keywords``).
+        Returns (encode_query_fn, assess_query_fn) or (None, None) on failure.
+        """
+        import sys
+        import types
+
+        if not source_files or "encoder.py" not in source_files:
+            return None, None
+
+        created_modules: list[str] = []
+        try:
+            # Load all non-encoder .py files first as importable modules
+            for filename, source in sorted(source_files.items()):
+                if filename == "encoder.py" or not filename.endswith(".py"):
+                    continue
+                mod_name = filename[:-3]  # "intent.py" → "intent"
+                mod = types.ModuleType(mod_name)
+                mod.__file__ = f"<db:{filename}>"
+                exec(compile(source, f"<db:{filename}>", "exec"), mod.__dict__)
+                sys.modules[mod_name] = mod
+                created_modules.append(mod_name)
+
+            # Now load encoder.py — it can import from the modules above
+            encoder_mod = types.ModuleType("model_encoder_db")
+            encoder_mod.__file__ = "<db:encoder.py>"
+            exec(
+                compile(source_files["encoder.py"], "<db:encoder.py>", "exec"),
+                encoder_mod.__dict__,
+            )
+
+            encode_query_fn = getattr(encoder_mod, "encode_query", None)
+            assess_query_fn = getattr(encoder_mod, "assess_query", None)
+            return encode_query_fn, assess_query_fn
+
+        except Exception as e:
+            logger.warning(f"Failed to load model fns from stored source: {e}")
+            return None, None
+        finally:
+            # Clean up temporary modules from sys.modules
+            for mod_name in created_modules:
+                sys.modules.pop(mod_name, None)
+
     async def list_models(self) -> List[ModelInfoResponse]:
         """List all currently loaded models."""
         models = []
