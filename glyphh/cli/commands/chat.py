@@ -362,9 +362,14 @@ def _do_query(ctx, query_text, tool="nl_query", stage="auto", confirmed=False):
 
     except Exception as exc:
         if "connect" in str(exc).lower() or "connection" in str(exc).lower():
+            from pathlib import Path
+            if Path.cwd().joinpath("docker-compose.yml").exists():
+                hint = "docker compose up -d --wait"
+            else:
+                hint = "glyphh dev ."
             click.secho(
                 f"  Could not connect to runtime at {ctx['runtime_url']}. "
-                "Start it with: glyphh dev .",
+                f"Start it with: {hint}",
                 fg=theme.ERROR,
             )
         else:
@@ -497,6 +502,10 @@ def handle_chat(func: str | None, args: str = ""):
     """Route chat subcommands from the interactive shell."""
     full_query = " ".join(p for p in [func, args] if p).strip()
     ctx = _resolve_context()
+
+    if not _wait_for_ready(ctx):
+        return
+
     if full_query:
         _do_query(ctx, full_query)
     else:
