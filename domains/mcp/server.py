@@ -244,7 +244,7 @@ class MCPServer:
             mgr = self._query_service._model_manager
             from domains.models.db_models import ModelConfig
             from sqlalchemy import select
-            async with mgr._session_factory() as session:
+            async with mgr._db_session_factory() as session:
                 result = await session.execute(
                     select(ModelConfig.source_files).where(
                         ModelConfig.org_id == org_id,

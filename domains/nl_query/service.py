@@ -408,7 +408,7 @@ class NLQueryService:
             from domains.models.db_models import ModelConfig
             from sqlalchemy import select
             mgr = self.query_service._model_manager
-            async with mgr._session_factory() as session:
+            async with mgr._db_session_factory() as session:
                 result = await session.execute(
                     select(ModelConfig.source_files).where(
                         ModelConfig.org_id == org_id,

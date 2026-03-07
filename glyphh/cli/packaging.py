@@ -29,6 +29,7 @@ PACKAGE_INCLUDES = [
     "config.yaml",
     "encoder.py",
     "build.py",
+    "gql.json",
     "data",
 ]
 
