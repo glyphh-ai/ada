@@ -226,11 +226,9 @@ from api.routes import (
     org_level_router,
     listeners_router,
     tokens_router,
-    setup_router,
 )
 
 app.include_router(health_router)
-app.include_router(setup_router)
 app.include_router(tokens_router)
 # listeners_router must come before org_scoped_router (more specific prefix)
 app.include_router(listeners_router)

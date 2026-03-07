@@ -4,7 +4,7 @@ Authentication middleware for Glyphh Runtime.
 Dual auth: accepts both database-backed API tokens (glyphh_xxxx) and
 Platform JWTs (HS256, from browser login). Local mode bypasses all auth.
 
-- CLI/API tools use database tokens created via POST /setup or glyphh token create
+- CLI/API tools use database tokens created via glyphh token create
 - Browser dashboard uses Platform JWTs obtained via POST /auth/login on Platform
 """
 

@@ -73,12 +73,7 @@ def config_set():
 @config_set.command("endpoint")
 @click.argument("url")
 def config_set_endpoint(url):
-    """Persist a runtime endpoint URL.
-
-    If a cached token exists for this endpoint, it's restored immediately.
-    Otherwise, if logged in, the runtime is auto-bootstrapped (license pushed,
-    admin token obtained).
-    """
+    """Persist a runtime endpoint URL."""
     try:
         RuntimeConfig(runtime_url=url)
     except ConfigurationError as e:
@@ -88,23 +83,8 @@ def config_set_endpoint(url):
     normalized = url.rstrip("/")
     config = _load_config()
     config["runtime_url"] = normalized
-
-    # Check for cached per-endpoint token
-    cached_tokens = config.get("runtime_tokens", {})
-    cached = cached_tokens.get(normalized)
-
-    if cached:
-        config["runtime_token"] = cached
-        _save_config(config)
-        click.secho(f"  Switched to: {normalized} (cached)", fg=theme.SUCCESS)
-    else:
-        _save_config(config)
-        click.secho(f"  Endpoint saved: {normalized}", fg=theme.SUCCESS)
-
-        # Auto-bootstrap if logged in
-        from ..auth import is_logged_in, bootstrap_runtime
-        if is_logged_in():
-            bootstrap_runtime(runtime_url=normalized)
+    _save_config(config)
+    click.secho(f"  Endpoint saved: {normalized}", fg=theme.SUCCESS)
 
 
 @config_set.command("token")

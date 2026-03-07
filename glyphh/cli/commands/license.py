@@ -53,6 +53,14 @@ def license_show():
     else:
         click.secho("  Expires:   never", fg=theme.TEXT_DIM)
 
+    # Show runtime_id for remote deployment
+    from ..auth import _load_config
+    runtime_id = _load_config().get("runtime_id")
+    if runtime_id:
+        click.echo()
+        click.secho(f"  Runtime:   {runtime_id}", fg=theme.ACCENT)
+        click.secho("             Set GLYPHH_RUNTIME_ID on remote runtimes to self-fetch this license.", fg=theme.TEXT_DIM)
+
     click.echo()
 
 
