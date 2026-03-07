@@ -75,7 +75,9 @@ def config_set():
 def config_set_endpoint(url):
     """Persist a runtime endpoint URL.
 
-    Example: glyphh config set endpoint https://my-app.herokuapp.com
+    If a cached token exists for this endpoint, it's restored immediately.
+    Otherwise, if logged in, the runtime is auto-bootstrapped (license pushed,
+    admin token obtained).
     """
     try:
         RuntimeConfig(runtime_url=url)
@@ -83,11 +85,26 @@ def config_set_endpoint(url):
         click.secho(f"  Invalid URL: {e}", fg=theme.ERROR)
         return
 
+    normalized = url.rstrip("/")
     config = _load_config()
-    config["runtime_url"] = url.rstrip("/")
-    _save_config(config)
+    config["runtime_url"] = normalized
 
-    click.secho(f"  Endpoint saved: {url.rstrip('/')}", fg=theme.SUCCESS)
+    # Check for cached per-endpoint token
+    cached_tokens = config.get("runtime_tokens", {})
+    cached = cached_tokens.get(normalized)
+
+    if cached:
+        config["runtime_token"] = cached
+        _save_config(config)
+        click.secho(f"  Switched to: {normalized} (cached)", fg=theme.SUCCESS)
+    else:
+        _save_config(config)
+        click.secho(f"  Endpoint saved: {normalized}", fg=theme.SUCCESS)
+
+        # Auto-bootstrap if logged in
+        from ..auth import is_logged_in, bootstrap_runtime
+        if is_logged_in():
+            bootstrap_runtime(runtime_url=normalized)
 
 
 @config_set.command("token")

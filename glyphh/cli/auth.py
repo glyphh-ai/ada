@@ -76,7 +76,7 @@ def clear_session():
     them causes a new registration on every login cycle.
     """
     config = _load_config()
-    for key in ("access_token", "refresh_token", "user", "runtime_token"):
+    for key in ("access_token", "refresh_token", "user", "runtime_token", "runtime_tokens"):
         config.pop(key, None)
     _save_config(config)
 
@@ -156,7 +156,6 @@ def device_login() -> bool:
                     click.echo()
                     register_runtime()
                     bootstrap_runtime()
-                    _patch_docker_compose()
                     return True
 
                 if status == "expired":
@@ -190,25 +189,6 @@ def device_login() -> bool:
     except Exception as e:
         click.secho(f"  Login failed: {e}", fg=theme.ERROR)
         return False
-
-
-def _patch_docker_compose():
-    """If a docker-compose.yml exists in CWD without GLYPHH_LICENSE, inject it."""
-    compose = Path.cwd() / "docker-compose.yml"
-    if not compose.exists():
-        return
-
-    content = compose.read_text()
-    if "GLYPHH_LICENSE" in content:
-        return  # already has license
-
-    from .commands.docker import _inject_license_env
-    patched, tier = _inject_license_env(content)
-    if tier:
-        compose.write_text(patched)
-        click.echo()
-        click.secho(f"  License injected into docker-compose.yml ({tier} tier)", fg=theme.SUCCESS)
-        click.secho("  Restart Docker to apply: docker compose down -v && docker compose up -d --wait", fg=theme.MUTED)
 
 
 def _get_machine_id() -> str:
@@ -321,19 +301,21 @@ def resolve_org_id(runtime_url: str) -> str | None:
     return config.get("user", {}).get("org_id")
 
 
-def bootstrap_runtime() -> bool:
-    """Push the license JWT to the remote runtime to get an admin token.
+def bootstrap_runtime(runtime_url: str | None = None) -> bool:
+    """Push the license JWT to a runtime to get an admin token.
 
-    Called after device_login() → register_runtime(). The license JWT
-    (saved to ~/.glyphh/license.json by register_runtime) is sent as
+    Called after device_login() → register_runtime(), or when switching
+    endpoints via `config set endpoint`. The license JWT is sent as
     Bearer auth to POST /setup. The runtime verifies the Ed25519 signature,
     revokes old admin tokens, and returns a fresh one. Last auth wins.
 
-    Skips silently if: no remote endpoint, local URL, no license, or runtime offline.
-    """
-    from .config import resolve_runtime_url
+    Tokens are cached per-endpoint in config.json["runtime_tokens"].
 
-    runtime_url = resolve_runtime_url()
+    Skips silently if: local URL, no license, or runtime offline.
+    """
+    if runtime_url is None:
+        from .config import resolve_runtime_url
+        runtime_url = resolve_runtime_url()
 
     # Skip for local URLs
     from urllib.parse import urlparse
@@ -368,8 +350,12 @@ def bootstrap_runtime() -> bool:
             if token:
                 config = _load_config()
                 config["runtime_token"] = token
+                # Cache per-endpoint
+                tokens = config.get("runtime_tokens", {})
+                tokens[runtime_url.rstrip("/")] = token
+                config["runtime_tokens"] = tokens
                 _save_config(config)
-                click.secho(f"  Runtime token saved (org: {data.get('org_id', '?')})", fg=theme.SUCCESS)
+                click.secho(f"  Runtime bootstrapped (org: {data.get('org_id', '?')})", fg=theme.SUCCESS)
                 return True
 
         else:

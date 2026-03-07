@@ -16,6 +16,8 @@ from .commands.query import handle_query
 from .commands.chat import handle_chat
 from .commands.dev import handle_dev
 from .commands.config import handle_config
+from .commands.docker import handle_docker
+from .commands.license import handle_license
 from . import theme
 
 # Try to import readline for history/completion
@@ -36,6 +38,8 @@ COMMAND_HANDLERS = {
     "chat": handle_chat,
     "dev": handle_dev,
     "config": handle_config,
+    "docker": handle_docker,
+    "license": handle_license,
 }
 
 
@@ -62,6 +66,8 @@ _SUBCOMMANDS = {
     "chat": [],
     "dev": ["start", "stop", "status", "log", "restart"],
     "config": ["show", "set", "clear"],
+    "docker": ["init"],
+    "license": ["show", "activate", "deactivate", "refresh"],
 }
 
 _CATEGORIES = list(_SUBCOMMANDS.keys()) + ["help", "clear", "home", "exit", "quit"]
@@ -298,6 +304,15 @@ def _print_help():
     click.secho("    dev status               Show dev server status", fg=theme.MUTED)
     click.secho("    dev log [n]              Show last n lines of log (default 30)", fg=theme.MUTED)
     click.secho("    dev restart [path]       Restart the dev server", fg=theme.MUTED)
+    click.echo()
+    click.secho("  docker", fg=theme.ACCENT)
+    click.secho("    docker init [--force]    Write docker-compose.yml + init.sql", fg=theme.MUTED)
+    click.echo()
+    click.secho("  license", fg=theme.ACCENT)
+    click.secho("    license show             Display current license info", fg=theme.MUTED)
+    click.secho("    license activate <jwt>   Activate a license token", fg=theme.MUTED)
+    click.secho("    license deactivate       Remove license (free tier)", fg=theme.MUTED)
+    click.secho("    license refresh          Re-fetch license from Platform", fg=theme.MUTED)
     click.echo()
     click.secho("  config", fg=theme.ACCENT)
     click.secho("    config show              Show current configuration", fg=theme.MUTED)

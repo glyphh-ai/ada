@@ -34,7 +34,7 @@ def license_show():
         click.secho("  Glyphs:    10,000 per model", fg=theme.TEXT_DIM)
         click.echo()
         click.secho("  Activate a license to unlock higher limits:", fg=theme.MUTED)
-        click.secho("    glyphh license activate '<jwt-token>'", fg=theme.MUTED)
+        click.secho("    license activate '<jwt-token>'", fg=theme.MUTED)
         click.echo()
         return
 
@@ -90,11 +90,11 @@ def license_refresh():
     token = get_token()
 
     if not runtime_id:
-        click.secho("  No runtime registered. Run: glyphh auth login", fg=theme.ERROR)
+        click.secho("  No runtime registered. Run: auth login", fg=theme.ERROR)
         return
 
     if not token:
-        click.secho("  Not logged in. Run: glyphh auth login", fg=theme.ERROR)
+        click.secho("  Not logged in. Run: auth login", fg=theme.ERROR)
         return
 
     api_url = get_api_url()
@@ -128,7 +128,7 @@ def license_refresh():
             click.secho(f"  Saved to: {path}", fg=theme.TEXT_DIM)
             click.echo()
         elif res.status_code == 401:
-            click.secho("  Session expired. Run: glyphh auth login", fg=theme.ERROR)
+            click.secho("  Session expired. Run: auth login", fg=theme.ERROR)
         elif res.status_code == 404:
             click.secho("  Runtime not found on Platform.", fg=theme.ERROR)
         else:
@@ -145,3 +145,27 @@ def license_deactivate():
         click.secho("  License removed. Runtime will use free tier.", fg=theme.SUCCESS)
     else:
         click.secho("  No license file found.", fg=theme.MUTED)
+
+
+# ── Handler for interactive shell ──
+
+def handle_license(func: str | None, args: str = ""):
+    """Route license subcommands from the interactive shell."""
+    if func == "show":
+        ctx = click.Context(license_show)
+        ctx.invoke(license_show)
+    elif func == "activate":
+        token = args.strip().strip("'\"") if args else ""
+        if not token:
+            click.secho("  usage: license activate '<jwt-token>'", fg=theme.MUTED)
+            return
+        ctx = click.Context(license_activate)
+        ctx.invoke(license_activate, token=token)
+    elif func == "deactivate":
+        ctx = click.Context(license_deactivate)
+        ctx.invoke(license_deactivate)
+    elif func == "refresh":
+        ctx = click.Context(license_refresh)
+        ctx.invoke(license_refresh)
+    else:
+        click.secho("  usage: license show | activate <token> | deactivate | refresh", fg=theme.MUTED)
