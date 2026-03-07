@@ -36,6 +36,9 @@ class GridSpinner:
         self._thread: threading.Thread | None = None
 
     def __enter__(self):
+        # Show first frame immediately (even if response is fast)
+        sys.stdout.write(f"\r{_CLR}{self._prefix}{_FRAMES[0]}{_RST} ")
+        sys.stdout.flush()
         self._running = True
         self._thread = threading.Thread(target=self._spin, daemon=True)
         self._thread.start()
@@ -53,7 +56,7 @@ class GridSpinner:
         i = 0
         while self._running:
             frame = _FRAMES[i % len(_FRAMES)]
-            sys.stdout.write(f"\r{self._prefix}{_CLR}{frame}{_RST} ")
+            sys.stdout.write(f"\r{_CLR}{self._prefix}{frame}{_RST} ")
             sys.stdout.flush()
             i += 1
             time.sleep(_INTERVAL)

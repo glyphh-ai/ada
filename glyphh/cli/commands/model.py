@@ -322,8 +322,8 @@ def model_undeploy(model_id):
 
         click.secho(f"  Undeploying {model_id}...", fg=theme.MUTED)
         with httpx.Client(timeout=30) as client:
-            res = client.post(
-                f"{runtime_url}/{org_id}/{model_id}/model/undeploy",
+            res = client.delete(
+                f"{runtime_url}/{org_id}/{model_id}/model",
                 headers=headers,
             )
 
