@@ -664,10 +664,10 @@ class ModelManager:
 
     @staticmethod
     def _read_source_files(model_dir: Path) -> Dict[str, str]:
-        """Read all .py source files from a model directory for DB storage.
+        """Read all .py source files + config.yaml from a model directory for DB storage.
 
         Returns a dict mapping filename to source text, e.g.
-        {"encoder.py": "...", "intent.py": "..."}.
+        {"encoder.py": "...", "intent.py": "...", "config.yaml": "..."}.
         """
         sources: Dict[str, str] = {}
         if not model_dir.is_dir():
@@ -679,6 +679,14 @@ class ModelManager:
                 sources[py_file.name] = py_file.read_text()
             except Exception:
                 pass
+        # Also store config.yaml and gql.json for runtime settings
+        for extra in ("config.yaml", "gql.json"):
+            extra_file = model_dir / extra
+            if extra_file.exists():
+                try:
+                    sources[extra] = extra_file.read_text()
+                except Exception:
+                    pass
         return sources
 
     @staticmethod

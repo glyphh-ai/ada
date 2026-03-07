@@ -302,6 +302,7 @@ class NLQueryService:
         auto_schema_matcher: Optional['AutoSchemaMatcher'] = None,
         assess_query_fn: Optional[Any] = None,
         min_gap: float = 0.03,
+        two_stage: bool = False,
         cognitive_loop_enabled: bool = False,
         cognitive_loop_config: Optional[Dict] = None,
     ):
@@ -320,6 +321,9 @@ class NLQueryService:
             min_gap: Minimum score gap between top-1 and top-2 similarity results
                      for a DONE response.  Queries where all top results cluster
                      within this band return ASK for disambiguation.
+            two_stage: If True, the model uses two-stage queries (exemplar match →
+                       GQL procedure).  Gap analysis is skipped because stage 1 is
+                       just routing — stage 2 results are the final answer.
             cognitive_loop_enabled: If True, route queries through CognitiveLoop
                                    after similarity search (adds memory, slot
                                    extraction, confidence blending).
@@ -332,6 +336,7 @@ class NLQueryService:
         self._auto_schema_matcher = auto_schema_matcher
         self._assess_query_fn = assess_query_fn
         self._min_gap = min_gap
+        self._two_stage = two_stage
         self._cognitive_loop_enabled = cognitive_loop_enabled
         self._cognitive_loop_config = cognitive_loop_config or {}
         # Cache for Stage 2 GQL storage per model — avoids reloading all
@@ -395,6 +400,26 @@ class NLQueryService:
             return proc.get("gql")
         return None
 
+    async def _load_source_files_from_db(
+        self, org_id: str, model_id: str,
+    ) -> Optional[dict]:
+        """Load source_files from model_configs DB table (fallback for no-disk)."""
+        try:
+            from domains.models.db_models import ModelConfig
+            from sqlalchemy import select
+            mgr = self.query_service._model_manager
+            async with mgr._session_factory() as session:
+                result = await session.execute(
+                    select(ModelConfig.source_files).where(
+                        ModelConfig.org_id == org_id,
+                        ModelConfig.model_id == model_id,
+                    )
+                )
+                sf = result.scalar_one_or_none()
+            return sf if isinstance(sf, dict) else None
+        except Exception:
+            return None
+
     async def _resolve_gql_template(
         self,
         org_id: str,
@@ -407,6 +432,8 @@ class NLQueryService:
           1. Per-exemplar inline gql_query
           2. Per-exemplar gql_id → gql.json procedure
           3. config.yaml gql_query_default → gql.json procedure or inline GQL
+
+        Falls back to DB source_files when files aren't on disk (Heroku).
         """
         # 1. Per-exemplar inline gql_query
         gql = matched_metadata.get("gql_query")
@@ -418,11 +445,20 @@ class NLQueryService:
             loaded_model = await self.query_service._model_manager.get_model(org_id, model_id)
         except Exception:
             return None
-        if not loaded_model or not hasattr(loaded_model, "model_path") or not loaded_model.model_path:
-            return None
 
-        model_path = loaded_model.model_path
-        procedures = self._load_gql_procedures(model_path)
+        model_path = getattr(loaded_model, "model_path", None) if loaded_model else None
+        procedures = self._load_gql_procedures(model_path) if model_path else {}
+
+        # Fallback: load gql.json from DB source_files
+        if not procedures:
+            source_files = await self._load_source_files_from_db(org_id, model_id)
+            if source_files and "gql.json" in source_files:
+                try:
+                    import json
+                    procedures = json.loads(source_files["gql.json"])
+                except Exception:
+                    pass
+
         logger.debug(
             f"GQL resolution for {org_id}/{model_id}: "
             f"model_path={model_path}, procedures={list(procedures.keys())}"
@@ -436,21 +472,28 @@ class NLQueryService:
                 return resolved
 
         # 3. config.yaml gql_query_default → procedure ID or inline GQL
+        config_raw = None
         try:
             import yaml
-            for path in self._resolve_model_paths(model_path):
-                config_path = path / "config.yaml"
-                if config_path.exists():
-                    with open(config_path) as f:
-                        raw = yaml.safe_load(f) or {}
-                    default = raw.get("gql_query_default")
-                    if default:
-                        # Check if it's a procedure ID reference
-                        resolved = self._resolve_procedure_id(default, procedures)
-                        if resolved:
-                            return resolved
-                        # Otherwise treat as inline GQL
-                        return default
+            if model_path:
+                for path in self._resolve_model_paths(model_path):
+                    config_path = path / "config.yaml"
+                    if config_path.exists():
+                        with open(config_path) as f:
+                            config_raw = yaml.safe_load(f) or {}
+                        break
+            # Fallback: config.yaml from DB source_files
+            if config_raw is None:
+                source_files = await self._load_source_files_from_db(org_id, model_id)
+                if source_files and "config.yaml" in source_files:
+                    config_raw = yaml.safe_load(source_files["config.yaml"]) or {}
+            if config_raw:
+                default = config_raw.get("gql_query_default")
+                if default:
+                    resolved = self._resolve_procedure_id(default, procedures)
+                    if resolved:
+                        return resolved
+                    return default
         except Exception:
             pass
 
@@ -695,8 +738,10 @@ class NLQueryService:
             # Step 1b: Gap analysis — if top results cluster within min_gap,
             # the query is ambiguous.  Return ASK with the top candidates.
             # Skip when confirmed=True (user already picked from disambiguation).
+            # Skip for two-stage models — stage 1 is routing, stage 2 produces
+            # the final list.  Clustered exemplar scores are expected.
             top_scores = _extract_top_scores(fact_tree)
-            if not confirmed and len(top_scores) >= 2 and (top_scores[0] - top_scores[1]) < self._min_gap:
+            if not self._two_stage and not confirmed and len(top_scores) >= 2 and (top_scores[0] - top_scores[1]) < self._min_gap:
                 top_matches = _extract_top_matches(fact_tree, n=3)
                 logger.info(
                     f"Gap too small ({top_scores[0]:.3f} vs {top_scores[1]:.3f}) "
@@ -931,8 +976,9 @@ class NLQueryService:
         # override to ASK — UNLESS episodic memory confirms the top-1.
         # "Confirms" = recalled idea labels the same function as current
         # top-1 (raw cosine > 0.25 already gated by IdeaSpace.recall).
+        # Skip for two-stage models — stage 1 is routing, not disambiguation.
         passed_gap_gate = True
-        if step_result.action == "CALL" and len(top_matches) >= 2:
+        if not self._two_stage and step_result.action == "CALL" and len(top_matches) >= 2:
             gap = top_matches[0]["score"] - top_matches[1]["score"]
             if gap < self._min_gap:
                 recall_confirms = False

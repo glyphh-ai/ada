@@ -225,19 +225,37 @@ class MCPServer:
         }
     
     async def _load_model_config(self, org_id: str, model_id: str) -> dict:
-        """Load a model's config.yaml (cached per request)."""
+        """Load a model's config.yaml — tries disk first, falls back to DB source_files."""
+        import yaml
         try:
             loaded_model = await self._query_service._model_manager.get_model(
                 org_id, model_id,
             )
-            if not loaded_model or not loaded_model.model_path:
+            if not loaded_model:
                 return {}
-            import yaml
-            from pathlib import Path as _Path
-            mp = _Path(loaded_model.model_path)
-            cfg_path = (mp if mp.is_dir() else mp.parent) / "config.yaml"
-            if cfg_path.exists():
-                return yaml.safe_load(cfg_path.read_text()) or {}
+            # Try disk first
+            if loaded_model.model_path:
+                from pathlib import Path as _Path
+                mp = _Path(loaded_model.model_path)
+                cfg_path = (mp if mp.is_dir() else mp.parent) / "config.yaml"
+                if cfg_path.exists():
+                    return yaml.safe_load(cfg_path.read_text()) or {}
+            # Fallback: config.yaml stored in DB source_files (Heroku / no-disk)
+            mgr = self._query_service._model_manager
+            from domains.models.db_models import ModelConfig
+            from sqlalchemy import select
+            async with mgr._session_factory() as session:
+                result = await session.execute(
+                    select(ModelConfig.source_files).where(
+                        ModelConfig.org_id == org_id,
+                        ModelConfig.model_id == model_id,
+                    )
+                )
+                source_files = result.scalar_one_or_none()
+            if source_files and isinstance(source_files, dict):
+                config_text = source_files.get("config.yaml")
+                if config_text:
+                    return yaml.safe_load(config_text) or {}
         except Exception:
             pass
         return {}
@@ -436,35 +454,28 @@ class MCPServer:
         # and min_gap from config for gap-based disambiguation.
         min_gap = 0.03  # default; overridden by model's disambiguation.min_gap
         similarity_threshold = 0.5  # default; overridden by model's similarity.threshold
+        two_stage = False
         cognitive_loop_enabled = False
         cognitive_loop_config: dict = {}
-        try:
-            import yaml
-            cfg_path = None
-            if loaded_model.model_path:
-                from pathlib import Path as _Path
-                mp = _Path(loaded_model.model_path)
-                cfg_path = (mp if mp.is_dir() else mp.parent) / "config.yaml"
-            if cfg_path and cfg_path.exists():
-                _cfg = yaml.safe_load(cfg_path.read_text()) or {}
-                min_gap = _cfg.get("disambiguation", {}).get("min_gap", min_gap)
-                similarity_threshold = _cfg.get("similarity", {}).get("threshold", similarity_threshold)
-                # Cognitive loop: optional per-model
-                cl = _cfg.get("cognitive_loop", False)
-                if isinstance(cl, dict):
-                    cognitive_loop_enabled = cl.get("enabled", False)
-                    cognitive_loop_config = cl
-                elif cl:
-                    cognitive_loop_enabled = True
-                    cognitive_loop_config = {}
-        except Exception:
-            pass
+        _cfg = await self._load_model_config(org_id, model_id)
+        if _cfg:
+            min_gap = _cfg.get("disambiguation", {}).get("min_gap", min_gap)
+            similarity_threshold = _cfg.get("similarity", {}).get("threshold", similarity_threshold)
+            two_stage = bool(_cfg.get("gql_query_default"))
+            cl = _cfg.get("cognitive_loop", False)
+            if isinstance(cl, dict):
+                cognitive_loop_enabled = cl.get("enabled", False)
+                cognitive_loop_config = cl
+            elif cl:
+                cognitive_loop_enabled = True
+                cognitive_loop_config = {}
 
         nl_service = NLQueryService(
             query_service=self._query_service,
             confidence_threshold=similarity_threshold,
             assess_query_fn=getattr(loaded_model, "assess_query_fn", None),
             min_gap=min_gap,
+            two_stage=two_stage,
             cognitive_loop_enabled=cognitive_loop_enabled,
             cognitive_loop_config=cognitive_loop_config,
         )

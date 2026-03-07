@@ -24,7 +24,7 @@ CUSTOM_MODELS_DIR = RUNTIME_ROOT / "custom_models"
 
 
 def _read_source_files(model_dir: Path) -> dict[str, str] | None:
-    """Read all .py source files from a model directory for DB storage."""
+    """Read all .py source files + config.yaml from a model directory for DB storage."""
     sources: dict[str, str] = {}
     if not model_dir.is_dir():
         return None
@@ -35,6 +35,14 @@ def _read_source_files(model_dir: Path) -> dict[str, str] | None:
             sources[py_file.name] = py_file.read_text()
         except Exception:
             pass
+    # Also store config.yaml and gql.json for runtime settings
+    for extra in ("config.yaml", "gql.json"):
+        extra_file = model_dir / extra
+        if extra_file.exists():
+            try:
+                sources[extra] = extra_file.read_text()
+            except Exception:
+                pass
     return sources if sources else None
 
 
