@@ -181,6 +181,15 @@ def _match_nodes(ft):
     return []
 
 
+def _matched_exemplar(ft):
+    """Extract matched_exemplar from Execution Metadata data_context."""
+    for child in (ft or {}).get("children", []):
+        if child.get("description") == "Execution Metadata":
+            dc = child.get("data_context") or {}
+            return dc.get("matched_exemplar")
+    return None
+
+
 _STATE_COLOR = {
     "DONE":          "SUCCESS",
     "ASK":           "WARNING",
@@ -266,6 +275,24 @@ def _print_result(data):
         click.secho(f"  ✕  {msg}", fg=theme.ERROR)
         click.echo()
         return
+
+    # Matched exemplar (stage 1 pattern) — show before results
+    exemplar = _matched_exemplar(ft)
+    if exemplar:
+        conf = exemplar.get("confidence", 0)
+        label = exemplar.get("question") or exemplar.get("concept_text") or "—"
+        pct = conf * 100
+        filled = round(conf * 12)
+        bar = "█" * filled + "░" * (12 - filled)
+        click.echo(
+            click.style("   ▸ ", fg=theme.MUTED)
+            + click.style(f"{pct:>5.1f}%  ", fg=theme.ACCENT, bold=True)
+            + click.style(f"[{bar}]  ", fg=theme.TEXT_DIM)
+            + click.style(label, fg=theme.TEXT)
+        )
+        response_text = exemplar.get("response", "")
+        if response_text:
+            click.secho(f"                       {response_text}", fg=theme.TEXT_DIM)
 
     # Similarity search / list matches
     matches = _match_nodes(ft)
