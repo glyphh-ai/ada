@@ -36,7 +36,7 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - ${HOME}/.glyphh:/root/.glyphh:ro
+      - ${HOME}/.glyphh:/home/glyphh/.glyphh:ro
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health')\""]
       interval: 10s

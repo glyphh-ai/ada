@@ -43,8 +43,8 @@ def _inject_model_volume(compose_text: str, model_id: str) -> str:
     volume_line = f"      - .:/app/custom_models/{model_id}:ro"
     # Insert after the existing ~/.glyphh volume line
     compose_text = compose_text.replace(
-        "      - ${HOME}/.glyphh:/root/.glyphh:ro",
-        f"      - ${{HOME}}/.glyphh:/root/.glyphh:ro\n{volume_line}",
+        "      - ${HOME}/.glyphh:/home/glyphh/.glyphh:ro",
+        f"      - ${{HOME}}/.glyphh:/home/glyphh/.glyphh:ro\n{volume_line}",
     )
     return compose_text
 
