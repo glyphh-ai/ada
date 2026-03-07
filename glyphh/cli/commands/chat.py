@@ -336,8 +336,10 @@ def _do_query(ctx, query_text, tool="nl_query", stage="auto", confirmed=False):
     payload = {"tool": tool, "arguments": args}
 
     try:
-        with httpx.Client(timeout=30) as client:
-            res = client.post(url, json=payload, headers=ctx["headers"])
+        from ..spinner import GridSpinner
+        with GridSpinner():
+            with httpx.Client(timeout=30) as client:
+                res = client.post(url, json=payload, headers=ctx["headers"])
 
         if res.status_code == 200:
             return _print_result(res.json())

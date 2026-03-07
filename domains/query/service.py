@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
+from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from glyphh.fact_tree.builder import FactTree, Citation, FactNode
@@ -267,19 +268,41 @@ class QueryService:
         for k, v in query_filters.items():
             if k not in effective_filters:
                 effective_filters[k] = v
+
+        default_filter: dict = {}
+        # 1. Try filesystem: config.yaml in model directory
         try:
-            model_config_path = Path(loaded_model.model_path) / "config.yaml"
+            model_path = Path(loaded_model.model_path)
+            # If model_path is a .glyphh file, check parent directory
+            config_dir = model_path.parent if model_path.is_file() else model_path
+            model_config_path = config_dir / "config.yaml"
             if model_config_path.exists():
                 import yaml
                 with open(model_config_path) as _f:
                     _raw = yaml.safe_load(_f) or {}
                 default_filter = _raw.get("similarity", {}).get("default_filter") or {}
-                # Default filter only applies if not overridden by the caller
-                for k, v in default_filter.items():
-                    if k not in effective_filters:
-                        effective_filters[k] = v
         except Exception:
             pass
+
+        # 2. Fallback: read from DB-persisted encoder_config._similarity_config
+        if not default_filter:
+            try:
+                async with self._session_factory() as _sess:
+                    from domains.models.db_models import ModelConfig as _MC
+                    _row = (await _sess.execute(
+                        sa_select(_MC).where(
+                            _MC.org_id == org_id, _MC.model_id == model_id,
+                        )
+                    )).scalar_one_or_none()
+                    if _row and _row.encoder_config:
+                        _sim = _row.encoder_config.get("_similarity_config") or {}
+                        default_filter = _sim.get("default_filter") or {}
+            except Exception:
+                pass
+
+        for k, v in default_filter.items():
+            if k not in effective_filters:
+                effective_filters[k] = v
 
         # Fetch extra candidates for dedup — multiple exemplars per concept
         # are collapsed to the best-scoring one, so we need more than top_k.

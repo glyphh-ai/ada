@@ -226,6 +226,21 @@ class ModelManager:
         if model_dir.is_dir():
             source_files_dict = self._read_source_files(model_dir) or None
 
+        # Embed similarity config from config.yaml into encoder_config for DB persistence
+        # (allows default_filter to work even when config.yaml isn't on disk)
+        if model_dir.is_dir() and encoder_config_dict is not None:
+            try:
+                _cfg_path = model_dir / "config.yaml"
+                if _cfg_path.exists():
+                    import yaml
+                    with open(_cfg_path) as _f:
+                        _raw = yaml.safe_load(_f) or {}
+                    _sim_cfg = _raw.get("similarity")
+                    if _sim_cfg:
+                        encoder_config_dict["_similarity_config"] = _sim_cfg
+            except Exception:
+                pass
+
         # DB upsert first — if this fails, the old model stays intact in memory
         async with self._db_session_factory() as session:
             result = await session.execute(
@@ -405,6 +420,20 @@ class ModelManager:
         encoder_config_dict = None
         if hasattr(encoder_config, 'to_dict'):
             encoder_config_dict = encoder_config.to_dict()
+
+        # Embed similarity config from config.yaml into encoder_config for DB persistence
+        # (allows default_filter to work even when config.yaml isn't on disk)
+        try:
+            _cfg_path = model_dir / "config.yaml"
+            if _cfg_path.exists() and encoder_config_dict is not None:
+                import yaml
+                with open(_cfg_path) as _f:
+                    _raw = yaml.safe_load(_f) or {}
+                _sim_cfg = _raw.get("similarity")
+                if _sim_cfg:
+                    encoder_config_dict["_similarity_config"] = _sim_cfg
+        except Exception:
+            pass
 
         # Read source files for DB restore
         source_files_dict = self._read_source_files(model_dir)
