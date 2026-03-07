@@ -809,20 +809,14 @@ class NLQueryService:
                 match_meta = match_detail.get("metadata", {})
                 glyph_id = match_detail["glyph_id"]
 
-                # Skip Stage 2 for pattern records that have no per-exemplar
-                # GQL query.  Pattern records ARE the final answer — running
-                # the config-level gql_query_default against them would load
-                # every glyph into memory for no benefit.
-                is_pattern = match_meta.get("record_type") == "pattern"
-                has_own_gql = bool(
-                    match_meta.get("gql_query") or match_meta.get("gql_id")
+                # Resolve GQL template for Stage 2.
+                # Pattern records without a per-exemplar gql_query or a
+                # model-level gql_query_default are their own final answer
+                # (e.g. Pipedream).  But if gql_query_default exists (e.g.
+                # churn), patterns are routing — Stage 2 finds real data.
+                gql_template = await self._resolve_gql_template(
+                    org_id, model_id, match_meta,
                 )
-
-                gql_template = None
-                if not is_pattern or has_own_gql:
-                    gql_template = await self._resolve_gql_template(
-                        org_id, model_id, match_meta,
-                    )
 
                 if gql_template:
                     try:
