@@ -549,7 +549,7 @@ class NLQueryService:
 
     @staticmethod
     def _inject_stage2_filter(gql: str) -> str:
-        """Inject WHERE record_type != 'pattern' into a stage 2 GQL query.
+        """Inject WHERE record_type != "pattern" into a stage 2 GQL query.
 
         Stage 2 searches for data records, not exemplars (patterns).
         If the GQL already has a WHERE clause, leave it alone.
@@ -558,7 +558,7 @@ class NLQueryService:
         # Insert WHERE before LIMIT, THRESHOLD, AT LAYER, or end of string
         return re.sub(
             r"(FIND SIMILAR TO .+?)((?:\s+(?:AT LAYER|LIMIT|THRESHOLD))\b)",
-            r"\1 WHERE record_type != 'pattern'\2",
+            r'\1 WHERE record_type != "pattern"\2',
             gql,
             count=1,
             flags=re.IGNORECASE,
