@@ -152,6 +152,35 @@ class GlyphStorage:
             updated_at=glyph.updated_at,
         )
     
+    async def get_glyphs_by_ids(
+        self,
+        org_id: str,
+        model_id: str,
+        glyph_ids: List[UUID],
+    ) -> Dict[str, GlyphResponse]:
+        """Batch-fetch glyphs by ID. Returns {str(id): GlyphResponse}."""
+        if not glyph_ids:
+            return {}
+        result = await self._session.execute(
+            select(Glyph).where(
+                Glyph.org_id == org_id,
+                Glyph.model_id == model_id,
+                Glyph.id.in_(glyph_ids),
+            )
+        )
+        return {
+            str(g.id): GlyphResponse(
+                id=g.id,
+                org_id=g.org_id,
+                model_id=g.model_id,
+                concept_text=g.concept_text,
+                metadata=g.glyph_metadata,
+                created_at=g.created_at,
+                updated_at=g.updated_at,
+            )
+            for g in result.scalars().all()
+        }
+
     async def update_glyph(
         self,
         org_id: str,

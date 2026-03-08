@@ -247,7 +247,27 @@ class QueryService:
         
         # Get similarity service for this model
         similarity_service = self._get_similarity_service(loaded_model)
-        
+
+        # Read model config
+        config = await self._model_manager.get_config(org_id, model_id)
+        similarity_weights = config.similarity_weights
+
+        # Read query_scope from config.yaml: similarity.query_scope
+        # e.g. "semantic" or "semantic.context" — scopes NL query embedding
+        # to a specific layer/segment so irrelevant layers don't add noise.
+        query_scope: Optional[str] = None
+        try:
+            model_path = Path(loaded_model.model_path)
+            config_dir = model_path.parent if model_path.is_file() else model_path
+            model_config_path = config_dir / "config.yaml"
+            if model_config_path.exists():
+                import yaml
+                with open(model_config_path) as _f:
+                    _raw = yaml.safe_load(_f) or {}
+                query_scope = _raw.get("similarity", {}).get("query_scope")
+        except Exception:
+            pass
+
         # Encode query text using SDK encoder with lexicon matching.
         # encode_query may also return model-provided metadata filters
         # (e.g. app_slug extracted from the query text).
@@ -256,11 +276,8 @@ class QueryService:
             request.query,
             org_id=org_id,
             model_id=model_id,
+            query_scope=query_scope,
         )
-
-        # Get model config for weights
-        config = await self._model_manager.get_config(org_id, model_id)
-        similarity_weights = config.similarity_weights
 
         # Read default_filter from model's config.yaml (e.g. similarity.default_filter)
         # Merge: request filters > query filters > config defaults
@@ -311,14 +328,44 @@ class QueryService:
         async with self._session_factory() as session:
             storage = GlyphStorage(session)
 
-            # Use pgvector HNSW index for similarity search (fast, no limit issues)
-            results = await storage.similarity_search(
-                org_id=org_id,
-                model_id=model_id,
-                query_embedding=query_embedding,
-                top_k=fetch_k,
-                filters=effective_filters or None,
-            )
+            # When query_scope is set, search against layer/segment vectors
+            # in the GlyphVector table instead of the full cortex embedding.
+            if query_scope:
+                scope_parts = query_scope.split(".", 1)
+                scope_path = scope_parts[0]  # layer name for path filter
+                results = await storage.similarity_search_by_level(
+                    org_id=org_id,
+                    model_id=model_id,
+                    query_embedding=query_embedding,
+                    level="layer",
+                    path=scope_path,
+                    top_k=fetch_k,
+                )
+                # Convert (glyph_id, path, score) to (GlyphResponse, score)
+                # by fetching the full glyph records
+                glyph_ids = [gid for gid, _, _ in results]
+                score_by_id = {str(gid): score for gid, _, score in results}
+                glyph_map = await storage.get_glyphs_by_ids(org_id, model_id, glyph_ids)
+                # Apply metadata filters
+                results = []
+                for gid_str, glyph_resp in glyph_map.items():
+                    if gid_str not in score_by_id:
+                        continue
+                    if effective_filters:
+                        meta = glyph_resp.metadata or {}
+                        if not all(str(meta.get(k)) == str(v) for k, v in effective_filters.items()):
+                            continue
+                    results.append((glyph_resp, score_by_id[gid_str]))
+                results.sort(key=lambda x: x[1], reverse=True)
+            else:
+                # Default: search against full cortex embedding
+                results = await storage.similarity_search(
+                    org_id=org_id,
+                    model_id=model_id,
+                    query_embedding=query_embedding,
+                    top_k=fetch_k,
+                    filters=effective_filters or None,
+                )
 
             scored_results = []
             for glyph_response, base_similarity in results:
@@ -648,6 +695,7 @@ class QueryService:
         query: str,
         org_id: Optional[str] = None,
         model_id: Optional[str] = None,
+        query_scope: Optional[str] = None,
     ) -> tuple:
         """
         Encode query text using the model's custom encode_query_fn.
@@ -658,6 +706,12 @@ class QueryService:
         dict (e.g. ``{"app_slug": "slack_bot"}``).  These are extracted
         before encoding and returned separately so the caller can apply
         them as metadata filters on the similarity search.
+
+        If *query_scope* is set (e.g. ``"semantic"`` or
+        ``"semantic.context"``), only that layer or segment cortex is
+        used as the query embedding — enabling models to route NL queries
+        through a specific layer while keeping the full glyph for data
+        matching.
         """
         try:
             loaded_model = None
@@ -678,11 +732,21 @@ class QueryService:
                     attrs = concept.get("attributes", concept)
                     concept = _Concept(name=name, attributes=attrs)
                 glyph = encoder.encode(concept)
+
+                # If query_scope is set, use only that layer/segment cortex
+                if query_scope:
+                    scoped = self._extract_scoped_cortex(glyph, query_scope)
+                    if scoped is not None:
+                        return scoped.astype(float).tolist(), query_filters
+                    logger.warning(
+                        "query_scope '%s' not found in glyph; falling back to full cortex",
+                        query_scope,
+                    )
+
+                # Default: bundle all non-temporal layers.
                 # Exclude the _temporal layer from the query embedding so that
                 # similarity scores are deterministic (temporal uses datetime.now()
                 # which changes every call, making scores non-deterministic).
-                # Stored glyphs have a fixed ingestion timestamp — the query should
-                # match their semantic/metrics layers only.
                 non_temporal = [
                     layer.cortex.data
                     for name, layer in glyph.layers.items()
@@ -713,6 +777,37 @@ class QueryService:
                 reason=f"Failed to encode: {e}"
             )
     
+    @staticmethod
+    def _extract_scoped_cortex(glyph: Any, scope: str) -> Any:
+        """Extract the cortex vector for a given scope path.
+
+        *scope* is ``"layer_name"`` or ``"layer_name.segment_name"``.
+        Returns the cortex ndarray or None if not found.
+        """
+        parts = scope.split(".", 1)
+        layer_name = parts[0]
+        segment_name = parts[1] if len(parts) > 1 else None
+
+        layer = glyph.layers.get(layer_name) if hasattr(glyph, "layers") else None
+        if layer is None:
+            return None
+
+        if segment_name is None:
+            return layer.cortex.data if hasattr(layer, "cortex") and layer.cortex is not None else None
+
+        # Navigate to segment
+        if hasattr(layer, "segments"):
+            seg = layer.segments.get(segment_name) if isinstance(layer.segments, dict) else None
+            if seg is None:
+                # Try iterating if segments is a list
+                for s in (layer.segments if not isinstance(layer.segments, dict) else []):
+                    if getattr(s, "name", None) == segment_name:
+                        seg = s
+                        break
+            if seg is not None and hasattr(seg, "cortex") and seg.cortex is not None:
+                return seg.cortex.data
+        return None
+
     def _compute_security_weight(
         self,
         glyph: GlyphResponse,
