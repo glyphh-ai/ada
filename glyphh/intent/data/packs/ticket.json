@@ -1,0 +1,59 @@
+{
+  "pack": "ticket",
+  "description": "Ticket management: create, resolve, track, and manage support tickets and issues",
+  "actions": [
+    {"canonical": "create_ticket", "synonyms": ["create ticket", "new ticket", "open ticket", "file ticket", "submit ticket", "raise ticket", "draft ticket"], "phrases": ["create a new ticket", "open a ticket", "file a support ticket", "submit a ticket", "raise a ticket for", "draft a ticket about"]},
+    {"canonical": "resolve_ticket", "synonyms": ["resolve ticket", "fix ticket", "mark resolved", "close as resolved", "resolution", "mark as resolved"], "phrases": ["resolve the ticket", "mark ticket as resolved", "add resolution to ticket", "resolve the issue", "ticket resolution"]},
+    {"canonical": "get_ticket", "synonyms": ["get ticket", "view ticket", "check ticket", "ticket details", "ticket info", "show ticket", "retrieve ticket"], "phrases": ["get ticket details", "view the ticket", "check ticket status", "show ticket information", "retrieve ticket by id"]},
+    {"canonical": "close_ticket", "synonyms": ["close ticket", "close issue", "close the ticket", "mark closed", "archive ticket"], "phrases": ["close the ticket", "close the issue", "mark ticket as closed", "archive the ticket"]},
+    {"canonical": "edit_ticket", "synonyms": ["edit ticket", "update ticket", "modify ticket", "change ticket", "ticket update"], "phrases": ["edit the ticket", "update ticket details", "modify the ticket", "change ticket priority", "update the ticket"]},
+    {"canonical": "get_user_tickets", "synonyms": ["my tickets", "user tickets", "list tickets", "show tickets", "all tickets", "assigned tickets"], "phrases": ["show my tickets", "list all my tickets", "view my open tickets", "get user tickets", "show all tickets"]},
+    {"canonical": "ticket_login", "synonyms": ["ticket login", "log in to ticket system", "sign in tickets", "ticket sign in", "authenticate ticket"], "phrases": ["log in to ticket system", "sign in to tickets", "authenticate with ticket system", "ticket login"]},
+    {"canonical": "ticket_logout", "synonyms": ["ticket logout", "log out of tickets", "sign out tickets", "ticket sign out"], "phrases": ["log out of ticket system", "sign out of tickets", "ticket logout"]},
+    {"canonical": "ticket_get_login_status", "synonyms": ["ticket login status", "am i logged in to tickets", "check ticket login", "ticket session status"], "phrases": ["check ticket login status", "am i logged in to tickets", "is my ticket session active", "ticket authentication status"]}
+  ],
+  "targets": [
+    {"canonical": "ticket", "synonyms": ["ticket", "issue", "bug", "task", "request", "support ticket", "incident"], "phrases": ["support ticket", "bug report", "issue tracker", "service request"]},
+    {"canonical": "priority", "synonyms": ["priority", "severity", "urgency", "importance", "critical", "high priority"], "phrases": ["ticket priority", "issue severity", "high priority ticket"]},
+    {"canonical": "status", "synonyms": ["status", "state", "progress", "open", "closed", "resolved", "pending"], "phrases": ["ticket status", "issue state", "current status"]},
+    {"canonical": "resolution", "synonyms": ["resolution", "fix", "solution", "workaround", "root cause"], "phrases": ["ticket resolution", "issue fix", "proposed solution"]}
+  ],
+  "phrases": [
+    {"phrase": "create a new ticket", "action": "create_ticket"},
+    {"phrase": "open a ticket", "action": "create_ticket"},
+    {"phrase": "file a support ticket", "action": "create_ticket"},
+    {"phrase": "submit a ticket", "action": "create_ticket"},
+    {"phrase": "raise a ticket", "action": "create_ticket"},
+    {"phrase": "resolve the ticket", "action": "resolve_ticket"},
+    {"phrase": "mark ticket as resolved", "action": "resolve_ticket"},
+    {"phrase": "add resolution to ticket", "action": "resolve_ticket"},
+    {"phrase": "get ticket details", "action": "get_ticket"},
+    {"phrase": "view the ticket", "action": "get_ticket"},
+    {"phrase": "check ticket status", "action": "get_ticket"},
+    {"phrase": "show ticket information", "action": "get_ticket"},
+    {"phrase": "close the ticket", "action": "close_ticket"},
+    {"phrase": "close the issue", "action": "close_ticket"},
+    {"phrase": "mark ticket as closed", "action": "close_ticket"},
+    {"phrase": "edit the ticket", "action": "edit_ticket"},
+    {"phrase": "update ticket details", "action": "edit_ticket"},
+    {"phrase": "modify the ticket", "action": "edit_ticket"},
+    {"phrase": "change ticket priority", "action": "edit_ticket"},
+    {"phrase": "show my tickets", "action": "get_user_tickets"},
+    {"phrase": "list all my tickets", "action": "get_user_tickets"},
+    {"phrase": "view my open tickets", "action": "get_user_tickets"},
+    {"phrase": "get user tickets", "action": "get_user_tickets"},
+    {"phrase": "log in to ticket system", "action": "ticket_login"},
+    {"phrase": "sign in to tickets", "action": "ticket_login"},
+    {"phrase": "log out of ticket system", "action": "ticket_logout"},
+    {"phrase": "sign out of tickets", "action": "ticket_logout"},
+    {"phrase": "check ticket login status", "action": "ticket_get_login_status"},
+    {"phrase": "am i logged in to tickets", "action": "ticket_get_login_status"}
+  ],
+  "domain_signals": {
+    "ticket": {
+      "ticket": 3, "issue": 2, "bug": 3, "jira": 3, "support ticket": 3,
+      "priority": 2, "resolved": 3, "closed": 2, "incident": 3,
+      "helpdesk": 3, "service desk": 3, "backlog": 3, "sprint": 3
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "pack": "social",
+  "description": "Social media domain knowledge — authentication prerequisites for posting/messaging.",
+
+  "transitions": [
+    {
+      "name": "twitter_auth",
+      "directing_actions": [],
+      "operating_actions": ["post_tweet", "comment", "retweet", "mention"],
+      "prerequisite": "authenticate_twitter",
+      "description": "Twitter posting/interaction requires authentication first"
+    }
+  ],
+
+  "patterns": [
+    {
+      "label": "authenticate_twitter_needed",
+      "features": {"query_tokens": "tweet post twitter share broadcast draft comment retweet mention"},
+      "description": "Twitter interactions need authentication"
+    },
+    {
+      "label": "authenticate_twitter_not_needed",
+      "features": {"query_tokens": "view read check timeline feed browse"},
+      "description": "Read-only Twitter operations don't need auth"
+    }
+  ]
+}

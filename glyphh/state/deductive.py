@@ -17,7 +17,8 @@ When target_vector ≠ state_vector (cosine divergence), the layer resolves the
 mismatch against a transition library to identify prerequisites. The transition
 library is pre-seeded and learns via Hebbian reinforcement.
 
-Three mismatch detection levels (checked in order):
+Four mismatch detection levels (checked in order):
+  0. **Proactive**: query implies directing/operating action + location context
   1. **Explicit**: target-vs-state cosine divergence (classic deductive)
   2. **Temporal stagnation**: state unchanged despite directing actions (temporal)
   3. **Beam divergence**: predicted state trajectory diverges from actual (beam search)
@@ -180,6 +181,19 @@ class DeductiveLayer:
         self._operating_phrases: list[tuple[str, str]] = []  # (phrase, canonical)
         self._operating_synonyms: dict[str, str] = {}  # word → canonical
 
+        # Directing action NL mapping — also loaded from intent packs.
+        # Used for proactive prerequisite detection: when a query implies
+        # a directing action + a location context, the prerequisite fires
+        # without needing cross-turn history.
+        self._directing_phrases: list[tuple[str, str]] = []  # (phrase, canonical)
+        self._directing_synonyms: dict[str, str] = {}  # word → canonical
+
+        # Location/context phrases — NL patterns that signal the query
+        # refers to a different location than current state.
+        # Loaded from prerequisite action's synonyms/phrases in intent packs.
+        self._prerequisite_phrases: list[tuple[str, str]] = []  # (phrase, canonical)
+        self._prerequisite_synonyms: dict[str, str] = {}  # word → canonical
+
         # Load domain packs — known transitions, no manual registration needed
         if packs:
             self._load_packs(packs)
@@ -224,12 +238,16 @@ class DeductiveLayer:
         self._load_intent_synonyms(packs)
 
     def _load_intent_synonyms(self, packs: list[str]) -> None:
-        """Load NL synonyms for operating actions from intent packs.
+        """Load NL synonyms for operating, directing, and prerequisite actions.
 
-        Maps the intent pack's synonym/phrase definitions back to the
-        operating action function names registered via transitions. This
-        lets the deductive layer recognise NL queries as implying an
-        operating action from the registered vocabulary.
+        Maps the intent pack's synonym/phrase definitions back to action
+        function names registered via transitions. This lets the deductive
+        layer recognise NL queries as implying specific action types.
+
+        Three categories are loaded:
+          - Operating actions: actions that need the prerequisite (grep, cat, ...)
+          - Directing actions: actions that redirect state (mv, cp, mkdir, ...)
+          - Prerequisite actions: the prerequisite itself (cd, authenticate, ...)
 
         Phrase matching (multi-word) is checked first; single-word
         synonyms serve as fallback.
@@ -246,24 +264,53 @@ class DeductiveLayer:
 
             for action_def in intent_pack.get("actions", []):
                 canonical = action_def.get("canonical", "")
-                if canonical not in self._operating_verbs:
+
+                # Determine which category this action belongs to
+                is_operating = canonical in self._operating_verbs
+                is_directing = canonical in self._directing_actions
+                is_prerequisite = canonical in self._resolving_actions
+
+                if not (is_operating or is_directing or is_prerequisite):
                     continue
 
-                # Multi-word phrases (checked via substring in query)
                 for phrase in action_def.get("phrases", []):
-                    self._operating_phrases.append((phrase.lower(), canonical))
+                    phrase_lower = phrase.lower()
+                    if is_operating:
+                        self._operating_phrases.append((phrase_lower, canonical))
+                    if is_directing:
+                        self._directing_phrases.append((phrase_lower, canonical))
+                    if is_prerequisite:
+                        self._prerequisite_phrases.append((phrase_lower, canonical))
 
-                # Single-word synonyms (checked via word intersection)
                 for syn in action_def.get("synonyms", []):
                     syn_lower = syn.lower()
-                    # Multi-word synonyms → also add as phrases
                     if " " in syn_lower:
-                        self._operating_phrases.append((syn_lower, canonical))
+                        # Multi-word synonyms → treat as phrases
+                        if is_operating:
+                            self._operating_phrases.append((syn_lower, canonical))
+                        if is_directing:
+                            self._directing_phrases.append((syn_lower, canonical))
+                            # Also register the leading verb as a single-word
+                            # synonym for directing detection. Multi-word phrases
+                            # like "move file" won't substring-match when there's
+                            # content between "move" and "file" in the query.
+                            lead = syn_lower.split()[0]
+                            if len(lead) > 2 and lead not in self._directing_synonyms:
+                                self._directing_synonyms[lead] = canonical
+                        if is_prerequisite:
+                            self._prerequisite_phrases.append((syn_lower, canonical))
                     else:
-                        self._operating_synonyms[syn_lower] = canonical
+                        if is_operating:
+                            self._operating_synonyms[syn_lower] = canonical
+                        if is_directing:
+                            self._directing_synonyms[syn_lower] = canonical
+                        if is_prerequisite:
+                            self._prerequisite_synonyms[syn_lower] = canonical
 
         # Sort phrases longest-first for greedy matching
         self._operating_phrases.sort(key=lambda x: len(x[0]), reverse=True)
+        self._directing_phrases.sort(key=lambda x: len(x[0]), reverse=True)
+        self._prerequisite_phrases.sort(key=lambda x: len(x[0]), reverse=True)
 
     def _state_vec(self, state: str) -> np.ndarray:
         """Encode a state label as a deterministic bipolar vector."""
@@ -430,6 +477,86 @@ class DeductiveLayer:
         # Level 3: literal function-name matching
         return bool(words & self._operating_verbs)
 
+    def _query_implies_directing(self, query: str) -> bool:
+        """Check if the query implies a directing action (mv, cp, mkdir, touch, ...).
+
+        Mirrors _query_implies_operating but for directing actions.
+        Used by proactive deduction to detect when a query contains
+        both a directing action and a location context.
+        """
+        query_lower = query.lower()
+
+        # Level 1: phrase matching (longest match first)
+        for phrase, canonical in self._directing_phrases:
+            if phrase in query_lower:
+                return True
+
+        # Level 2: single-word synonym matching
+        words = set(re.sub(r"[^a-z0-9\s]", "", query_lower).split())
+        if words & set(self._directing_synonyms.keys()):
+            return True
+
+        # Level 3: literal action-name matching
+        return bool(words & self._directing_actions)
+
+    def _query_implies_prerequisite(self, query: str) -> bool:
+        """Check if the query implies a location/context change (cd, navigate, ...).
+
+        Detects NL patterns that signal the query refers to a different
+        location or context than the current state. Uses the prerequisite
+        action's synonyms/phrases from intent packs.
+
+        Also detects implicit location references like "within X directory",
+        "in the Y folder", "to the Z path" — these indicate a prerequisite
+        is needed even when not explicitly stated.
+        """
+        query_lower = query.lower()
+
+        # Level 1: explicit prerequisite phrases ("navigate to folder", "go to directory")
+        for phrase, canonical in self._prerequisite_phrases:
+            if phrase in query_lower:
+                return True
+
+        # Level 2: single-word synonym matching
+        words = set(re.sub(r"[^a-z0-9\s]", "", query_lower).split())
+        if words & set(self._prerequisite_synonyms.keys()):
+            return True
+
+        # Level 3: implicit location context patterns (domain-agnostic)
+        # These detect NL patterns that reference a specific named
+        # location/context, indicating navigation is needed.
+        # Excludes "current directory", "same directory", "this folder" etc.
+        # which indicate the user is already in the right place.
+        _STAY_PATTERNS = re.compile(
+            r"\b(?:current|same|this|my|present|existing)\s+(?:directory|folder|dir)\b"
+        )
+        if _STAY_PATTERNS.search(query_lower):
+            # "current directory" etc. — no navigation needed.
+            # But still check if the query ALSO references another directory
+            # (e.g. "in current directory, move to archive folder").
+            pass  # fall through to location patterns below
+
+        _LOCATION_PATTERNS = [
+            r"\b(?:within|inside|into|from)\s+(?:the\s+)?(?:\w+\s+)?(?:directory|folder|dir)\b",
+            r"\b(?:go\s+(?:to|into)|open|enter|head\s+(?:to|over))\s+",
+            r"\b(?:to|in)\s+(?:the\s+)?'\w+'\s*(?:directory|folder)?\b",
+            r"\b(?:directory|folder)\s+(?:named?|called?)\s+",
+            r"\bin\s+(?:the\s+)?\w+\s+(?:directory|folder)\b",
+        ]
+        # Only match if NOT exclusively a "current/same directory" reference
+        if not _STAY_PATTERNS.search(query_lower):
+            for pattern in _LOCATION_PATTERNS:
+                if re.search(pattern, query_lower):
+                    return True
+        else:
+            # Has "current directory" but check if also mentions another location
+            for pattern in _LOCATION_PATTERNS:
+                m = re.search(pattern, query_lower)
+                if m and not _STAY_PATTERNS.search(m.group(0)):
+                    return True
+
+        return False
+
     def _compute_stagnation(self) -> float:
         """Detect state stagnation during directing actions.
 
@@ -531,12 +658,13 @@ class DeductiveLayer:
     ) -> dict:
         """COMPARE + RESOLVE: Detect state mismatch, identify prerequisites.
 
-        Three-level mismatch detection (checked in order):
+        Four-level mismatch detection (checked in order):
+          0. Proactive: query implies directing action + location context
           1. Explicit target-vs-state cosine divergence (classic deductive)
           2. Temporal stagnation: state unchanged despite directing actions
           3. Beam divergence: predicted state trajectory diverges from actual
 
-        All three are domain-agnostic — they use registered transitions and
+        All four are domain-agnostic — they use registered transitions and
         observed state labels, not hard-coded domain knowledge.
 
         Args:
@@ -557,6 +685,27 @@ class DeductiveLayer:
             "target": None,
             "confidence": 0.0,
         }
+
+        # ── Level 0: Proactive prerequisite detection ──
+        # When the query itself implies a directing action (mv, cp, mkdir, ...)
+        # AND references a location/context (directory, folder, path), the
+        # prerequisite is needed proactively — no cross-turn history required.
+        #
+        # Also fires when the query implies an operating action (grep, cat, ...)
+        # with a location context — the operation needs navigation first.
+        #
+        # This handles the common case: "Move file within document directory"
+        # → need cd('document') before mv(), detected from the query alone.
+        if self._transitions and self._query_implies_prerequisite(query):
+            implies_directing = self._query_implies_directing(query)
+            implies_operating = self._query_implies_operating(query)
+            if implies_directing or implies_operating:
+                # Find the matching transition's prerequisite
+                for name, transition in self._transitions.items():
+                    result["prerequisites"] = [transition.prerequisite]
+                    result["mismatch_score"] = 1.0
+                    result["confidence"] = 0.75
+                    return result
 
         current_vec = self._state_vec(current_state)
 

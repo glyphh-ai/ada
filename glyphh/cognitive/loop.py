@@ -285,6 +285,21 @@ class CognitiveLoop:
                 action, target, query, deduction, recalled,
             )
             signals["resolve_source"] = "rule_based"
+
+        # Inject deductive prerequisites regardless of resolve path.
+        # The deductive layer detects when the query implies a location/context
+        # change — this applies whether functions came from classifier or rules.
+        if deduction.get("prerequisites"):
+            for prereq in deduction["prerequisites"]:
+                resolved = prereq
+                if prereq not in self._available_funcs:
+                    for fname in self._available_funcs:
+                        if fname.endswith(f".{prereq}"):
+                            resolved = fname
+                            break
+                if resolved in self._available_funcs and resolved not in functions:
+                    functions.insert(0, resolved)
+
         signals["resolved_functions"] = functions
 
         if not functions:
@@ -479,8 +494,16 @@ class CognitiveLoop:
         # 4. Deductive prerequisites
         if deduction.get("prerequisites"):
             for prereq in deduction["prerequisites"]:
-                if prereq in self._available_funcs and prereq not in functions:
-                    functions.insert(0, prereq)
+                # Resolve bare prerequisite name (e.g. "cd") to class-prefixed
+                # name (e.g. "GorillaFileSystem.cd") by matching available funcs.
+                resolved = prereq
+                if prereq not in self._available_funcs:
+                    for fname in self._available_funcs:
+                        if fname.endswith(f".{prereq}"):
+                            resolved = fname
+                            break
+                if resolved in self._available_funcs and resolved not in functions:
+                    functions.insert(0, resolved)
 
         # 5. Inductive prediction for trigger function
         if (trigger_func and trigger_func not in functions

@@ -1,0 +1,34 @@
+{
+  "pack": "messaging",
+  "description": "Messaging domain knowledge — authentication prerequisites for sending messages.",
+
+  "transitions": [
+    {
+      "name": "login_before_send",
+      "directing_actions": [],
+      "operating_actions": ["send_message", "delete_message", "view_messages_sent"],
+      "prerequisite": "message_login",
+      "description": "Messaging operations require login first"
+    },
+    {
+      "name": "user_id_before_send",
+      "directing_actions": [],
+      "operating_actions": ["send_message"],
+      "prerequisite": "get_user_id",
+      "description": "Sending a message requires knowing the recipient user ID"
+    }
+  ],
+
+  "patterns": [
+    {
+      "label": "message_login_needed",
+      "features": {"query_tokens": "send message text compose write dispatch contact reach out"},
+      "description": "Messaging operations need authentication"
+    },
+    {
+      "label": "get_user_id_needed",
+      "features": {"query_tokens": "send message to user contact person recipient"},
+      "description": "Sending messages needs user ID lookup"
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "pack": "vehicle",
+  "description": "Vehicle control domain knowledge — safety prerequisites and operational chains.",
+
+  "transitions": [
+    {
+      "name": "engine_start_safety",
+      "directing_actions": [],
+      "operating_actions": ["startEngine", "start_engine"],
+      "prerequisite": "pressBrakePedal",
+      "description": "Starting engine requires brake pedal pressed first"
+    },
+    {
+      "name": "brake_before_engine",
+      "directing_actions": [],
+      "operating_actions": ["pressBrakePedal"],
+      "prerequisite": "lockDoors",
+      "description": "Pressing brake requires doors locked first (safety chain: lock→brake→start)"
+    },
+    {
+      "name": "zipcode_before_distance",
+      "directing_actions": [],
+      "operating_actions": ["estimate_distance", "estimate_drive_feasibility_by_mileage"],
+      "prerequisite": "get_zipcode_based_on_city",
+      "description": "Distance estimation requires zipcode lookup for origin and destination cities"
+    },
+    {
+      "name": "distance_before_feasibility",
+      "directing_actions": [],
+      "operating_actions": ["estimate_drive_feasibility_by_mileage"],
+      "prerequisite": "estimate_distance",
+      "description": "Drive feasibility check requires distance estimation first"
+    },
+    {
+      "name": "fuel_before_feasibility",
+      "directing_actions": [],
+      "operating_actions": ["estimate_drive_feasibility_by_mileage"],
+      "prerequisite": "fillFuelTank",
+      "description": "Drive feasibility may require fuel tank filled first"
+    },
+    {
+      "name": "tire_before_shop",
+      "directing_actions": [],
+      "operating_actions": ["find_nearest_tire_shop"],
+      "prerequisite": "check_tire_pressure",
+      "description": "Finding tire shop requires checking tire pressure first"
+    }
+  ],
+
+  "patterns": [
+    {
+      "label": "lockDoors_needed",
+      "features": {"query_tokens": "start engine turn on car ignition drive ready prepare set off embark journey"},
+      "description": "Engine start chain needs lock→brake→start"
+    },
+    {
+      "label": "get_zipcode_based_on_city_needed",
+      "features": {"query_tokens": "distance between cities how far drive from to trip journey travel estimate feasibility"},
+      "description": "Distance/feasibility operations need zipcode lookup"
+    },
+    {
+      "label": "fillFuelTank_needed",
+      "features": {"query_tokens": "fill fuel tank refuel gas up top off fill up before driving"},
+      "description": "Fuel operations"
+    },
+    {
+      "label": "check_tire_pressure_needed",
+      "features": {"query_tokens": "tire pressure check tires inspect flat low pressure"},
+      "description": "Tire check triggers shop lookup"
+    }
+  ]
+}

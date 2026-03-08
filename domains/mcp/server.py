@@ -459,13 +459,18 @@ class MCPServer:
         # and min_gap from config for gap-based disambiguation.
         min_gap = 0.03  # default; overridden by model's disambiguation.min_gap
         similarity_threshold = 0.5  # default; overridden by model's similarity.threshold
+        top_k = 10  # default; overridden by model's similarity.top_k
         two_stage = False
+        result_field = None  # metadata field to surface as display result
         cognitive_loop_enabled = False
         cognitive_loop_config: dict = {}
         _cfg = await self._load_model_config(org_id, model_id)
         if _cfg:
             min_gap = _cfg.get("disambiguation", {}).get("min_gap", min_gap)
-            similarity_threshold = _cfg.get("similarity", {}).get("threshold", similarity_threshold)
+            sim_cfg = _cfg.get("similarity", {})
+            similarity_threshold = sim_cfg.get("threshold", similarity_threshold)
+            top_k = sim_cfg.get("top_k", top_k)
+            result_field = sim_cfg.get("result_field")
             two_stage = bool(_cfg.get("gql_query_default"))
             cl = _cfg.get("cognitive_loop", False)
             if isinstance(cl, dict):
@@ -480,7 +485,9 @@ class MCPServer:
             confidence_threshold=similarity_threshold,
             assess_query_fn=getattr(loaded_model, "assess_query_fn", None),
             min_gap=min_gap,
+            top_k=top_k,
             two_stage=two_stage,
+            result_field=result_field,
             cognitive_loop_enabled=cognitive_loop_enabled,
             cognitive_loop_config=cognitive_loop_config,
         )

@@ -318,7 +318,9 @@ class NLQueryService:
         auto_schema_matcher: Optional['AutoSchemaMatcher'] = None,
         assess_query_fn: Optional[Any] = None,
         min_gap: float = 0.03,
+        top_k: int = 10,
         two_stage: bool = False,
+        result_field: Optional[str] = None,
         cognitive_loop_enabled: bool = False,
         cognitive_loop_config: Optional[Dict] = None,
     ):
@@ -337,9 +339,17 @@ class NLQueryService:
             min_gap: Minimum score gap between top-1 and top-2 similarity results
                      for a DONE response.  Queries where all top results cluster
                      within this band return ASK for disambiguation.
+            top_k: Number of similarity results to retrieve.  Controls how many
+                   candidates are available for gap analysis.  Set to 1 to always
+                   return the best match without disambiguation.
             two_stage: If True, the model uses two-stage queries (exemplar match →
                        GQL procedure).  Gap analysis is skipped because stage 1 is
                        just routing — stage 2 results are the final answer.
+            result_field: Metadata field name to surface as the display result.
+                         When set, the value of metadata[result_field] is copied
+                         into a top-level "response" key on each match so that
+                         CLI and UI display it as the answer (e.g. "answer" for
+                         FAQ models).
             cognitive_loop_enabled: If True, route queries through CognitiveLoop
                                    after similarity search (adds memory, slot
                                    extraction, confidence blending).
@@ -352,7 +362,9 @@ class NLQueryService:
         self._auto_schema_matcher = auto_schema_matcher
         self._assess_query_fn = assess_query_fn
         self._min_gap = min_gap
+        self._top_k = top_k
         self._two_stage = two_stage
+        self._result_field = result_field
         self._cognitive_loop_enabled = cognitive_loop_enabled
         self._cognitive_loop_config = cognitive_loop_config or {}
         # Cache for Stage 2 GQL storage per model — avoids reloading all
@@ -385,6 +397,43 @@ class NLQueryService:
         self._auto_schema_matcher = matcher
         logger.info("AutoSchemaMatcher set for NL query service")
     
+    def _inject_result_field(self, fact_tree) -> None:
+        """Copy metadata[result_field] → metadata["response"] on each match.
+
+        This lets models specify which metadata field should be displayed as the
+        primary result text (e.g. FAQ uses result_field="answer").  CLI and UI
+        already render metadata["response"] when present.
+
+        Operates on the FactTree's FactNode objects directly (not the serialized
+        dict) so mutations persist through to_json() serialization.
+        """
+        if not self._result_field:
+            return
+        try:
+            root = fact_tree.root if hasattr(fact_tree, "root") else None
+            if root is None:
+                return
+            for child in root.children:
+                # Inject into match values under "results"
+                if child.description == "results":
+                    for match_node in child.children:
+                        v = match_node.value
+                        if isinstance(v, dict):
+                            meta = v.get("metadata")
+                            if isinstance(meta, dict):
+                                val = meta.get(self._result_field)
+                                if val and "response" not in meta:
+                                    meta["response"] = val
+                # Inject into matched_exemplar in Execution Metadata
+                if child.description == "Execution Metadata":
+                    exemplar = child.data_context.get("matched_exemplar")
+                    if isinstance(exemplar, dict):
+                        val = exemplar.get(self._result_field)
+                        if val and "response" not in exemplar:
+                            exemplar["response"] = val
+        except Exception:
+            pass
+
     def _resolve_model_paths(self, model_path: str) -> list:
         """Return candidate model directories (model_path + dev model dir)."""
         import os
@@ -755,7 +804,7 @@ class NLQueryService:
                 org_id,
                 model_id,
                 "similarity_search",
-                {"query": query, "top_k": 10},
+                {"query": query, "top_k": self._top_k},
             )
 
             elapsed_ms = (time.time() - start_time) * 1000
@@ -772,10 +821,10 @@ class NLQueryService:
             # Step 1b: Gap analysis — if top results cluster within min_gap,
             # the query is ambiguous.  Return ASK with the top candidates.
             # Skip when confirmed=True (user already picked from disambiguation).
-            # For two-stage models this is Stage 1 disambiguation: show top
-            # exemplar matches as numbered options so the user can refine.
+            # Skip for two-stage models — stage 1 is just routing to the best
+            # exemplar; stage 2 GQL results are the final answer.
             top_scores = _extract_top_scores(fact_tree)
-            if not confirmed and len(top_scores) >= 2 and (top_scores[0] - top_scores[1]) < self._min_gap:
+            if not self._two_stage and not confirmed and len(top_scores) >= 2 and (top_scores[0] - top_scores[1]) < self._min_gap:
                 top_matches = _extract_top_matches(fact_tree, n=3)
                 logger.info(
                     f"Gap too small ({top_scores[0]:.3f} vs {top_scores[1]:.3f}) "
@@ -806,7 +855,8 @@ class NLQueryService:
             # model's similarity threshold, no exemplar matched confidently.
             # Return ASK so the user can refine their query.
             # Skip when confirmed=True (user already picked from disambiguation).
-            if not confirmed and top_scores and top_scores[0] < self.confidence_threshold:
+            # Skip for two-stage — stage 1 routing uses its own threshold logic.
+            if not self._two_stage and not confirmed and top_scores and top_scores[0] < self.confidence_threshold:
                 top_matches = _extract_top_matches(fact_tree, n=3)
                 logger.info(
                     f"Best score {top_scores[0]:.3f} below threshold "
@@ -893,6 +943,11 @@ class NLQueryService:
                         total_query_time_ms=(time.time() - start_time) * 1000,
                     )
                     match_method = "two_stage_gql"
+
+            # Inject result_field → response into match metadata so CLI/UI
+            # can display the configured metadata field as the primary result.
+            if self._result_field:
+                self._inject_result_field(result_tree)
 
             elapsed_ms = (time.time() - start_time) * 1000
 

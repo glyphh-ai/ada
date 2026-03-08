@@ -26,7 +26,9 @@
     {"canonical": "curl", "synonyms": ["curl", "http request", "fetch url", "download url", "make request", "http get"], "phrases": ["make http request", "curl the endpoint", "fetch from url", "send http request to"]},
     {"canonical": "pipe", "synonyms": ["pipe", "pipe to", "pipe through", "chain commands", "redirect output"], "phrases": ["pipe output to", "chain with", "redirect output to", "pipe into"]},
     {"canonical": "diff", "synonyms": ["diff", "compare", "contrast", "differences"], "phrases": ["find the differences", "compare the files", "find me the differences", "differences between"]},
-    {"canonical": "sort", "synonyms": ["sort", "order", "arrange", "sort file"], "phrases": ["sort the file", "sort the output", "sort by", "arrange the"]}
+    {"canonical": "sort", "synonyms": ["sort", "order", "arrange", "sort file"], "phrases": ["sort the file", "sort the output", "sort by", "arrange the"]},
+    {"canonical": "du", "synonyms": ["du", "disk usage", "storage usage", "file size", "directory size", "space used"], "phrases": ["disk usage of", "how much space does", "storage usage for", "check disk usage", "directory size of"]},
+    {"canonical": "rmdir", "synonyms": ["rmdir", "remove directory", "delete directory", "delete folder", "remove folder"], "phrases": ["remove the directory", "delete the directory", "remove the folder", "delete the empty directory"]}
   ],
   "targets": [
     {"canonical": "directory", "synonyms": ["directory", "folder", "dir", "path", "location", "working directory"], "phrases": ["working directory", "home directory", "current directory", "target directory"]},

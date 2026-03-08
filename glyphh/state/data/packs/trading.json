@@ -1,0 +1,60 @@
+{
+  "pack": "trading",
+  "description": "Trading domain knowledge — stock info, login, and watchlist prerequisites.",
+
+  "transitions": [
+    {
+      "name": "stock_info_before_order",
+      "directing_actions": [],
+      "operating_actions": ["place_order"],
+      "prerequisite": "get_stock_info",
+      "description": "Placing orders requires stock information first"
+    },
+    {
+      "name": "stock_info_before_watchlist",
+      "directing_actions": [],
+      "operating_actions": ["add_to_watchlist"],
+      "prerequisite": "get_stock_info",
+      "description": "Adding to watchlist requires stock info first"
+    },
+    {
+      "name": "symbol_before_stock_info",
+      "directing_actions": [],
+      "operating_actions": ["get_stock_info"],
+      "prerequisite": "get_symbol_by_name",
+      "description": "Getting stock info requires symbol lookup by company name"
+    },
+    {
+      "name": "login_before_trading",
+      "directing_actions": [],
+      "operating_actions": ["place_order", "add_to_watchlist", "cancel_order", "fund_account", "withdraw_funds"],
+      "prerequisite": "trading_login",
+      "description": "Trading operations require authentication first"
+    },
+    {
+      "name": "order_before_details",
+      "directing_actions": [],
+      "operating_actions": ["get_order_details"],
+      "prerequisite": "place_order",
+      "description": "Getting order details requires placing an order first"
+    }
+  ],
+
+  "patterns": [
+    {
+      "label": "get_stock_info_needed",
+      "features": {"query_tokens": "buy sell purchase acquire order trade place shares stock invest"},
+      "description": "Trading operations need stock info"
+    },
+    {
+      "label": "get_symbol_by_name_needed",
+      "features": {"query_tokens": "company name symbol ticker find stock lookup what is the symbol"},
+      "description": "Symbol lookup by company name"
+    },
+    {
+      "label": "trading_login_needed",
+      "features": {"query_tokens": "trade buy sell order watchlist fund withdraw place invest"},
+      "description": "Trading operations need authentication"
+    }
+  ]
+}

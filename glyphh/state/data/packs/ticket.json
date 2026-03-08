@@ -1,0 +1,22 @@
+{
+  "pack": "ticket",
+  "description": "Ticket management domain knowledge — authentication prerequisites for ticket operations.",
+
+  "transitions": [
+    {
+      "name": "login_before_ticket_ops",
+      "directing_actions": [],
+      "operating_actions": ["create_ticket", "edit_ticket", "resolve_ticket", "close_ticket"],
+      "prerequisite": "ticket_login",
+      "description": "Ticket operations require login first"
+    }
+  ],
+
+  "patterns": [
+    {
+      "label": "ticket_login_needed",
+      "features": {"query_tokens": "create ticket open issue file submit raise resolve close edit update"},
+      "description": "Ticket operations need authentication"
+    }
+  ]
+}

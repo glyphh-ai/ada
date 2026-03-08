@@ -1,0 +1,14 @@
+{
+  "pack": "math",
+  "description": "Math operations domain knowledge — no prerequisite chains, pure function routing.",
+
+  "transitions": [],
+
+  "patterns": [
+    {
+      "label": "calculate_needed",
+      "features": {"query_tokens": "calculate compute average mean add subtract multiply divide percentage power square root logarithm"},
+      "description": "Math computation patterns"
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "pack": "messaging",
+  "description": "Messaging and communication: send messages, manage contacts, inbox operations",
+  "actions": [
+    {"canonical": "send_message", "synonyms": ["send message", "message", "send msg", "text", "write message", "compose message", "dispatch message"], "phrases": ["send a message to", "message the user", "send a text to", "compose a message for", "write a message to"]},
+    {"canonical": "view_messages", "synonyms": ["view messages", "check messages", "read messages", "inbox", "show messages", "see messages", "view sent messages"], "phrases": ["view my messages", "check my inbox", "show messages sent", "read my messages", "see messages received", "view sent messages"]},
+    {"canonical": "delete_message", "synonyms": ["delete message", "remove message", "erase message", "unsend message", "retract message"], "phrases": ["delete the message", "remove the message", "erase the message to", "unsend the message", "delete my message"]},
+    {"canonical": "search_messages", "synonyms": ["search messages", "find message", "look up message", "message search", "search inbox"], "phrases": ["search messages for", "find messages containing", "look up messages with", "search my inbox for", "find a message about"]},
+    {"canonical": "add_contact", "synonyms": ["add contact", "new contact", "add user", "add to contacts", "save contact", "register contact"], "phrases": ["add a new contact", "add user to contacts", "save as contact", "register a new contact", "add to my contacts"]},
+    {"canonical": "get_user_id", "synonyms": ["get user id", "user id", "find user id", "look up user", "user lookup", "resolve username"], "phrases": ["get the user id for", "what is the user id", "look up user id", "find the id of user", "resolve the username"]},
+    {"canonical": "list_users", "synonyms": ["list users", "show users", "all users", "user list", "who is online", "workspace members"], "phrases": ["list all users", "show all users", "who is in the workspace", "view all users", "list workspace members"]},
+    {"canonical": "get_message_stats", "synonyms": ["message stats", "message statistics", "messaging analytics", "inbox stats", "message count"], "phrases": ["get message statistics", "show message stats", "how many messages", "messaging analytics", "message count"]},
+    {"canonical": "message_login", "synonyms": ["message login", "log in to messaging", "sign in messaging", "messaging sign in", "authenticate messaging"], "phrases": ["log in to messaging", "sign in to messaging", "authenticate with messaging", "messaging login"]},
+    {"canonical": "message_get_login_status", "synonyms": ["messaging login status", "am i logged in", "check login", "authentication status", "session status"], "phrases": ["check messaging login status", "am i logged in to messaging", "is my messaging session active", "messaging authentication status"]}
+  ],
+  "targets": [
+    {"canonical": "message", "synonyms": ["message", "text", "msg", "chat", "conversation", "thread"], "phrases": ["text message", "chat message", "direct message"]},
+    {"canonical": "contact", "synonyms": ["contact", "user", "person", "recipient", "sender", "member"], "phrases": ["contact list", "user profile", "message recipient"]},
+    {"canonical": "inbox", "synonyms": ["inbox", "mailbox", "messages received", "incoming messages"], "phrases": ["my inbox", "message inbox", "received messages"]},
+    {"canonical": "workspace", "synonyms": ["workspace", "team", "group", "channel", "organization"], "phrases": ["team workspace", "messaging group", "workspace members"]}
+  ],
+  "phrases": [
+    {"phrase": "send a message to", "action": "send_message"},
+    {"phrase": "message the user", "action": "send_message"},
+    {"phrase": "compose a message for", "action": "send_message"},
+    {"phrase": "write a message to", "action": "send_message"},
+    {"phrase": "view my messages", "action": "view_messages"},
+    {"phrase": "check my inbox", "action": "view_messages"},
+    {"phrase": "show messages sent", "action": "view_messages"},
+    {"phrase": "read my messages", "action": "view_messages"},
+    {"phrase": "view sent messages", "action": "view_messages"},
+    {"phrase": "delete the message", "action": "delete_message"},
+    {"phrase": "remove the message", "action": "delete_message"},
+    {"phrase": "unsend the message", "action": "delete_message"},
+    {"phrase": "search messages for", "action": "search_messages"},
+    {"phrase": "find messages containing", "action": "search_messages"},
+    {"phrase": "search my inbox for", "action": "search_messages"},
+    {"phrase": "add a new contact", "action": "add_contact"},
+    {"phrase": "add user to contacts", "action": "add_contact"},
+    {"phrase": "save as contact", "action": "add_contact"},
+    {"phrase": "get the user id for", "action": "get_user_id"},
+    {"phrase": "what is the user id", "action": "get_user_id"},
+    {"phrase": "look up user id", "action": "get_user_id"},
+    {"phrase": "list all users", "action": "list_users"},
+    {"phrase": "show all users", "action": "list_users"},
+    {"phrase": "who is in the workspace", "action": "list_users"},
+    {"phrase": "get message statistics", "action": "get_message_stats"},
+    {"phrase": "show message stats", "action": "get_message_stats"},
+    {"phrase": "how many messages", "action": "get_message_stats"},
+    {"phrase": "log in to messaging", "action": "message_login"},
+    {"phrase": "sign in to messaging", "action": "message_login"},
+    {"phrase": "check messaging login status", "action": "message_get_login_status"},
+    {"phrase": "am i logged in to messaging", "action": "message_get_login_status"}
+  ],
+  "domain_signals": {
+    "messaging": {
+      "message": 2, "inbox": 3, "contact": 2, "chat": 2, "dm": 3,
+      "send message": 3, "text message": 3, "workspace": 2, "recipient": 3,
+      "compose": 2, "reply": 2
+    }
+  }
+}

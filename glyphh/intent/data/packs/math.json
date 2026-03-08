@@ -16,7 +16,17 @@
     {"canonical": "convert_units", "synonyms": ["convert", "convert units", "change units", "convert to", "unit conversion"], "phrases": ["convert to meters", "change units to", "convert celsius to", "convert from", "convert to kilometers", "convert pounds to"]},
     {"canonical": "statistics", "synonyms": ["statistics", "mean", "average", "median", "mode", "standard deviation", "variance", "std dev"], "phrases": ["calculate the mean of", "find the average of", "standard deviation of", "variance of", "median of the list"]},
     {"canonical": "matrix_op", "synonyms": ["matrix multiply", "dot product", "cross product", "matrix inverse", "determinant", "eigenvalue"], "phrases": ["multiply the matrices", "dot product of", "cross product of", "inverse of the matrix", "determinant of"]},
-    {"canonical": "modulo", "synonyms": ["modulo", "mod", "remainder", "modulus"], "phrases": ["modulo of", "remainder when", "what is mod", "modulus of"]}
+    {"canonical": "modulo", "synonyms": ["modulo", "mod", "remainder", "modulus"], "phrases": ["modulo of", "remainder when", "what is mod", "modulus of"]},
+    {"canonical": "absolute_value", "synonyms": ["absolute value", "abs", "magnitude", "absolute", "modulus of number"], "phrases": ["absolute value of", "what is the absolute value", "magnitude of the number", "abs of"]},
+    {"canonical": "max_value", "synonyms": ["max value", "maximum", "largest", "biggest", "highest value", "find max", "greatest"], "phrases": ["find the maximum of", "what is the largest", "maximum value in", "find the biggest number", "highest value in"]},
+    {"canonical": "min_value", "synonyms": ["min value", "minimum", "smallest", "least", "lowest value", "find min"], "phrases": ["find the minimum of", "what is the smallest", "minimum value in", "find the least number", "lowest value in"]},
+    {"canonical": "round_number", "synonyms": ["round", "round number", "round off", "round to", "round up", "round down", "truncate"], "phrases": ["round to decimal places", "round the number to", "round off to", "round up to", "round down to"]},
+    {"canonical": "percentage", "synonyms": ["percentage", "percent", "percent of", "rate", "proportion"], "phrases": ["what percentage is", "calculate the percentage", "percent of the total", "what is the percentage"]},
+    {"canonical": "standard_deviation", "synonyms": ["standard deviation", "std dev", "std", "deviation", "spread"], "phrases": ["standard deviation of", "calculate the standard deviation", "std dev of the numbers", "deviation of the data"]},
+    {"canonical": "sum_values", "synonyms": ["sum values", "sum list", "total values", "add all", "sum all", "aggregate"], "phrases": ["sum all the values", "total of the list", "add all numbers together", "sum of all values", "aggregate the numbers"]},
+    {"canonical": "mean", "synonyms": ["mean", "arithmetic mean", "average value", "avg", "expected value"], "phrases": ["calculate the mean", "find the mean of", "average of the numbers", "arithmetic mean of"]},
+    {"canonical": "si_unit_conversion", "synonyms": ["si conversion", "metric conversion", "si units", "convert si", "metric units"], "phrases": ["convert between si units", "si unit conversion", "convert to metric", "metric conversion of"]},
+    {"canonical": "imperial_si_conversion", "synonyms": ["imperial to si", "imperial conversion", "feet to meters", "pounds to kilograms", "miles to kilometers", "fahrenheit to celsius"], "phrases": ["convert imperial to si", "convert feet to meters", "convert pounds to kilograms", "convert miles to kilometers", "fahrenheit to celsius"]}
   ],
   "targets": [
     {"canonical": "number", "synonyms": ["number", "integer", "float", "value", "constant", "digit", "decimal", "real number"], "phrases": ["real number", "integer value", "decimal number", "floating point"]},
@@ -61,21 +71,46 @@
     {"phrase": "convert to meters", "action": "convert_units"},
     {"phrase": "convert celsius to", "action": "convert_units"},
     {"phrase": "convert from", "action": "convert_units"},
-    {"phrase": "calculate the mean of", "action": "statistics"},
-    {"phrase": "find the average of", "action": "statistics"},
-    {"phrase": "standard deviation of", "action": "statistics"},
+    {"phrase": "calculate the mean of", "action": "mean"},
+    {"phrase": "find the average of", "action": "mean"},
+    {"phrase": "standard deviation of", "action": "standard_deviation"},
+    {"phrase": "calculate the standard deviation", "action": "standard_deviation"},
     {"phrase": "multiply the matrices", "action": "matrix_op"},
     {"phrase": "dot product of", "action": "matrix_op"},
     {"phrase": "inverse of the matrix", "action": "matrix_op"},
     {"phrase": "remainder when", "action": "modulo"},
-    {"phrase": "what is mod", "action": "modulo"}
+    {"phrase": "what is mod", "action": "modulo"},
+    {"phrase": "absolute value of", "action": "absolute_value"},
+    {"phrase": "magnitude of the number", "action": "absolute_value"},
+    {"phrase": "find the maximum of", "action": "max_value"},
+    {"phrase": "what is the largest", "action": "max_value"},
+    {"phrase": "maximum value in", "action": "max_value"},
+    {"phrase": "find the minimum of", "action": "min_value"},
+    {"phrase": "what is the smallest", "action": "min_value"},
+    {"phrase": "minimum value in", "action": "min_value"},
+    {"phrase": "round to decimal places", "action": "round_number"},
+    {"phrase": "round the number to", "action": "round_number"},
+    {"phrase": "round off to", "action": "round_number"},
+    {"phrase": "what percentage is", "action": "percentage"},
+    {"phrase": "calculate the percentage", "action": "percentage"},
+    {"phrase": "percent of the total", "action": "percentage"},
+    {"phrase": "sum all the values", "action": "sum_values"},
+    {"phrase": "total of the list", "action": "sum_values"},
+    {"phrase": "add all numbers together", "action": "sum_values"},
+    {"phrase": "convert imperial to si", "action": "imperial_si_conversion"},
+    {"phrase": "convert feet to meters", "action": "imperial_si_conversion"},
+    {"phrase": "convert pounds to kilograms", "action": "imperial_si_conversion"},
+    {"phrase": "convert miles to kilometers", "action": "imperial_si_conversion"},
+    {"phrase": "convert between si units", "action": "si_unit_conversion"},
+    {"phrase": "si unit conversion", "action": "si_unit_conversion"}
   ],
   "domain_signals": {
     "math": {
       "equation": 3, "formula": 3, "calculate": 3, "sqrt": 3, "integral": 3,
       "derivative": 3, "matrix": 3, "algebra": 3, "calculus": 3, "polynomial": 3,
       "theorem": 3, "logarithm": 3, "trigonometry": 3, "modulo": 3, "eigenvalue": 3,
-      "determinant": 3, "variance": 3, "standard deviation": 3, "arithmetic": 3
+      "determinant": 3, "variance": 3, "standard deviation": 3, "arithmetic": 3,
+      "percentage": 2, "absolute value": 3, "round": 2
     }
   }
 }

@@ -1,0 +1,72 @@
+{
+  "pack": "travel",
+  "description": "Travel booking domain knowledge — authentication, cost lookup, and booking chains.",
+
+  "transitions": [
+    {
+      "name": "auth_before_booking",
+      "directing_actions": [],
+      "operating_actions": ["book_flight", "cancel_booking", "purchase_insurance", "set_budget_limit"],
+      "prerequisite": "authenticate_travel",
+      "description": "Travel operations require authentication first"
+    },
+    {
+      "name": "airport_before_cost",
+      "directing_actions": [],
+      "operating_actions": ["get_flight_cost"],
+      "prerequisite": "get_nearest_airport_by_city",
+      "description": "Getting flight cost requires knowing the airport codes"
+    },
+    {
+      "name": "cost_before_booking",
+      "directing_actions": [],
+      "operating_actions": ["book_flight"],
+      "prerequisite": "get_flight_cost",
+      "description": "Booking a flight requires cost lookup first"
+    },
+    {
+      "name": "booking_before_invoice",
+      "directing_actions": [],
+      "operating_actions": ["retrieve_invoice"],
+      "prerequisite": "book_flight",
+      "description": "Retrieving invoice requires a booking first"
+    },
+    {
+      "name": "exchange_before_budget",
+      "directing_actions": [],
+      "operating_actions": ["set_budget_limit"],
+      "prerequisite": "compute_exchange_rate",
+      "description": "Setting budget may require exchange rate computation"
+    },
+    {
+      "name": "card_before_booking",
+      "directing_actions": [],
+      "operating_actions": ["book_flight", "purchase_insurance"],
+      "prerequisite": "get_credit_card_balance",
+      "description": "Booking may require credit card balance check"
+    }
+  ],
+
+  "patterns": [
+    {
+      "label": "authenticate_travel_needed",
+      "features": {"query_tokens": "book flight travel reserve cancel insurance budget booking trip"},
+      "description": "Travel operations need authentication"
+    },
+    {
+      "label": "get_nearest_airport_by_city_needed",
+      "features": {"query_tokens": "fly from to city airport flight nearest closest"},
+      "description": "Flight operations need airport lookup"
+    },
+    {
+      "label": "get_flight_cost_needed",
+      "features": {"query_tokens": "book flight reserve plane ticket fly travel cost price how much"},
+      "description": "Flight booking needs cost info"
+    },
+    {
+      "label": "compute_exchange_rate_needed",
+      "features": {"query_tokens": "exchange rate convert currency budget foreign"},
+      "description": "Budget operations may need exchange rate"
+    }
+  ]
+}
