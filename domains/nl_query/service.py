@@ -674,6 +674,7 @@ class NLQueryService:
         debug: bool = False,
         stage: str = "auto",
         confirmed: bool = False,
+        selected_glyph_id: Optional[str] = None,
     ) -> NLQueryResult:
         """
         Execute a natural language query.
@@ -696,6 +697,13 @@ class NLQueryService:
         # Stage "data" — bypass exemplar matching, search data records directly
         if stage == "data":
             return await self._execute_data_stage(org_id, model_id, query, debug, start_time)
+
+        # Direct glyph selection — user picked a specific option from ASK.
+        # Skip similarity search entirely; use the selected glyph for Stage 2.
+        if selected_glyph_id:
+            return await self._execute_selected_glyph(
+                org_id, model_id, query, selected_glyph_id, debug, start_time,
+            )
 
         # Step 0: Try auto-schema matching if available
         if self._auto_schema_matcher is not None:
@@ -1197,6 +1205,94 @@ class NLQueryService:
                 ),
                 translated_query={"signals": step.signals} if debug else None,
             )
+
+    async def _execute_selected_glyph(
+        self,
+        org_id: str,
+        model_id: str,
+        query: str,
+        glyph_id: str,
+        debug: bool,
+        start_time: float,
+    ) -> NLQueryResult:
+        """Execute Stage 2 using a directly-selected glyph from ASK disambiguation.
+
+        Skips similarity search — the user already chose the exemplar they want.
+        Loads the glyph from storage and runs the two-stage GQL pipeline directly.
+        """
+        gql_storage, pattern_ids = await self._get_or_build_gql_storage(org_id, model_id)
+
+        # Look up the selected glyph
+        try:
+            glyph = gql_storage.get_glyph(glyph_id)
+        except KeyError:
+            logger.warning(f"Selected glyph {glyph_id} not found in storage")
+            return NLQueryResult(
+                state=ResponseState.ERROR,
+                query_type="similarity_search",
+                match_method="none",
+                confidence=0.0,
+                query_time_ms=(time.time() - start_time) * 1000,
+                error=ErrorPayload(
+                    code="GLYPH_NOT_FOUND",
+                    message=f"Selected glyph not found: {glyph_id}",
+                ),
+            )
+
+        # Build match_detail from the selected glyph
+        match_detail = {
+            "glyph_id": glyph_id,
+            "concept_text": getattr(glyph, "concept_text", glyph_id),
+            "score": 1.0,  # User explicitly selected this
+            "metadata": getattr(glyph, "metadata", None) or {},
+        }
+
+        match_meta = match_detail["metadata"]
+
+        # Resolve GQL template for Stage 2
+        gql_template = await self._resolve_gql_template(org_id, model_id, match_meta)
+
+        if gql_template:
+            try:
+                resolved_gql = self._fill_slots(gql_template, glyph_id, match_meta, query)
+                stage2_tree = await self._execute_gql(org_id, model_id, resolved_gql)
+                result_tree = FactTreeBuilder.build_two_stage_result(
+                    exemplar_match=match_detail,
+                    data_results=stage2_tree,
+                    gql_query=resolved_gql,
+                    total_query_time_ms=(time.time() - start_time) * 1000,
+                    exclude_glyph_ids=pattern_ids,
+                )
+                logger.info(
+                    f"Selected-glyph query: exemplar={match_detail['concept_text']!r}, "
+                    f"gql={resolved_gql}"
+                )
+            except Exception as e:
+                logger.error(f"Stage 2 GQL failed for selected glyph: {e}", exc_info=True)
+                result_tree = FactTreeBuilder.build_two_stage_result(
+                    exemplar_match=match_detail,
+                    data_results=None,
+                    gql_query=gql_template,
+                    total_query_time_ms=(time.time() - start_time) * 1000,
+                )
+        else:
+            # No GQL template — return the exemplar match directly
+            result_tree = FactTreeBuilder.build_two_stage_result(
+                exemplar_match=match_detail,
+                data_results=None,
+                gql_query="",
+                total_query_time_ms=(time.time() - start_time) * 1000,
+            )
+
+        elapsed_ms = (time.time() - start_time) * 1000
+        return NLQueryResult(
+            state=ResponseState.DONE,
+            fact_tree=result_tree,
+            query_type="similarity_search",
+            match_method="two_stage_gql" if gql_template else "direct",
+            confidence=1.0,
+            query_time_ms=elapsed_ms,
+        )
 
     async def _execute_data_stage(
         self,

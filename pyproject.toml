@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "glyphh"
-version = "0.10.20"
+version = "0.10.21"
 description = "Hyperdimensional Computing SDK and Runtime"
 readme = "README.md"
 license = {text = "Proprietary"}

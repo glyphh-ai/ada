@@ -122,6 +122,10 @@ class MCPServer:
                             "description": "Query stage mode: 'auto' (full two-stage), 'patterns' (Stage 1 exemplar match only), 'data' (Stage 2 data search only)",
                             "enum": ["auto", "patterns", "data"],
                             "default": "auto"
+                        },
+                        "selected_glyph_id": {
+                            "type": "string",
+                            "description": "Glyph ID from ASK disambiguation — skips re-query and uses this glyph directly for Stage 2"
                         }
                     },
                     "required": ["org_id", "model_id", "query"]
@@ -428,6 +432,7 @@ class MCPServer:
         debug = arguments.get("debug", False)
         stage = arguments.get("stage", "auto")
         confirmed = arguments.get("confirmed", False)
+        selected_glyph_id = arguments.get("selected_glyph_id")
 
         # Send initial progress if token provided
         if progress_handler and progress_token:
@@ -494,6 +499,7 @@ class MCPServer:
             debug=debug,
             stage=stage,
             confirmed=confirmed,
+            selected_glyph_id=selected_glyph_id,
         )
 
         if progress_handler and progress_token:

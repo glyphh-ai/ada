@@ -173,11 +173,36 @@ def _wait_for_ready(ctx) -> bool:
 # ── Result rendering ─────────────────────────────────────────────────────────
 
 def _match_nodes(ft):
-    """Extract Match nodes from the 'results' intermediate node of a FactTree dict."""
+    """Extract Match nodes from the 'results' intermediate node of a FactTree dict.
+
+    Handles two formats:
+      1. Children with description "Match N" (two-stage / NL results)
+      2. Value list with {id, concept_text, score, metadata} (GQL LIST/FIND SIMILAR)
+    """
     for child in (ft or {}).get("children", []):
-        if child.get("description") == "results":
-            return [c for c in child.get("children", [])
-                    if c.get("description", "").startswith("Match")]
+        desc = child.get("description", "")
+        if desc == "results" or desc.startswith("Found ") or desc.startswith("Listed "):
+            # Format 1: child nodes named "Match N"
+            match_children = [c for c in child.get("children", [])
+                              if c.get("description", "").startswith("Match")]
+            if match_children:
+                return match_children
+            # Format 2: value is a list of result dicts (GQL plans)
+            value_list = child.get("value")
+            if isinstance(value_list, list):
+                return [
+                    {
+                        "description": f"Match {i+1}",
+                        "value": {
+                            "glyph_id": item.get("id", ""),
+                            "concept_text": item.get("concept_text", item.get("id", "")),
+                            "similarity_score": item.get("score"),
+                            "final_score": item.get("score"),
+                            "metadata": item.get("metadata", {}),
+                        },
+                    }
+                    for i, item in enumerate(value_list)
+                ]
     return []
 
 
@@ -240,25 +265,28 @@ def _print_result(data):
             if missing:
                 click.secho(f"  Missing: {', '.join(missing)}", fg=theme.TEXT_DIM)
             options = ask.get("disambiguation_options") or []
-            option_labels = []
+            option_entries = []
             for i, opt in enumerate(options, 1):
                 label = opt.get("suggestion") or opt.get("intent") or str(opt)
                 # Strip trailing match score like "(74% match)" for re-query
                 import re as _re
                 clean = _re.sub(r"\s*\(\d+%\s*match\)\s*$", "", label).strip()
-                option_labels.append(clean)
+                option_entries.append({
+                    "label": clean,
+                    "glyph_id": opt.get("glyph_id"),
+                })
                 click.echo(
                     click.style(f"    {i}. ", fg=theme.ACCENT, bold=True)
                     + click.style(label, fg=theme.TEXT)
                 )
-            if option_labels:
+            if option_entries:
                 click.echo()
                 click.secho("  Enter a number to select, or type a new query.", fg=theme.MUTED)
         else:
-            option_labels = []
+            option_entries = []
             click.secho("  Please clarify your request.", fg=theme.WARNING)
         click.echo()
-        return option_labels
+        return option_entries
 
     if not ft:
         click.secho("  No result.", fg=theme.TEXT_DIM)
@@ -341,9 +369,9 @@ def _print_result(data):
 
 # ── Single query execution ───────────────────────────────────────────────────
 
-def _do_query(ctx, query_text, tool="nl_query", stage="auto", confirmed=False):
+def _do_query(ctx, query_text, tool="nl_query", stage="auto", confirmed=False, selected_glyph_id=None):
     """POST one query to the MCP endpoint and print the result.
-    Returns a list of disambiguation option strings if ASK state, else None.
+    Returns a list of disambiguation option dicts if ASK state, else None.
     """
     import httpx
 
@@ -360,6 +388,8 @@ def _do_query(ctx, query_text, tool="nl_query", stage="auto", confirmed=False):
         args["stage"] = stage
     if confirmed:
         args["confirmed"] = True
+    if selected_glyph_id:
+        args["selected_glyph_id"] = selected_glyph_id
     payload = {"tool": tool, "arguments": args}
 
     try:
@@ -473,15 +503,19 @@ def _run_repl(ctx, tool="nl_query"):
         else:
             # If user typed a number and we have pending options, select that option
             query = line
+            selected_glyph_id = None
             is_selection = False
             if pending_options and line.isdigit():
                 idx = int(line) - 1
                 if 0 <= idx < len(pending_options):
-                    query = pending_options[idx]
+                    opt = pending_options[idx]
+                    query = opt["label"]
+                    selected_glyph_id = opt.get("glyph_id")
                     is_selection = True
                     click.secho(f"  → {query}", fg=theme.TEXT_DIM)
 
-            result = _do_query(ctx, query, tool=current_tool, stage=current_stage, confirmed=is_selection)
+            result = _do_query(ctx, query, tool=current_tool, stage=current_stage,
+                               confirmed=is_selection, selected_glyph_id=selected_glyph_id)
             pending_options = result if result else []
 
 
