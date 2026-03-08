@@ -687,25 +687,34 @@ class GlyphStorage:
         if settings.resolved_storage_backend == "pgvector" and len(query_embedding) < max_dim:
             query_embedding = query_embedding + [0.0] * (max_dim - len(query_embedding))
 
-        query = (
-            select(
-                GlyphVector.glyph_id,
-                GlyphVector.path,
-                (1 - GlyphVector.embedding.cosine_distance(query_embedding)).label("similarity")
-            )
-            .where(
-                GlyphVector.org_id == org_id,
-                GlyphVector.model_id == model_id,
-                GlyphVector.level == level,
-            )
-            .order_by(GlyphVector.embedding.cosine_distance(query_embedding))
-            .limit(top_k)
-        )
-        
+        # Use raw SQL — VectorType TypeDecorator doesn't expose
+        # pgvector's cosine_distance operator on the ORM column.
+        from sqlalchemy import text as sa_text
+
+        emb_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+        path_clause = ""
+        params: dict = {
+            "org_id": org_id,
+            "model_id": model_id,
+            "level": level,
+            "emb": emb_str,
+            "top_k": top_k,
+        }
         if path is not None:
-            query = query.where(GlyphVector.path == path)
-        
-        result = await self._session.execute(query)
+            path_clause = " AND path = :path"
+            params["path"] = path
+
+        sql = sa_text(f"""
+            SELECT glyph_id, path,
+                   1 - (embedding <=> CAST(:emb AS vector)) as similarity
+            FROM glyph_vectors
+            WHERE org_id = :org_id AND model_id = :model_id
+              AND level = :level{path_clause}
+            ORDER BY embedding <=> CAST(:emb AS vector)
+            LIMIT :top_k
+        """)
+
+        result = await self._session.execute(sql, params)
         return [(row.glyph_id, row.path, float(row.similarity)) for row in result.all()]
     
     async def get_hierarchical_embeddings(
