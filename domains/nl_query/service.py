@@ -239,7 +239,7 @@ def _extract_top_scores(fact_tree) -> list[float]:
 
 
 def _extract_top_matches(fact_tree, n: int = 3) -> list[dict]:
-    """Return top-n {concept_text, score} dicts from a FactTree."""
+    """Return top-n {concept_text, score, metadata, glyph_id} dicts from a FactTree."""
     try:
         ft_json = fact_tree.to_json() if hasattr(fact_tree, "to_json") else fact_tree
         for child in ft_json.get("children", []):
@@ -252,12 +252,28 @@ def _extract_top_matches(fact_tree, n: int = 3) -> list[dict]:
                         matches.append({
                             "concept_text": v.get("concept_text", ""),
                             "score": float(s),
+                            "metadata": v.get("metadata") or {},
+                            "glyph_id": v.get("glyph_id"),
                         })
                 matches.sort(key=lambda x: x["score"], reverse=True)
                 return matches[:n]
     except Exception:
         pass
     return []
+
+
+def _human_label(match: dict) -> str:
+    """Derive a human-readable label for a match candidate.
+
+    Priority: metadata display fields → concept_text.
+    """
+    meta = match.get("metadata") or {}
+    for key in ("name", "title", "question", "label", "description", "summary"):
+        val = meta.get(key)
+        if val and isinstance(val, str):
+            return val[:120]
+    # Fall back to concept_text
+    return match.get("concept_text", "")
 
 
 def _extract_top_match_detail(fact_tree) -> Optional[dict]:
@@ -759,7 +775,9 @@ class NLQueryService:
                             {
                                 "intent": m["concept_text"],
                                 "confidence": m["score"],
-                                "suggestion": f"{m['concept_text']} ({m['score']:.0%} match)",
+                                "label": _human_label(m),
+                                "suggestion": f"{_human_label(m)} ({m['score']:.0%} match)",
+                                "glyph_id": m.get("glyph_id"),
                             }
                             for m in top_matches
                         ],
@@ -788,7 +806,9 @@ class NLQueryService:
                             {
                                 "intent": m["concept_text"],
                                 "confidence": m["score"],
-                                "suggestion": f"{m['concept_text']} ({m['score']:.0%} match)",
+                                "label": _human_label(m),
+                                "suggestion": f"{_human_label(m)} ({m['score']:.0%} match)",
+                                "glyph_id": m.get("glyph_id"),
                             }
                             for m in top_matches
                         ] if top_matches else [],
