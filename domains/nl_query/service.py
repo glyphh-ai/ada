@@ -552,6 +552,8 @@ class NLQueryService:
     ):
         """Get or build a cached GQL storage for Stage 2 queries.
 
+        Returns (gql_storage, pattern_glyph_ids) tuple.
+
         Caches glyph embeddings per model to avoid reloading 22K+ vectors
         on every request.  Uses an async lock to prevent thundering herd —
         only one request builds the cache, others wait.
@@ -567,18 +569,18 @@ class NLQueryService:
         # Fast path: check cache without lock
         cached = self._gql_storage_cache.get(cache_key)
         if cached is not None:
-            storage, ts = cached
+            storage, pattern_ids, ts = cached
             if _time.time() - ts < 300:  # 5 min TTL
-                return storage
+                return storage, pattern_ids
 
         # Slow path: acquire lock, build cache once
         async with self._gql_cache_lock:
             # Re-check after acquiring lock (another request may have built it)
             cached = self._gql_storage_cache.get(cache_key)
             if cached is not None:
-                storage, ts = cached
+                storage, pattern_ids, ts = cached
                 if _time.time() - ts < 300:
-                    return storage
+                    return storage, pattern_ids
 
             loaded_model = await self.query_service._model_manager.get_model(org_id, model_id)
             if loaded_model is None:
@@ -624,10 +626,18 @@ class NLQueryService:
                 hierarchical_embeddings=hierarchical,
             )
 
-            self._gql_storage_cache[cache_key] = (gql_storage, _time.time())
+            # Collect all pattern glyph IDs for stage 2 exclusion.
+            # Patterns have record_type="pattern" in metadata (set by deploy_models.py).
+            pattern_glyph_ids = {
+                str(g.id) for g in db_glyphs
+                if (g.metadata or {}).get("record_type") == "pattern"
+            }
+
+            self._gql_storage_cache[cache_key] = (gql_storage, pattern_glyph_ids, _time.time())
             logger.info(f"Built GQL storage cache for {org_id}/{model_id}: "
-                         f"{len(db_glyphs)} glyphs, {len(embeddings)} embeddings")
-            return gql_storage
+                         f"{len(db_glyphs)} glyphs, {len(embeddings)} embeddings, "
+                         f"{len(pattern_glyph_ids)} patterns")
+            return gql_storage, pattern_glyph_ids
 
     async def _execute_gql(
         self,
@@ -645,7 +655,7 @@ class NLQueryService:
         if loaded_model is None:
             raise ValueError(f"Model {org_id}/{model_id} not loaded")
 
-        gql_storage = await self._get_or_build_gql_storage(org_id, model_id)
+        gql_storage, _pattern_ids = await self._get_or_build_gql_storage(org_id, model_id)
 
         context = ExecutionContext(
             model=loaded_model.sdk_model,
@@ -846,14 +856,12 @@ class NLQueryService:
                         stage2_tree = await self._execute_gql(
                             org_id, model_id, resolved_gql,
                         )
-                        # Collect ALL stage 1 glyph IDs — they are patterns
-                        # (stage 1 uses default_filter: record_type=pattern).
-                        # Pass as exclusion set so stage 2 only returns data.
-                        s1_all = _extract_top_matches(fact_tree, n=100)
-                        pattern_ids = {
-                            m["glyph_id"] for m in s1_all
-                            if m.get("glyph_id")
-                        }
+                        # Get ALL pattern glyph IDs from cached storage.
+                        # These were identified at cache build time from
+                        # metadata record_type="pattern".
+                        _, pattern_ids = await self._get_or_build_gql_storage(
+                            org_id, model_id,
+                        )
                         result_tree = FactTreeBuilder.build_two_stage_result(
                             exemplar_match=match_detail,
                             data_results=stage2_tree,
