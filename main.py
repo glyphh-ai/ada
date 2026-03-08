@@ -105,7 +105,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info(f"Deployed {len(results)} models, {total_glyphs} total glyphs")
     except Exception as e:
         logger.debug(f"Model auto-deploy skipped: {e}")
-    
+
+    # Resume any incomplete staged exemplar encoding from a previous run
+    try:
+        await model_manager.resume_staged_encoding()
+    except Exception as e:
+        logger.warning(f"Staged encoding resume failed: {e}")
+
     yield
     
     # Graceful shutdown

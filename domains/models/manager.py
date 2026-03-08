@@ -111,6 +111,7 @@ class ModelManager:
         self._db_session_factory = db_session_factory
         self._re_encode_jobs: Dict[str, ReEncodeJob] = {}
         self._sdk_version: Optional[str] = None
+        self._encoding_in_progress: set = set()  # (org_id, model_id) keys with active encoding tasks
         
     async def _get_sdk_version(self) -> str:
         if self._sdk_version is None:
@@ -515,6 +516,7 @@ class ModelManager:
                         cfg.staged_exemplars = jsonl_text
                         await session.commit()
 
+                self._encoding_in_progress.add((org_id, model_id))
                 asyncio.create_task(
                     self._process_staged_exemplars(org_id, model_id),
                     name=f"exemplar_load_{org_id}_{model_id}",
@@ -555,10 +557,10 @@ class ModelManager:
         from glyphh.core.ops import bundle
         from domains.listeners.async_service import _extract_hierarchical_vectors
 
-        BATCH_SIZE = 500
+        BATCH_SIZE = 100
 
         try:
-            # Read staged JSONL from DB
+            # Read staged JSONL from DB — only count lines first, don't parse
             async with self._db_session_factory() as session:
                 result = await session.execute(
                     select(ModelConfig).where(
@@ -572,9 +574,10 @@ class ModelManager:
                     return
                 raw_jsonl = cfg.staged_exemplars
 
-            # Parse lines (streaming — one line at a time, not a big list)
             lines = [ln for ln in raw_jsonl.split("\n") if ln.strip()]
             total = len(lines)
+            # Free the raw text — lines list is sufficient
+            del raw_jsonl
             logger.info(f"Processing {total} staged exemplars for {model_id}")
 
             # Get the loaded model's encoder and entry_to_record_fn
@@ -697,6 +700,8 @@ class ModelManager:
                     await session.commit()
 
                 logger.info(f"Encoded {created}/{total} exemplars for {model_id}")
+                # Yield control to event loop so queries can be served
+                await asyncio.sleep(0)
 
             # Done — clear staged data
             await self._clear_staged_exemplars(org_id, model_id)
@@ -710,6 +715,45 @@ class ModelManager:
             logger.error(
                 f"Background exemplar load failed for {model_id}: {e}",
                 exc_info=True,
+            )
+        finally:
+            self._encoding_in_progress.discard((org_id, model_id))
+
+    async def resume_staged_encoding(self) -> None:
+        """Resume any incomplete exemplar encoding from a previous run.
+
+        Called once from lifespan startup — scans model_configs for rows with
+        non-null staged_exemplars and kicks off one background task per model.
+        """
+        async with self._db_session_factory() as session:
+            result = await session.execute(
+                select(ModelConfig.org_id, ModelConfig.model_id).where(
+                    ModelConfig.staged_exemplars.isnot(None),
+                )
+            )
+            pending = result.all()
+
+        if not pending:
+            return
+
+        for org_id, model_id in pending:
+            key = (org_id, model_id)
+            if key in self._encoding_in_progress:
+                continue
+
+            # Ensure model is loaded in memory first
+            loaded = self._models.get(key)
+            if not loaded:
+                loaded = await self._load_from_db(org_id, model_id)
+            if not loaded:
+                logger.warning(f"Cannot resume encoding for {model_id}: model not loadable")
+                continue
+
+            logger.info(f"Resuming staged encoding for {org_id}/{model_id}")
+            self._encoding_in_progress.add(key)
+            asyncio.create_task(
+                self._process_staged_exemplars(org_id, model_id),
+                name=f"exemplar_load_{org_id}_{model_id}",
             )
 
     async def _clear_staged_exemplars(self, org_id: str, model_id: str) -> None:
@@ -918,15 +962,8 @@ class ModelManager:
                 f"{' (with custom encode_query_fn)' if encode_query_fn else ''}"
             )
 
-            # Check for staged exemplars that need processing (e.g. after dyno restart)
-            if db_config.staged_exemplars:
-                logger.info(
-                    f"Found staged exemplars for {model_id}, resuming encoding"
-                )
-                asyncio.create_task(
-                    self._process_staged_exemplars(org_id, model_id),
-                    name=f"exemplar_load_{org_id}_{model_id}",
-                )
+            # Staged exemplars are resumed from lifespan startup via
+            # resume_staged_encoding(), not from the query path.
 
             return loaded_model
             

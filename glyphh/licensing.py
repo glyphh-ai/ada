@@ -212,6 +212,7 @@ def load_license() -> LicenseInfo:
     # 3. Platform self-fetch (GLYPHH_RUNTIME_ID env var)
     runtime_id = os.environ.get("GLYPHH_RUNTIME_ID", "").strip()
     if runtime_id:
+        logger.info(f"Fetching license from Platform for runtime_id={runtime_id}")
         token_str = _fetch_token_from_platform(runtime_id)
         if token_str:
             claims = _verify_token(token_str)
@@ -220,7 +221,9 @@ def load_license() -> LicenseInfo:
                 info = _claims_to_license_info(claims)
                 logger.info(f"License fetched from Platform: tier={info.tier}, org={info.org_id}")
                 return info
-            logger.warning("Platform returned invalid license token")
+            logger.warning("Platform returned token but verification failed (public key mismatch?)")
+        else:
+            logger.warning("Platform did not return a license token")
 
     # 4. No license → free tier
     logger.info("No license found — using free tier defaults")
