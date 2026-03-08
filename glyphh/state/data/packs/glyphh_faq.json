@@ -1,0 +1,184 @@
+{
+  "pack": "glyphh_faq",
+  "description": "Glyphh AI platform knowledge — prerequisite transitions for onboarding, model building, and deployment workflows, plus inductive patterns for FAQ category classification.",
+
+  "transitions": [
+    {
+      "name": "install_before_use",
+      "directing_actions": [],
+      "operating_actions": ["create_model", "run_server", "deploy", "use_cli", "encode"],
+      "prerequisite": "install",
+      "description": "Must install the Glyphh SDK before any other operations"
+    },
+    {
+      "name": "config_before_encode",
+      "directing_actions": ["create_config", "define_roles", "set_dimensions"],
+      "operating_actions": ["encode", "encode_query", "build_glyph"],
+      "prerequisite": "create_config",
+      "description": "Must define EncoderConfig before encoding concepts into glyphs"
+    },
+    {
+      "name": "model_before_deploy",
+      "directing_actions": ["create_model", "build_model", "package_model"],
+      "operating_actions": ["deploy", "deploy_heroku", "deploy_docker", "serve"],
+      "prerequisite": "build_model",
+      "description": "Must build and package a model before deployment"
+    },
+    {
+      "name": "database_before_server",
+      "directing_actions": [],
+      "operating_actions": ["run_server", "serve", "start_runtime"],
+      "prerequisite": "setup_database",
+      "description": "PostgreSQL with pgvector must be configured before starting the runtime server"
+    },
+    {
+      "name": "auth_before_manage",
+      "directing_actions": ["create_token", "authenticate"],
+      "operating_actions": ["deploy", "manage_models", "manage_org"],
+      "prerequisite": "authenticate",
+      "description": "Must authenticate with API token before managing platform resources"
+    },
+    {
+      "name": "exemplars_before_build",
+      "directing_actions": ["create_exemplars", "write_jsonl"],
+      "operating_actions": ["build_model", "package_model", "test_model"],
+      "prerequisite": "create_exemplars",
+      "description": "Must create training exemplars (JSONL) before building a model"
+    },
+    {
+      "name": "encoder_before_query",
+      "directing_actions": ["create_config", "create_encoder"],
+      "operating_actions": ["encode_query", "similarity_search", "find_similar"],
+      "prerequisite": "create_encoder",
+      "description": "Must instantiate an Encoder from config before encoding queries"
+    }
+  ],
+
+  "patterns": [
+    {
+      "label": "getting_started",
+      "features": {"query_tokens": "install setup pip get started quickstart first steps new beginner hello world requirements python version"},
+      "description": "Installation, setup, and onboarding questions"
+    },
+    {
+      "label": "getting_started",
+      "features": {"query_tokens": "how begin onboarding first model try glyphh start using new user"},
+      "description": "First-time user onboarding questions"
+    },
+    {
+      "label": "sdk",
+      "features": {"query_tokens": "encoder glyph vector concept layer segment role dimension encode config"},
+      "description": "SDK core types and encoding questions"
+    },
+    {
+      "label": "sdk",
+      "features": {"query_tokens": "bag of words lexicon thermometer bind bundle cosine similarity weight key_part bipolar hypervector"},
+      "description": "SDK encoding strategies and operations"
+    },
+    {
+      "label": "sdk",
+      "features": {"query_tokens": "encoderconfig numeric encoding seed temporal similarity_weight text_encoding"},
+      "description": "SDK configuration and encoding options"
+    },
+    {
+      "label": "runtime",
+      "features": {"query_tokens": "runtime server fastapi uvicorn start serve database pgvector postgresql"},
+      "description": "Runtime server and database questions"
+    },
+    {
+      "label": "runtime",
+      "features": {"query_tokens": "mcp model context protocol fact tree graphql gql query pipeline similarity search"},
+      "description": "Runtime query pipeline and protocols"
+    },
+    {
+      "label": "runtime",
+      "features": {"query_tokens": "done ask no_match confidence response state stored procedure nl query"},
+      "description": "Runtime response states and confidence handling"
+    },
+    {
+      "label": "cli",
+      "features": {"query_tokens": "cli command line terminal glyphh dev glyphh serve glyphh chat"},
+      "description": "CLI commands and terminal usage"
+    },
+    {
+      "label": "cli",
+      "features": {"query_tokens": "package glyphh file model deploy model load token create"},
+      "description": "CLI packaging and deployment commands"
+    },
+    {
+      "label": "models",
+      "features": {"query_tokens": "custom model build create model directory encoder.py config.yaml manifest.yaml"},
+      "description": "Custom model building and structure"
+    },
+    {
+      "label": "models",
+      "features": {"query_tokens": "exemplar exemplars jsonl training data entry_to_record encode_query test benchmark"},
+      "description": "Model training data and testing"
+    },
+    {
+      "label": "models",
+      "features": {"query_tokens": "toolrouter pipedream churn faq bfcl function calling tool router"},
+      "description": "Built-in model types and use cases"
+    },
+    {
+      "label": "architecture",
+      "features": {"query_tokens": "hyperdimensional computing hdc deterministic no hallucination sidecar llm"},
+      "description": "HDC architecture and design principles"
+    },
+    {
+      "label": "architecture",
+      "features": {"query_tokens": "how works under hood neural network embedding difference advantage benefit compared rag retrieval"},
+      "description": "Architecture comparisons and advantages"
+    },
+    {
+      "label": "deployment",
+      "features": {"query_tokens": "deploy deployment heroku docker docker compose cloud production"},
+      "description": "Deployment platforms and containerization"
+    },
+    {
+      "label": "deployment",
+      "features": {"query_tokens": "database_url alembic migration procfile dyno scaling environment env var"},
+      "description": "Deployment configuration and scaling"
+    },
+    {
+      "label": "pricing",
+      "features": {"query_tokens": "pricing price cost free tier paid plan plans advanced pro enterprise"},
+      "description": "Pricing tiers and plan limits"
+    },
+    {
+      "label": "pricing",
+      "features": {"query_tokens": "limit quota rate limit max models max glyphs requests subscription billing upgrade"},
+      "description": "Usage limits and billing questions"
+    },
+    {
+      "label": "security",
+      "features": {"query_tokens": "security authentication auth token api token api key jwt ed25519"},
+      "description": "Authentication and token security"
+    },
+    {
+      "label": "security",
+      "features": {"query_tokens": "license privacy data encryption credential permission org organization team"},
+      "description": "Licensing, privacy, and access control"
+    },
+    {
+      "label": "troubleshooting",
+      "features": {"query_tokens": "error bug issue problem not working broken fix debug troubleshoot"},
+      "description": "Error diagnosis and debugging"
+    },
+    {
+      "label": "troubleshooting",
+      "features": {"query_tokens": "low score low similarity no match no results slow performance timeout crash memory oom"},
+      "description": "Performance and accuracy troubleshooting"
+    },
+    {
+      "label": "general",
+      "features": {"query_tokens": "support contact help documentation docs community github open source"},
+      "description": "General support and community questions"
+    },
+    {
+      "label": "general",
+      "features": {"query_tokens": "what is glyphh who company about roadmap feature request feedback contribute"},
+      "description": "General product and company questions"
+    }
+  ]
+}
