@@ -557,7 +557,7 @@ class ModelManager:
         from glyphh.core.ops import bundle
         from domains.listeners.async_service import _extract_hierarchical_vectors
 
-        BATCH_SIZE = 100
+        BATCH_SIZE = 500
         # Advisory lock ID derived from model_id — prevents duplicate encoding
         # across Heroku worker processes (WEB_CONCURRENCY > 1)
         lock_id = hash(f"exemplar_load_{org_id}_{model_id}") & 0x7FFFFFFF
