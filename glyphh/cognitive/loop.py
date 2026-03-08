@@ -214,6 +214,98 @@ class CognitiveLoop:
 
         return self._loop_id
 
+    def route(self, query: str) -> StepResult:
+        """Route-only: PERCEIVE → RECALL → DEDUCE → RESOLVE → RECORD.
+
+        Like step() but skips slot extraction and state update. Use this
+        when an external system (e.g. LLM) handles argument extraction.
+        After external extraction, call apply_state(calls) to update state.
+
+        Records the turn in episodic memory and deductive layer so that
+        future turns benefit from memory recall and temporal tracking.
+        """
+        signals: dict[str, Any] = {}
+
+        # ── 1. PERCEIVE ──
+        scorer_functions, scorer_confidence, intent, idea_vec = (
+            self._perceive(query, signals)
+        )
+
+        # ── 2. RECALL ──
+        recalled = self.idea_space.recall(idea_vec, top_k=3)
+        signals["recall"] = [
+            (idea.label or "?", round(sim, 3))
+            for idea, sim in recalled
+        ]
+
+        # ── 3. DEDUCE ──
+        deduction = self.deductive.deduce(
+            query=query,
+            current_state=self._state.get("primary", self._default_primary),
+        )
+        signals["deduction"] = deduction
+
+        # ── 4. RESOLVE ──
+        resolve_threshold = 0.1
+        if scorer_functions and scorer_confidence > resolve_threshold:
+            functions = [f for f in scorer_functions if f in self._available_funcs]
+            functions = self._apply_exclusion_rules(functions)
+            signals["resolve_source"] = "classifier_direct"
+        else:
+            action = intent.get("action", "")
+            target = intent.get("target", "")
+            functions = self._resolve_functions(
+                action, target, query, deduction, recalled,
+            )
+            signals["resolve_source"] = "rule_based"
+
+        # Inject deductive prerequisites
+        if deduction.get("prerequisites"):
+            for prereq in deduction["prerequisites"]:
+                resolved = prereq
+                if prereq not in self._available_funcs:
+                    for fname in self._available_funcs:
+                        if fname.endswith(f".{prereq}"):
+                            resolved = fname
+                            break
+                if resolved in self._available_funcs and resolved not in functions:
+                    functions.insert(0, resolved)
+
+        signals["resolved_functions"] = functions
+
+        # ── RECORD (no state update — caller handles that) ──
+        self._record_turn(functions, idea_vec)
+        self._last_step_funcs = functions
+
+        if not functions:
+            return StepResult(
+                action="ASK",
+                missing=["No functions resolved"],
+                confidence=0.0,
+                signals=signals,
+            )
+
+        confidence = self._compute_confidence(
+            intent, functions, deduction, recalled, {}, {},
+        )
+        if self._classifier is not None and scorer_confidence > 0:
+            confidence = 0.4 * confidence + 0.6 * scorer_confidence
+
+        return StepResult(
+            action="CALL",
+            calls=[{f: {}} for f in functions],
+            confidence=confidence,
+            signals=signals,
+        )
+
+    def apply_state(self, calls: list[dict]) -> None:
+        """Update state after external arg extraction.
+
+        Call this after route() + external extraction to apply state
+        effects (e.g. cd updates CWD).
+        """
+        self._update_state(calls)
+
     def step(self, query: str) -> StepResult:
         """Process one turn through the cognitive loop.
 
@@ -222,50 +314,19 @@ class CognitiveLoop:
         """
         signals: dict[str, Any] = {}
 
-        # ── 1. PERCEIVE: intent classification ──
-        scorer_functions: list[str] = []
+        # ── 1. PERCEIVE ──
+        scorer_functions, scorer_confidence, intent, idea_vec = (
+            self._perceive(query, signals)
+        )
+        action = intent.get("action", "")
+        target = intent.get("target", "")
+
+        # Get scorer arguments from classification (not in _perceive to keep it lean)
         scorer_arguments: dict[str, dict] = {}
-        scorer_confidence: float = 0.0
-
-        if self._classifier is not None:
-            # ModelScorer-primary path: function schemas define the intent space
-            classification = self._classifier.classify(
-                query=query,
-                state=self._state,
-                recent_actions=self._recent_actions[-3:],
-            )
-            signals["classification"] = classification
-            signals["classification_source"] = classification.get("source", "model_scorer")
-
-            scorer_functions = classification.get("functions", [])
-            scorer_arguments = classification.get("arguments", {})
-            scorer_confidence = classification.get("confidence", 0.0)
-
-            # Back-derive action for downstream compatibility (IdeaEncoder needs it)
-            func_to_action = {v: k for k, v in self._action_to_func.items()}
-            action = func_to_action.get(scorer_functions[0], "") if scorer_functions else ""
-            target = ""
-
-            keywords = _extract_keywords(query)
-            intent = {"action": action, "target": target, "domain": "", "keywords": keywords}
-            signals["intent"] = intent
-        else:
-            # Keyword-only extraction fallback
-            keywords = _extract_keywords(query)
-            intent = {"action": "", "target": "", "domain": "", "keywords": keywords}
-            signals["intent"] = intent
-            action = ""
-            target = ""
+        if "classification" in signals:
+            scorer_arguments = signals["classification"].get("arguments", {})
 
         # ── 2. RECALL: episodic memory lookup ──
-        idea_vec = self.idea_space.encoder.encode_from_query(
-            query=query,
-            intent=intent,
-            state=self._state.get("primary", self._default_primary),
-            recent_actions=self._recent_actions[-3:],
-        )
-        self._last_step_idea_vec = idea_vec
-
         recalled = self.idea_space.recall(idea_vec, top_k=3)
         signals["recall"] = [
             (idea.label or "?", round(sim, 3))
@@ -447,6 +508,49 @@ class CognitiveLoop:
         self.conv_state.reset()
 
     # ── Internal ──
+
+    def _perceive(
+        self, query: str, signals: dict[str, Any],
+    ) -> tuple[list[str], float, dict, "np.ndarray"]:
+        """PERCEIVE stage: classify intent and encode idea vector.
+
+        Returns (scorer_functions, scorer_confidence, intent, idea_vec).
+        """
+        scorer_functions: list[str] = []
+        scorer_confidence: float = 0.0
+
+        if self._classifier is not None:
+            classification = self._classifier.classify(
+                query=query,
+                state=self._state,
+                recent_actions=self._recent_actions[-3:],
+            )
+            signals["classification"] = classification
+            signals["classification_source"] = classification.get("source", "model_scorer")
+
+            scorer_functions = classification.get("functions", [])
+            scorer_confidence = classification.get("confidence", 0.0)
+
+            func_to_action = {v: k for k, v in self._action_to_func.items()}
+            action = func_to_action.get(scorer_functions[0], "") if scorer_functions else ""
+
+            keywords = _extract_keywords(query)
+            intent = {"action": action, "target": "", "domain": "", "keywords": keywords}
+        else:
+            keywords = _extract_keywords(query)
+            intent = {"action": "", "target": "", "domain": "", "keywords": keywords}
+
+        signals["intent"] = intent
+
+        idea_vec = self.idea_space.encoder.encode_from_query(
+            query=query,
+            intent=intent,
+            state=self._state.get("primary", self._default_primary),
+            recent_actions=self._recent_actions[-3:],
+        )
+        self._last_step_idea_vec = idea_vec
+
+        return scorer_functions, scorer_confidence, intent, idea_vec
 
     def _get_trigger_func(self) -> str | None:
         """Get the trigger function from config (e.g. navigation trigger)."""
