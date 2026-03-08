@@ -124,7 +124,7 @@ from .gql import (
     PredictionError,
 )
 
-__version__ = "0.7.0"
+__version__ = "0.12.0"
 
 __all__ = [
     # Core types (runtime)

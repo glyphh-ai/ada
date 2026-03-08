@@ -1,13 +1,17 @@
 """
 .glyphh package format — zip-based model packaging.
 
-A .glyphh file is a zip archive containing:
-  manifest.yaml      # model identity metadata
-  config.yaml        # encoder/runtime config (optional)
-  encoder.py         # custom encoder (optional)
-  build.py           # build script (optional)
-  data/              # training data (optional)
-    *.jsonl
+A .glyphh file is a zip archive containing the full model directory:
+  manifest.yaml      # model identity metadata (required)
+  config.yaml        # encoder/runtime config
+  encoder.py         # custom encoder
+  intent.py          # intent extraction
+  data/              # training data (exemplars, etc.)
+  apps/              # per-app modules (Pipedream)
+  classes/           # per-class modules (BFCL)
+  ...                # any other model-specific files/dirs
+
+Build artifacts (__pycache__, .git, tests/, etc.) are excluded.
 
 The CLI can deploy from either:
   - A .glyphh file directly
@@ -23,15 +27,17 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-# Files/dirs included in a .glyphh package
-PACKAGE_INCLUDES = [
-    "manifest.yaml",
-    "config.yaml",
-    "encoder.py",
-    "build.py",
-    "gql.json",
-    "data",
-]
+# Directories excluded from packaging (build artifacts, not needed at runtime)
+PACKAGE_EXCLUDE_DIRS = {
+    "__pycache__", ".git", ".pytest_cache", ".venv", "venv",
+    "tests", "results", ".mypy_cache", ".ruff_cache", "node_modules",
+}
+
+# Root-level files excluded from packaging (build-time only)
+PACKAGE_EXCLUDE_ROOT_FILES = {
+    "build.py", "discover.py", "tests.py", "test.py",
+    "gap_analysis.py", "run_bfcl.py",
+}
 
 
 def is_model_dir(path: Path) -> bool:
@@ -66,6 +72,9 @@ def read_manifest(model_dir: Path) -> dict:
 def package_model(model_dir: Path, output: Optional[Path] = None) -> Path:
     """Package a model directory into a .glyphh file.
 
+    Bundles everything in the model directory except build artifacts.
+    Subdirectory structure is preserved (apps/, classes/, data/, etc.).
+
     Args:
         model_dir: Path to the model directory containing manifest.yaml
         output: Output path for the .glyphh file (default: <model_dir>/<model_id>.glyphh)
@@ -80,20 +89,30 @@ def package_model(model_dir: Path, output: Optional[Path] = None) -> Path:
         output = model_dir / f"{model_id}.glyphh"
 
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zf:
-        for include in PACKAGE_INCLUDES:
-            item = model_dir / include
-            if item.is_file():
-                zf.write(item, include)
-            elif item.is_dir():
-                for child in sorted(item.rglob("*")):
-                    if child.is_file() and not child.name.startswith("."):
-                        zf.write(child, str(child.relative_to(model_dir)))
+        for child in sorted(model_dir.rglob("*")):
+            if not child.is_file():
+                continue
 
-        # Include all .py sibling modules (intent.py, scorer.py, etc.)
-        for py_file in sorted(model_dir.glob("*.py")):
-            name = py_file.name
-            if name not in ("build.py", "encoder.py") and name not in zf.namelist():
-                zf.write(py_file, name)
+            rel = child.relative_to(model_dir)
+            parts = rel.parts
+
+            # Skip files in excluded directories
+            if any(p in PACKAGE_EXCLUDE_DIRS or p.startswith(".") for p in parts[:-1]):
+                continue
+
+            # Skip hidden files
+            if rel.name.startswith("."):
+                continue
+
+            # Skip excluded root-level files
+            if len(parts) == 1 and rel.name in PACKAGE_EXCLUDE_ROOT_FILES:
+                continue
+
+            # Skip .glyphh files (don't nest packages)
+            if rel.suffix == ".glyphh":
+                continue
+
+            zf.write(child, str(rel))
 
     logger.info(f"Packaged {model_id} -> {output}")
     return output

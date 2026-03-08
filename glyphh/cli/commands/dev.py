@@ -111,9 +111,6 @@ def _run_server(path: str, port: int, no_reload: bool, daemon: bool) -> None:
     os.environ.setdefault("DEPLOYMENT_MODE", "local")
     os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./glyphh_dev.db")
 
-    if model_dir:
-        os.environ["GLYPHH_DEV_MODEL_DIR"] = str(model_dir)
-
     # Clear lru_cache so the server picks up the fresh env vars
     try:
         from infrastructure.config import get_settings

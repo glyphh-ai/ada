@@ -35,42 +35,8 @@ def model_group():
 @model_group.command("list")
 @click.option("--remote", is_flag=True, help="List models deployed on the remote runtime.")
 def model_list(remote):
-    """List models. By default lists local models found on disk.
-
-    Use --remote to list models deployed on the runtime.
-    """
-    if remote:
-        _list_remote_models()
-        return
-
-    models = discover_local_models()
-    if not models:
-        click.secho("  No models found in current directory.", fg=theme.MUTED)
-        return
-
-    # Table header
-    click.echo()
-    header = f"  {'NAME':<24} {'VERSION':<10} {'CATEGORY':<14} {'GLYPHS':<8} {'TYPE':<6} PATH"
-    click.secho(header, fg=theme.TEXT_DIM)
-    click.secho("  " + "─" * 90, fg=theme.TEXT_DIM)
-
-    for m in models:
-        name = m["name"][:22]
-        ver = m["version"][:8] or "—"
-        cat = m["category"][:12] or "—"
-        glyphs = str(m["glyphs"]) if m["glyphs"] > 0 else "—"
-        mtype = m["type"]
-        path = m["path"]
-
-        click.echo(
-            click.style(f"  {name:<24} ", fg=theme.TEXT)
-            + click.style(f"{ver:<10} ", fg=theme.MUTED)
-            + click.style(f"{cat:<14} ", fg=theme.INFO)
-            + click.style(f"{glyphs:<8} ", fg=theme.ACCENT)
-            + click.style(f"{mtype:<6} ", fg=theme.TEXT_DIM)
-            + click.style(path, fg=theme.TEXT_DIM)
-        )
-    click.echo()
+    """List models deployed on the runtime."""
+    _list_remote_models()
 
 
 def _list_remote_models():
@@ -95,6 +61,10 @@ def _list_remote_models():
         with httpx.Client(timeout=15) as client:
             res = client.get(f"{runtime_url}/{org_id}/models", headers=headers)
 
+        if res.status_code == 404:
+            click.secho("  No models deployed yet. Deploy one first:", fg=theme.MUTED)
+            click.secho("    glyphh model deploy", fg=theme.MUTED)
+            return
         if res.status_code != 200:
             detail = res.text
             try:
@@ -133,8 +103,12 @@ def _list_remote_models():
             )
         click.echo()
 
-    except Exception as e:
-        click.secho(f"  Could not connect to runtime: {e}", fg=theme.ERROR)
+    except Exception:
+        click.secho(f"  Could not connect to runtime at {runtime_url}", fg=theme.WARNING)
+        click.secho("  Is the runtime running? Check:", fg=theme.MUTED)
+        click.secho("    glyphh dev start          (local dev server)", fg=theme.MUTED)
+        click.secho("    docker compose up -d      (Docker)", fg=theme.MUTED)
+        click.secho(f"    glyphh config set endpoint <url>", fg=theme.MUTED)
 
 
 @model_group.command("deploy")
@@ -903,7 +877,7 @@ def handle_model(func: str | None, args: str = ""):
     else:
         click.echo()
         click.secho("  usage:", fg=theme.MUTED)
-        click.secho("    model list                 List local models", fg=theme.MUTED)
+        click.secho("    model list                 List deployed models", fg=theme.MUTED)
         click.secho("    model deploy [path]        Deploy model to runtime", fg=theme.MUTED)
         click.secho("    model load <file>          Load data from concepts.json", fg=theme.MUTED)
         click.secho("    model data                 View stored glyphs", fg=theme.MUTED)

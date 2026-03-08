@@ -195,6 +195,17 @@ class CognitiveLoop:
         if self._classifier is not None:
             self._classifier.configure(functions, self._action_to_func)
 
+        # Register deductive transitions from domain config
+        if self._config and self._config.transitions:
+            for t in self._config.transitions:
+                self.deductive.add_transition(
+                    name=t.get("name", ""),
+                    directing_actions=t.get("directing_actions", []),
+                    operating_actions=t.get("operating_actions", []),
+                    prerequisite=t.get("prerequisite", ""),
+                    strength=t.get("strength", 1.0),
+                )
+
         # Observe initial state in deductive layer
         self.deductive.observe(
             state=self._state.get("primary", self._default_primary),

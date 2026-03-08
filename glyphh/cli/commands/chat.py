@@ -322,9 +322,9 @@ def _print_result(data):
         if response_text:
             click.secho(f"                       {response_text}", fg=theme.TEXT_DIM)
 
-    # Similarity search / list matches
+    # Similarity search / list matches (skip if exemplar already shown for single result)
     matches = _match_nodes(ft)
-    if matches:
+    if matches and not (exemplar and len(matches) <= 1):
         for match in matches:
             v = match.get("value") or {}
             concept = v.get("concept_text", "—")

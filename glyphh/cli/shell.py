@@ -274,7 +274,7 @@ def _print_help():
     click.secho("    auth status             Show auth status", fg=theme.MUTED)
     click.echo()
     click.secho("  model", fg=theme.ACCENT)
-    click.secho("    model list              List local models", fg=theme.MUTED)
+    click.secho("    model list              List deployed models", fg=theme.MUTED)
     click.secho("    model deploy [path]     Deploy model to runtime", fg=theme.MUTED)
     click.secho("    model load <file>       Load data from concepts.json", fg=theme.MUTED)
     click.secho("    model data              View stored glyphs", fg=theme.MUTED)

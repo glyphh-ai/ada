@@ -11,6 +11,8 @@ All registry keys are (org_id, model_id) tuples. No namespace concept.
 
 import asyncio
 import logging
+import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -80,6 +82,7 @@ class LoadedModel:
         self.encode_query_fn = encode_query_fn
         self.assess_query_fn = assess_query_fn
         self.entry_to_record_fn = entry_to_record_fn
+        self.deploy_dir: Optional[Path] = None  # Materialized temp dir (cleaned on unload)
 
 
 class ReEncodeJob:
@@ -830,9 +833,12 @@ class ModelManager:
                 )
                 cfg = result.scalar_one_or_none()
                 if cfg and cfg.source_files:
-                    _, _, entry_to_record_fn = self._load_model_fns_from_source(
+                    _, _, entry_to_record_fn, _tmp = self._load_model_fns_from_source(
                         cfg.source_files, model_id=model_id
                     )
+                    # Clean up any materialized dir — we only needed the function
+                    if _tmp:
+                        shutil.rmtree(_tmp, ignore_errors=True)
                     return entry_to_record_fn
         except Exception as e:
             logger.debug(f"Could not restore entry_to_record for {model_id}: {e}")
@@ -891,10 +897,15 @@ class ModelManager:
         if key in self._models:
             loaded_model = self._models[key]
             del self._models[key]
-            
+
             if hasattr(loaded_model, 'encoder') and hasattr(loaded_model.encoder, 'clear_cache'):
                 loaded_model.encoder.clear_cache()
-        
+
+            # Clean up materialized temp directory
+            if loaded_model.deploy_dir and loaded_model.deploy_dir.exists():
+                shutil.rmtree(loaded_model.deploy_dir, ignore_errors=True)
+                logger.debug(f"Cleaned up deploy dir: {loaded_model.deploy_dir}")
+
         logger.info(f"Unloaded model org={org_id}, model={model_id}")
     
     async def get_model(self, org_id: str, model_id: str) -> Optional[LoadedModel]:
@@ -959,8 +970,9 @@ class ModelManager:
             encode_query_fn = None
             assess_query_fn = None
             entry_to_record_fn = None
+            deploy_dir = None
             if db_config.source_files:
-                encode_query_fn, assess_query_fn, entry_to_record_fn = (
+                encode_query_fn, assess_query_fn, entry_to_record_fn, deploy_dir = (
                     self._load_model_fns_from_source(db_config.source_files, model_id=model_id)
                 )
             if encode_query_fn is None and db_config.model_path:
@@ -996,6 +1008,7 @@ class ModelManager:
                 assess_query_fn=assess_query_fn,
                 entry_to_record_fn=entry_to_record_fn,
             )
+            loaded_model.deploy_dir = deploy_dir
 
             self._models[(org_id, model_id)] = loaded_model
 
@@ -1044,57 +1057,121 @@ class ModelManager:
         encode_query_fn, _, _ = ModelManager._load_model_fns(model_path)
         return encode_query_fn
 
+    # Directories excluded from source capture (mirrors packaging.py blocklist)
+    _SOURCE_EXCLUDE_DIRS = {
+        "__pycache__", ".git", ".pytest_cache", ".venv", "venv",
+        "tests", "results", ".mypy_cache", ".ruff_cache", "node_modules",
+    }
+
+    # Root-level files excluded from source capture (build-time only)
+    _SOURCE_EXCLUDE_ROOT_FILES = {
+        "build.py", "discover.py", "tests.py", "test.py",
+        "gap_analysis.py", "run_bfcl.py",
+    }
+
+    # File extensions to capture (text files needed at runtime)
+    _SOURCE_INCLUDE_EXTENSIONS = {
+        ".py", ".yaml", ".yml", ".json", ".jsonl",
+    }
+
     @staticmethod
     def _read_source_files(model_dir: Path) -> Dict[str, str]:
-        """Read all .py source files + config.yaml from a model directory for DB storage.
+        """Recursively read all source files from a model directory for DB storage.
 
-        Returns a dict mapping filename to source text, e.g.
-        {"encoder.py": "...", "intent.py": "...", "config.yaml": "..."}.
+        Walks the entire model directory tree and captures .py, .yaml, .json,
+        .jsonl files. Keys are relative paths preserving subdirectory structure:
+          {"encoder.py": "...", "apps/slack_v2/intent.py": "...", "data/exemplars.jsonl": "..."}
+
+        Excludes build artifacts and build-time scripts (same blocklist as packaging.py).
         """
         sources: Dict[str, str] = {}
         if not model_dir.is_dir():
             return sources
-        for py_file in sorted(model_dir.glob("*.py")):
-            if py_file.name.startswith("."):
+
+        for child in sorted(model_dir.rglob("*")):
+            if not child.is_file():
                 continue
+
+            rel = child.relative_to(model_dir)
+            parts = rel.parts
+
+            # Skip files in excluded directories
+            if any(p in ModelManager._SOURCE_EXCLUDE_DIRS or p.startswith(".") for p in parts[:-1]):
+                continue
+
+            # Skip hidden files
+            if rel.name.startswith("."):
+                continue
+
+            # Skip excluded root-level files
+            if len(parts) == 1 and rel.name in ModelManager._SOURCE_EXCLUDE_ROOT_FILES:
+                continue
+
+            # Skip .glyphh files (packages)
+            if rel.suffix == ".glyphh":
+                continue
+
+            # Only capture known text file extensions
+            if rel.suffix not in ModelManager._SOURCE_INCLUDE_EXTENSIONS:
+                continue
+
             try:
-                sources[py_file.name] = py_file.read_text()
+                sources[str(rel)] = child.read_text()
             except Exception:
                 pass
-        # Also store config.yaml and gql.json for runtime settings
-        for extra in ("config.yaml", "gql.json"):
-            extra_file = model_dir / extra
-            if extra_file.exists():
-                try:
-                    sources[extra] = extra_file.read_text()
-                except Exception:
-                    pass
+
         return sources
+
+    @staticmethod
+    def _has_subdirectory_files(source_files: Dict[str, str]) -> bool:
+        """Check if source_files contains subdirectory keys (paths with '/')."""
+        return any("/" in key for key in source_files)
+
+    @staticmethod
+    def _materialize_source_files(source_files: Dict[str, str], model_id: str) -> Path:
+        """Write source_files to a temp directory preserving structure.
+
+        Returns the temp directory path. Caller is responsible for cleanup
+        (tracked via LoadedModel.deploy_dir).
+        """
+        tmp_dir = Path(tempfile.mkdtemp(prefix=f"glyphh_model_{model_id}_"))
+        for rel_path, content in source_files.items():
+            dest = tmp_dir / rel_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content)
+        return tmp_dir
 
     @staticmethod
     def _load_model_fns_from_source(
         source_files: Dict[str, str],
         model_id: str = "",
-    ) -> tuple[Optional[Any], Optional[Any], Optional[Any]]:
+        model_path: str = "",
+    ) -> tuple[Optional[Any], Optional[Any], Optional[Any], Optional[Path]]:
         """Load model functions from stored source code.
 
-        Each model's modules are registered under a unique namespace prefix
-        ``_glm_{model_id}.{module}`` so multiple models can coexist without
-        clobbering each other's ``encoder`` / ``intent`` in sys.modules.
+        For complex models with subdirectory files (apps/, data/, classes/),
+        materializes to a temp directory and loads via importlib so that
+        Path(__file__).parent resolves correctly for data file access.
 
-        Bare imports like ``from intent import ...`` and lazy imports like
-        ``from encoder import extract_app`` are rewritten in the source to
-        use the namespaced module name before exec.
+        For simple models (flat root-only files), uses the existing in-memory
+        exec() approach with namespaced modules.
 
-        Returns (encode_query_fn, assess_query_fn, entry_to_record_fn)
-        or (None, None, None) on failure.
+        Returns (encode_query_fn, assess_query_fn, entry_to_record_fn, deploy_dir)
+        where deploy_dir is a Path to the materialized temp directory (or None
+        for simple models). Caller must track deploy_dir for cleanup on unload.
         """
         import re as _re
         import sys
         import types
 
         if not source_files or "encoder.py" not in source_files:
-            return None, None, None
+            return None, None, None, None
+
+        # Complex models with subdirectory files: materialize and load from filesystem
+        if ModelManager._has_subdirectory_files(source_files):
+            return ModelManager._load_model_fns_materialized(source_files, model_id)
+
+        # --- Simple models: in-memory exec() with namespaced modules ---
 
         # Build the namespace prefix and the set of local module names
         safe_id = _re.sub(r"[^a-zA-Z0-9_]", "_", model_id) if model_id else "default"
@@ -1105,17 +1182,10 @@ class ModelManager:
                 local_names.add(filename[:-3])  # "intent.py" → "intent"
 
         def _rewrite_imports(source: str) -> str:
-            """Rewrite bare local imports to use the namespaced prefix.
-
-            Handles:
-              from intent import foo        → from _glm_X.intent import foo
-              from encoder import bar       → from _glm_X.encoder import bar
-              import intent                 → import _glm_X.intent as intent
-            """
+            """Rewrite bare local imports to use the namespaced prefix."""
             lines = source.split("\n")
             result = []
             for line in lines:
-                stripped = line.lstrip()
                 # "from <local> import ..."
                 m = _re.match(r"^(\s*)from\s+(" + "|".join(_re.escape(n) for n in local_names) + r")\s+import\s+(.+)", line)
                 if m:
@@ -1137,12 +1207,24 @@ class ModelManager:
         pkg.__package__ = prefix
         sys.modules[prefix] = pkg
 
+        # Resolve real filesystem path for __file__
+        _real_model_dir = None
+        if model_path:
+            _p = Path(model_path)
+            if _p.is_file():
+                _p = _p.parent
+            if _p.is_dir():
+                _real_model_dir = _p
+
         def _load_module(filename: str, source: str) -> bool:
-            """Load a single source file as a namespaced module. Returns True on success."""
+            """Load a single source file as a namespaced module."""
             mod_name = filename[:-3]
             fqn = f"{prefix}.{mod_name}"
             mod = types.ModuleType(fqn)
-            mod.__file__ = f"<db:{model_id}/{filename}>"
+            if _real_model_dir and (_real_model_dir / filename).exists():
+                mod.__file__ = str(_real_model_dir / filename)
+            else:
+                mod.__file__ = f"<db:{model_id}/{filename}>"
             mod.__package__ = prefix
             try:
                 rewritten = _rewrite_imports(source)
@@ -1155,15 +1237,12 @@ class ModelManager:
             return True
 
         try:
-            # Skip build-time and test files — only load runtime modules.
             skip = {"build.py", "tests.py", "test.py"}
             py_files = {
                 fn: src for fn, src in source_files.items()
                 if fn.endswith(".py") and fn not in skip
             }
 
-            # Two-pass loading: first pass loads files without circular deps,
-            # second pass retries deferred files (now that encoder is loaded).
             deferred: dict[str, str] = {}
 
             # Pass 1: load non-encoder files
@@ -1183,7 +1262,7 @@ class ModelManager:
             sys.modules[enc_fqn] = encoder_mod
             setattr(pkg, "encoder", encoder_mod)
 
-            # Pass 2: retry deferred files (they likely import from encoder)
+            # Pass 2: retry deferred files
             for filename, source in deferred.items():
                 if not _load_module(filename, source):
                     logger.debug(f"Skipping {filename} after retry: still fails")
@@ -1191,11 +1270,42 @@ class ModelManager:
             encode_query_fn = getattr(encoder_mod, "encode_query", None)
             assess_query_fn = getattr(encoder_mod, "assess_query", None)
             entry_to_record_fn = getattr(encoder_mod, "entry_to_record", None)
-            return encode_query_fn, assess_query_fn, entry_to_record_fn
+            return encode_query_fn, assess_query_fn, entry_to_record_fn, None
 
         except Exception as e:
             logger.warning(f"Failed to load model fns from stored source: {e}")
-            return None, None, None
+            return None, None, None, None
+
+    @staticmethod
+    def _load_model_fns_materialized(
+        source_files: Dict[str, str],
+        model_id: str,
+    ) -> tuple[Optional[Any], Optional[Any], Optional[Any], Optional[Path]]:
+        """Load model functions by materializing source files to a temp directory.
+
+        Used for complex models with subdirectories (apps/, data/, classes/).
+        Writes all source_files to disk, then imports encoder.py via importlib
+        so Path(__file__).parent resolves to the real temp directory.
+
+        Returns (encode_query_fn, assess_query_fn, entry_to_record_fn, deploy_dir).
+        """
+        try:
+            tmp_dir = ModelManager._materialize_source_files(source_files, model_id)
+            logger.info(f"Materialized {len(source_files)} source files for {model_id} -> {tmp_dir}")
+
+            from domains.models.loader import load_encoder_config
+            _, _, encode_query_fn, entry_to_record_fn, assess_query_fn = load_encoder_config(tmp_dir)
+
+            if encode_query_fn is None:
+                logger.warning(f"Materialized restore for {model_id}: no encode_query_fn found")
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                return None, None, None, None
+
+            return encode_query_fn, assess_query_fn, entry_to_record_fn, tmp_dir
+
+        except Exception as e:
+            logger.warning(f"Failed materialized restore for {model_id}: {e}")
+            return None, None, None, None
 
     async def list_models(self) -> List[ModelInfoResponse]:
         """List all currently loaded models."""

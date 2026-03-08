@@ -81,26 +81,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     resource_manager = ResourceManager(async_session_maker)
     logger.info("Resource manager initialized")
 
-    # Auto-deploy models from directory (JSONL → DB)
+    # Register in-memory encoders for models already deployed in the DB.
+    # Models are deployed explicitly via `glyphh model deploy`.
     try:
-        from scripts.deploy_models import deploy_all_models, register_model_encoders
-        results = await deploy_all_models(
-            model_manager=model_manager,
-            session_factory=async_session_maker,
-        )
-        total_glyphs = sum(results.values())
-        logger.info(f"Deployed {len(results)} models, {total_glyphs} total glyphs")
-
-        # Register in-memory encoders (encode_query_fn) for all models.
-        # deploy_all_models writes data to DB but may skip re-loading the
-        # model into memory on hot-reload.  register_model_encoders ensures
-        # the encode_query_fn is always available for queries.
+        from scripts.deploy_models import register_model_encoders
         await register_model_encoders(
             model_manager=model_manager,
             session_factory=async_session_maker,
         )
     except Exception as e:
-        logger.warning(f"Model auto-deploy/register failed: {e}")
+        logger.warning(f"Model encoder registration failed: {e}")
 
     yield
 
@@ -209,6 +199,7 @@ def _is_allowed_origin(origin: str) -> bool:
 # Import and include routers
 from api.routes import (
     health_router,
+    org_level_router,
     org_scoped_router,
     listeners_router,
     tokens_router,
@@ -218,4 +209,6 @@ app.include_router(health_router)
 app.include_router(tokens_router)
 # listeners_router must come before org_scoped_router (more specific prefix)
 app.include_router(listeners_router)
+# org_level_router (/{org_id}/models) before org_scoped_router (/{org_id}/{model_id}/...)
+app.include_router(org_level_router)
 app.include_router(org_scoped_router)

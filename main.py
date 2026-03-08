@@ -5,9 +5,9 @@ This runtime serves deployed models through REST and MCP APIs,
 handling persistent storage, multi-model management, licensing,
 authentication, and real-time data ingestion.
 
-Models are deployed from .glyphh packages or custom_models/ directories containing
-manifest.yaml, encoder.py, and data/*.jsonl files. On startup, the
-runtime discovers and deploys eligible models to PostgreSQL.
+Models are deployed explicitly via the CLI (`glyphh model deploy`) or the
+REST API. On startup, the runtime restores previously deployed models from
+the database — no auto-deploy from filesystem.
 """
 
 import logging
@@ -94,17 +94,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _srv.model_manager = model_manager
     _srv.resource_manager = resource_manager
     
-    # Auto-deploy models from directory (JSONL → DB)
+    # Register in-memory encoders for models already deployed in the DB.
+    # Models are deployed explicitly via `glyphh model deploy`.
     try:
-        from scripts.deploy_models import deploy_all_models
-        results = await deploy_all_models(
+        from scripts.deploy_models import register_model_encoders
+        await register_model_encoders(
             model_manager=model_manager,
             session_factory=async_session_maker,
         )
-        total_glyphs = sum(results.values())
-        logger.info(f"Deployed {len(results)} models, {total_glyphs} total glyphs")
     except Exception as e:
-        logger.debug(f"Model auto-deploy skipped: {e}")
+        logger.warning(f"Model encoder registration failed: {e}")
 
     # Resume any incomplete staged exemplar encoding from a previous run
     try:

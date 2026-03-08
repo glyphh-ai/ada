@@ -400,6 +400,14 @@ class GlyphStorage:
             if emb is None:
                 continue
             v = np.array(emb, dtype=np.float32)
+            # Pad shorter vector to match dimensions
+            if len(q) < len(v):
+                q = np.pad(q, (0, len(v) - len(q)))
+                q_norm = np.linalg.norm(q)
+                if q_norm == 0:
+                    return []
+            elif len(v) < len(q):
+                v = np.pad(v, (0, len(q) - len(v)))
             v_norm = np.linalg.norm(v)
             if v_norm == 0:
                 continue
@@ -705,8 +713,13 @@ class GlyphStorage:
         if settings.resolved_storage_backend == "pgvector" and len(query_embedding) < max_dim:
             query_embedding = query_embedding + [0.0] * (max_dim - len(query_embedding))
 
-        # Use raw SQL — VectorType TypeDecorator doesn't expose
-        # pgvector's cosine_distance operator on the ORM column.
+        # SQLite / non-pgvector: use Python cosine similarity
+        if settings.resolved_storage_backend != "pgvector":
+            return await self._similarity_search_by_level_python(
+                org_id, model_id, query_embedding, level, path, top_k
+            )
+
+        # pgvector: native cosine distance via raw SQL.
         from sqlalchemy import text as sa_text
 
         emb_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
@@ -734,7 +747,62 @@ class GlyphStorage:
 
         result = await self._session.execute(sql, params)
         return [(row.glyph_id, row.path, float(row.similarity)) for row in result.all()]
-    
+
+    async def _similarity_search_by_level_python(
+        self,
+        org_id: str,
+        model_id: str,
+        query_embedding: List[float],
+        level: str,
+        path: Optional[str] = None,
+        top_k: int = 10,
+    ) -> List[Tuple[UUID, str, float]]:
+        """Python cosine similarity fallback for SQLite and non-pgvector backends."""
+        stmt = (
+            select(GlyphVector)
+            .where(
+                GlyphVector.org_id == org_id,
+                GlyphVector.model_id == model_id,
+                GlyphVector.level == level,
+            )
+        )
+        if path is not None:
+            stmt = stmt.where(GlyphVector.path == path)
+
+        result = await self._session.execute(stmt)
+        vectors = result.scalars().all()
+
+        if not vectors:
+            return []
+
+        q = np.array(query_embedding, dtype=np.float32)
+        q_norm = np.linalg.norm(q)
+        if q_norm == 0:
+            return []
+
+        scored: List[Tuple[UUID, str, float]] = []
+        for vec in vectors:
+            emb = vec.embedding
+            if emb is None:
+                continue
+            v = np.array(emb, dtype=np.float32)
+            # Pad shorter vector to match dimensions
+            if len(q) < len(v):
+                q = np.pad(q, (0, len(v) - len(q)))
+                q_norm = np.linalg.norm(q)
+                if q_norm == 0:
+                    return []
+            elif len(v) < len(q):
+                v = np.pad(v, (0, len(q) - len(v)))
+            v_norm = np.linalg.norm(v)
+            if v_norm == 0:
+                continue
+            similarity = float(np.dot(q, v) / (q_norm * v_norm))
+            scored.append((vec.glyph_id, vec.path, similarity))
+
+        scored.sort(key=lambda x: x[2], reverse=True)
+        return scored[:top_k]
+
     async def get_hierarchical_embeddings(
         self,
         org_id: str,

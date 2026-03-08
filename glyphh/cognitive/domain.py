@@ -110,6 +110,7 @@ class DomainConfig:
     navigation_trigger: dict = field(default_factory=dict)
     target_extraction_rules: dict[str, dict] = field(default_factory=dict)
     initial_state_parser: dict = field(default_factory=dict)
+    transitions: list[dict] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DomainConfig:
@@ -170,6 +171,7 @@ class DomainConfig:
             navigation_trigger=data.get("navigation_trigger", {}),
             target_extraction_rules=data.get("target_extraction_rules", {}),
             initial_state_parser=data.get("initial_state_parser", {}),
+            transitions=data.get("transitions", []),
         )
 
     @classmethod
