@@ -843,17 +843,23 @@ class NLQueryService:
                         resolved_gql = self._fill_slots(
                             gql_template, glyph_id, match_meta, query,
                         )
-                        # Stage 2 pattern filtering is handled by
-                        # FactTreeBuilder.build_two_stage_result() which
-                        # checks metadata record_type == "pattern".
                         stage2_tree = await self._execute_gql(
                             org_id, model_id, resolved_gql,
                         )
+                        # Collect ALL stage 1 glyph IDs — they are patterns
+                        # (stage 1 uses default_filter: record_type=pattern).
+                        # Pass as exclusion set so stage 2 only returns data.
+                        s1_all = _extract_top_matches(fact_tree, n=100)
+                        pattern_ids = {
+                            m["glyph_id"] for m in s1_all
+                            if m.get("glyph_id")
+                        }
                         result_tree = FactTreeBuilder.build_two_stage_result(
                             exemplar_match=match_detail,
                             data_results=stage2_tree,
                             gql_query=resolved_gql,
                             total_query_time_ms=(time.time() - start_time) * 1000,
+                            exclude_glyph_ids=pattern_ids,
                         )
                         match_method = "two_stage_gql"
                         logger.info(

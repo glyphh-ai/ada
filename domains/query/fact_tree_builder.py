@@ -6,7 +6,7 @@ Handles conversion of runtime types (GlyphResponse) to SDK types (Citation).
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 from uuid import UUID
 import hashlib
 
@@ -292,6 +292,7 @@ class FactTreeBuilder:
         data_results: FactTree,
         gql_query: str,
         total_query_time_ms: float = 0.0,
+        exclude_glyph_ids: Optional[Set[str]] = None,
     ) -> FactTree:
         """
         Build a FactTree for two-stage query results.
@@ -319,9 +320,13 @@ class FactTreeBuilder:
         # Copy Stage 2 data results into the standard "results" path.
         # The GQL executor merges plan results with description like
         # "Found N similar glyphs" and stores matches as a list in value.
-        # Filter out the reference exemplar and any other pattern glyphs —
-        # Stage 2 should only return actual data records.
+        # Filter out ALL pattern/exemplar glyphs from Stage 2 results.
+        # Uses three checks:
+        #   1. Explicit exclusion set (glyph IDs from stage 1 — all patterns)
+        #   2. The matched exemplar's glyph_id (always exclude)
+        #   3. metadata record_type == "pattern" (belt-and-suspenders)
         exclude_id = exemplar_match.get("glyph_id", "")
+        _exclude_set = exclude_glyph_ids or set()
         has_data_results = False
         try:
             s2_json = data_results.to_json() if hasattr(data_results, "to_json") else {}
@@ -336,8 +341,10 @@ class FactTreeBuilder:
                         for item in value_list:
                             glyph_id = item.get("id", "")
                             meta = item.get("metadata") or {}
-                            # Skip the reference exemplar and any pattern glyphs
+                            # Skip patterns: by ID set, by exemplar ID, or by metadata
                             if glyph_id == exclude_id:
+                                continue
+                            if glyph_id and glyph_id in _exclude_set:
                                 continue
                             if meta.get("record_type") == "pattern":
                                 continue
