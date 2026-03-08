@@ -558,9 +558,21 @@ class ModelManager:
         from domains.listeners.async_service import _extract_hierarchical_vectors
 
         BATCH_SIZE = 100
+        # Advisory lock ID derived from model_id — prevents duplicate encoding
+        # across Heroku worker processes (WEB_CONCURRENCY > 1)
+        lock_id = hash(f"exemplar_load_{org_id}_{model_id}") & 0x7FFFFFFF
 
         try:
-            # Read staged JSONL from DB — only count lines first, don't parse
+            # Acquire DB advisory lock — skip if another worker is already encoding
+            async with self._db_session_factory() as session:
+                from sqlalchemy import text
+                lock_result = await session.execute(text(f"SELECT pg_try_advisory_lock({lock_id})"))
+                acquired = lock_result.scalar()
+                if not acquired:
+                    logger.info(f"Another worker is already encoding {model_id}, skipping")
+                    return
+
+            # Read staged JSONL from DB
             async with self._db_session_factory() as session:
                 result = await session.execute(
                     select(ModelConfig).where(
@@ -718,6 +730,13 @@ class ModelManager:
             )
         finally:
             self._encoding_in_progress.discard((org_id, model_id))
+            # Release advisory lock
+            try:
+                async with self._db_session_factory() as session:
+                    from sqlalchemy import text
+                    await session.execute(text(f"SELECT pg_advisory_unlock({lock_id})"))
+            except Exception:
+                pass
 
     async def resume_staged_encoding(self) -> None:
         """Resume any incomplete exemplar encoding from a previous run.
