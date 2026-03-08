@@ -706,9 +706,11 @@ class NLQueryService:
         """Execute a GQL query string through the GQL executor engine.
 
         Uses cached glyph storage to avoid reloading embeddings per request.
-        Pre-fetches any hierarchical embeddings needed by AT LAYER / AT SEGMENT
-        clauses before entering the sync GQL executor.
+        Pre-fetches hierarchical embeddings for AT LAYER clauses, then runs
+        the sync GQL executor in a thread so find_similar() can schedule
+        async DB calls back on the main event loop.
         """
+        import asyncio
         import re as _re
         from glyphh.gql import GQLExecutor, ExecutionContext
 
@@ -719,8 +721,6 @@ class NLQueryService:
         gql_storage, _pattern_ids = await self._get_or_build_gql_storage(org_id, model_id)
 
         # Pre-fetch hierarchical embeddings for AT LAYER clauses.
-        # The sync GQL executor cannot make async DB calls, so we must
-        # populate the cache here while we're still in an async context.
         glyph_match = _re.search(r'glyph\("([^"]+)"\)', gql_query)
         layer_match = _re.search(r'AT\s+LAYER\s+(\w+)', gql_query, _re.IGNORECASE)
         if glyph_match and layer_match and hasattr(gql_storage, 'prefetch_hierarchical_embedding'):
@@ -729,6 +729,11 @@ class NLQueryService:
                 layer=layer_match.group(1),
             )
 
+        # Give storage a reference to the running event loop so find_similar()
+        # can schedule async DB queries via run_coroutine_threadsafe().
+        loop = asyncio.get_running_loop()
+        gql_storage._loop = loop
+
         context = ExecutionContext(
             model=loaded_model.sdk_model,
             storage=gql_storage,
@@ -736,7 +741,10 @@ class NLQueryService:
         )
 
         executor = GQLExecutor(context=context, enable_cache=False)
-        return executor.execute(gql_query)
+
+        # Run the sync GQL executor in a worker thread so the main event
+        # loop stays free to process find_similar()'s DB queries.
+        return await loop.run_in_executor(None, executor.execute, gql_query)
 
     async def execute_nl_query(
         self,

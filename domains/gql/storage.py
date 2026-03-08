@@ -84,6 +84,7 @@ class DatabaseGlyphStorage:
         self._hierarchical_embeddings = hierarchical_embeddings or {}
         self._vector_fetcher = vector_fetcher
         self._session_factory = session_factory
+        self._loop = None  # Set by caller before sync GQL execution
 
         logger.debug(
             f"DatabaseGlyphStorage initialized: org={org_id}, model={model_id}, "
@@ -388,8 +389,14 @@ class DatabaseGlyphStorage:
                     return results
 
         # The GQL executor is sync but DB access is async.
-        # Run in a new thread with its own event loop to avoid deadlocking
-        # the caller's event loop.
+        # Schedule the coroutine on the MAIN event loop (set by _execute_gql)
+        # instead of creating a new loop, which would corrupt SQLAlchemy's
+        # connection pool ("Future attached to a different loop").
+        if self._loop is not None:
+            future = asyncio.run_coroutine_threadsafe(_search(), self._loop)
+            return future.result(timeout=30)
+
+        # Fallback: no loop reference (shouldn't happen in runtime)
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(asyncio.run, _search())
