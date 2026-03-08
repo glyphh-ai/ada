@@ -310,12 +310,15 @@ class FactTreeBuilder:
         fact_tree = FactTree()
         fact_tree.root.description = "Similarity Search"
 
-        # Query info (the matched exemplar's concept text)
-        fact_tree.add_fact(
-            path=["query"],
-            description="Search Query",
-            value=exemplar_match.get("concept_text", ""),
-        )
+        # Only add the query/exemplar header when there are Stage 2 data
+        # results to display beneath it.  When data_results is None the
+        # exemplar itself IS the result — showing it twice is redundant.
+        if data_results is not None:
+            fact_tree.add_fact(
+                path=["query"],
+                description="Search Query",
+                value=exemplar_match.get("concept_text", ""),
+            )
 
         # Copy Stage 2 data results into the standard "results" path.
         # The GQL executor merges plan results with description like
