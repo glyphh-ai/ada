@@ -233,8 +233,40 @@ class DatabaseGlyphStorage:
             glyph_hier = self._hierarchical_embeddings[glyph_id_str]
             if level in glyph_hier and path in glyph_hier[level]:
                 return glyph_hier[level][path]
-        
-        # Not found in cache
+
+        # pgvector mode: fetch from glyph_vectors table on cache miss
+        if self._session_factory is not None:
+            try:
+                import asyncio
+                from concurrent.futures import ThreadPoolExecutor
+
+                async def _fetch():
+                    from domains.models.storage import GlyphStorage
+                    from uuid import UUID as _UUID
+                    gid = glyph_id if isinstance(glyph_id, _UUID) else _UUID(str(glyph_id))
+                    async with self._session_factory() as session:
+                        storage = GlyphStorage(session)
+                        vectors = await storage.get_glyph_vectors_by_level(
+                            org_id=self._org_id,
+                            model_id=self._model_id,
+                            glyph_id=gid,
+                            level=level,
+                        )
+                        return vectors.get(path)
+
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    embedding = pool.submit(asyncio.run, _fetch()).result(timeout=10)
+                if embedding is not None:
+                    # Cache for future lookups
+                    if glyph_id_str not in self._hierarchical_embeddings:
+                        self._hierarchical_embeddings[glyph_id_str] = {}
+                    if level not in self._hierarchical_embeddings[glyph_id_str]:
+                        self._hierarchical_embeddings[glyph_id_str][level] = {}
+                    self._hierarchical_embeddings[glyph_id_str][level][path] = embedding
+                return embedding
+            except Exception as e:
+                logger.warning(f"Failed to fetch scoped embedding for {glyph_id}/{level}/{path}: {e}")
+
         return None
     
     def compute_similarity(self, v1: Any, v2: Any) -> float:
