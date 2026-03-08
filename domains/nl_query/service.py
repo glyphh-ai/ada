@@ -794,7 +794,7 @@ class NLQueryService:
                                 "intent": m["concept_text"],
                                 "confidence": m["score"],
                                 "label": _human_label(m),
-                                "suggestion": f"{_human_label(m)} ({m['score']:.0%} match)",
+                                "suggestion": f"{_human_label(m)} ({m['score']:.1%} match)",
                                 "glyph_id": m.get("glyph_id"),
                             }
                             for m in top_matches
@@ -825,7 +825,7 @@ class NLQueryService:
                                 "intent": m["concept_text"],
                                 "confidence": m["score"],
                                 "label": _human_label(m),
-                                "suggestion": f"{_human_label(m)} ({m['score']:.0%} match)",
+                                "suggestion": f"{_human_label(m)} ({m['score']:.1%} match)",
                                 "glyph_id": m.get("glyph_id"),
                             }
                             for m in top_matches
@@ -1189,7 +1189,7 @@ class NLQueryService:
                 disambiguation.append({
                     "intent": m["concept_text"],
                     "confidence": m["score"],
-                    "suggestion": f"{m['concept_text']} ({m['score']:.0%} match)",
+                    "suggestion": f"{m['concept_text']} ({m['score']:.1%} match)",
                 })
 
             return NLQueryResult(
