@@ -290,6 +290,11 @@ class ModelConfig(Base):
     # {"encoder.py": "...", "intent.py": "..."} — stored as text
     source_files = Column(JSONType, nullable=True)
 
+    # Staged exemplar data awaiting background encoding.
+    # Raw JSONL text (one JSON object per line).  Written during deploy,
+    # consumed and NULLed by the background encoder job.
+    staged_exemplars = Column(Text, nullable=True)
+
     # Similarity weights for each edge type
     similarity_weights = Column(JSONType, default=lambda: {
         "similarity": 1.0,

@@ -454,6 +454,7 @@ async def register_model_encoders(
                 short_description=loaded.manifest.description,
                 long_description="",
                 encode_query_fn=loaded.encode_query_fn,
+                entry_to_record_fn=loaded.entry_to_record_fn,
             )
 
             model_manager._models[(org_id, model_id)] = manager_model

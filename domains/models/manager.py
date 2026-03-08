@@ -64,6 +64,7 @@ class LoadedModel:
         long_description: str,
         encode_query_fn: Optional[Any] = None,
         assess_query_fn: Optional[Any] = None,
+        entry_to_record_fn: Optional[Any] = None,
     ):
         self.org_id = org_id
         self.model_id = model_id
@@ -78,6 +79,7 @@ class LoadedModel:
         self.long_description = long_description
         self.encode_query_fn = encode_query_fn
         self.assess_query_fn = assess_query_fn
+        self.entry_to_record_fn = entry_to_record_fn
 
 
 class ReEncodeJob:
@@ -199,7 +201,7 @@ class ModelManager:
         short_description = getattr(sdk_model, 'short_description', '') or ''
         long_description = getattr(sdk_model, 'long_description', '') or ''
         
-        _enc_fn, _assess_fn = self._load_model_fns(str(path))
+        _enc_fn, _assess_fn, _etr_fn = self._load_model_fns(str(path))
         loaded_model = LoadedModel(
             org_id=org_id,
             model_id=model_id,
@@ -213,6 +215,7 @@ class ModelManager:
             long_description=long_description,
             encode_query_fn=_enc_fn,
             assess_query_fn=_assess_fn,
+            entry_to_record_fn=_etr_fn,
         )
         
         # Serialize encoder config for DB storage
@@ -414,6 +417,7 @@ class ModelManager:
             long_description="",
             encode_query_fn=loaded.encode_query_fn,
             assess_query_fn=loaded.assess_query_fn,
+            entry_to_record_fn=loaded.entry_to_record_fn,
         )
 
         # Serialize encoder config for DB storage
@@ -488,9 +492,264 @@ class ModelManager:
             f"from directory into org={org_id}, model={model_id}"
         )
 
+        # Auto-load exemplars from data/ if present.
+        # Stage raw JSONL text to the DB (survives dyno restarts), then
+        # kick off a background task to encode.  No large in-memory list.
+        data_dir = model_dir / "data"
+        if data_dir.exists():
+            jsonl_text = self._read_exemplar_jsonl_raw(data_dir)
+            if jsonl_text:
+                line_count = sum(1 for ln in jsonl_text.split("\n") if ln.strip())
+                logger.info(
+                    f"Staging {line_count} exemplars for {model_id} to DB"
+                )
+                async with self._db_session_factory() as session:
+                    result = await session.execute(
+                        select(ModelConfig).where(
+                            ModelConfig.org_id == org_id,
+                            ModelConfig.model_id == model_id,
+                        )
+                    )
+                    cfg = result.scalar_one_or_none()
+                    if cfg:
+                        cfg.staged_exemplars = jsonl_text
+                        await session.commit()
+
+                asyncio.create_task(
+                    self._process_staged_exemplars(org_id, model_id),
+                    name=f"exemplar_load_{org_id}_{model_id}",
+                )
+
         return loaded_model
 
-    
+    @staticmethod
+    def _read_exemplar_jsonl_raw(data_dir: Path) -> str:
+        """Read exemplar JSONL files from a data directory as raw text.
+
+        Returns concatenated JSONL string (one JSON object per line).
+        Only reads files matching exemplars*.jsonl.
+        """
+        parts: list[str] = []
+        for jsonl_file in sorted(data_dir.glob("exemplars*.jsonl")):
+            text = jsonl_file.read_text()
+            if text:
+                parts.append(text.rstrip("\n"))
+        return "\n".join(parts) if parts else ""
+
+    async def _process_staged_exemplars(
+        self,
+        org_id: str,
+        model_id: str,
+    ) -> None:
+        """Encode staged exemplars from the DB and store as glyphs.
+
+        Reads raw JSONL from model_configs.staged_exemplars, encodes in
+        batches of BATCH_SIZE with per-batch commits, and NULLs the
+        staged column when complete.  Supports resume: if the process
+        is interrupted, the staged data remains and will be picked up
+        on the next startup or deploy.
+        """
+        import json as json_mod
+        from domains.models.storage import GlyphStorage
+        from glyphh.core.types import Concept
+        from glyphh.core.ops import bundle
+        from domains.listeners.async_service import _extract_hierarchical_vectors
+
+        BATCH_SIZE = 500
+
+        try:
+            # Read staged JSONL from DB
+            async with self._db_session_factory() as session:
+                result = await session.execute(
+                    select(ModelConfig).where(
+                        ModelConfig.org_id == org_id,
+                        ModelConfig.model_id == model_id,
+                    )
+                )
+                cfg = result.scalar_one_or_none()
+                if not cfg or not cfg.staged_exemplars:
+                    logger.info(f"No staged exemplars for {org_id}/{model_id}")
+                    return
+                raw_jsonl = cfg.staged_exemplars
+
+            # Parse lines (streaming — one line at a time, not a big list)
+            lines = [ln for ln in raw_jsonl.split("\n") if ln.strip()]
+            total = len(lines)
+            logger.info(f"Processing {total} staged exemplars for {model_id}")
+
+            # Get the loaded model's encoder and entry_to_record_fn
+            key = (org_id, model_id)
+            loaded_model = self._models.get(key)
+            if not loaded_model:
+                logger.error(f"Model {model_id} not in memory, cannot encode exemplars")
+                return
+
+            encoder = loaded_model.encoder
+            entry_to_record_fn = loaded_model.entry_to_record_fn
+
+            # If not available (e.g. model restored from DB after restart),
+            # try to reconstruct from stored source_files
+            if entry_to_record_fn is None:
+                entry_to_record_fn = await self._restore_entry_to_record(org_id, model_id)
+                if entry_to_record_fn:
+                    loaded_model.entry_to_record_fn = entry_to_record_fn
+
+            # Check existing glyph count for resume
+            async with self._db_session_factory() as session:
+                storage = GlyphStorage(session)
+                existing_count = await storage.count_glyphs(org_id, model_id)
+
+            if existing_count >= total:
+                logger.info(
+                    f"Exemplars already loaded for {org_id}/{model_id} "
+                    f"({existing_count} glyphs), clearing staged data"
+                )
+                await self._clear_staged_exemplars(org_id, model_id)
+                return
+
+            # Check license limits
+            from glyphh.licensing import get_current_license
+            license_info = get_current_license()
+            max_glyphs = license_info.max_glyphs_per_model
+            if max_glyphs >= 0 and total > max_glyphs:
+                logger.warning(
+                    f"Model {model_id} has {total:,} entries but "
+                    f"{license_info.tier} tier allows {max_glyphs:,}. "
+                    f"Encoding first {max_glyphs:,}."
+                )
+                lines = lines[:max_glyphs]
+                total = len(lines)
+
+            # Resume: skip already-encoded entries
+            start_index = existing_count if 0 < existing_count < total else 0
+            if existing_count > 0 and start_index == 0:
+                async with self._db_session_factory() as session:
+                    storage = GlyphStorage(session)
+                    logger.info(f"Re-deploying {model_id}: clearing {existing_count} old glyphs")
+                    await storage.delete_model_data(org_id, model_id)
+            elif start_index > 0:
+                logger.info(f"Resuming exemplar load for {model_id}: {start_index}/{total}")
+
+            created = start_index
+
+            for batch_start in range(start_index, total, BATCH_SIZE):
+                batch_end = min(batch_start + BATCH_SIZE, total)
+
+                async with self._db_session_factory() as session:
+                    storage = GlyphStorage(session)
+
+                    for i in range(batch_start, batch_end):
+                        try:
+                            entry = json_mod.loads(lines[i])
+
+                            if entry_to_record_fn:
+                                record = entry_to_record_fn(entry)
+                                concept_text = record["concept_text"]
+                                metadata = record["metadata"]
+                                attrs = record["attributes"]
+                            else:
+                                concept_text = entry.get("question", entry.get("text", ""))
+                                metadata = {k: v for k, v in entry.items() if k != "question"}
+                                attrs = {"text": concept_text}
+
+                            concept = Concept(
+                                name=f"entry_{created}",
+                                attributes=attrs,
+                                metadata=metadata,
+                            )
+                            glyph = encoder.encode(concept)
+
+                            non_temporal = [
+                                layer.cortex.data
+                                for name, layer in glyph.layers.items()
+                                if name != "_temporal"
+                                and hasattr(layer, "cortex")
+                                and layer.cortex is not None
+                            ]
+                            if non_temporal:
+                                embedding = bundle(non_temporal).astype(float).tolist()
+                            else:
+                                embedding = glyph.global_cortex.data.astype(float).tolist()
+
+                            glyph_response = await storage.create_glyph(
+                                org_id=org_id,
+                                model_id=model_id,
+                                concept_text=concept_text,
+                                embedding=embedding,
+                                metadata={**metadata, "record_type": "pattern"},
+                            )
+
+                            hierarchical = _extract_hierarchical_vectors(glyph)
+                            if hierarchical:
+                                await storage.create_glyph_vectors_batch(
+                                    glyph_id=glyph_response.glyph_id,
+                                    org_id=org_id,
+                                    model_id=model_id,
+                                    vectors=hierarchical,
+                                )
+
+                            created += 1
+
+                        except Exception as e:
+                            logger.warning(f"Failed to encode entry {i} in {model_id}: {e}")
+                            continue
+
+                    await session.commit()
+
+                logger.info(f"Encoded {created}/{total} exemplars for {model_id}")
+
+            # Done — clear staged data
+            await self._clear_staged_exemplars(org_id, model_id)
+
+            logger.info(
+                f"Background exemplar load complete for {org_id}/{model_id}: "
+                f"{created} glyphs from {total} entries"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Background exemplar load failed for {model_id}: {e}",
+                exc_info=True,
+            )
+
+    async def _clear_staged_exemplars(self, org_id: str, model_id: str) -> None:
+        """NULL out the staged_exemplars column after encoding is complete."""
+        async with self._db_session_factory() as session:
+            result = await session.execute(
+                select(ModelConfig).where(
+                    ModelConfig.org_id == org_id,
+                    ModelConfig.model_id == model_id,
+                )
+            )
+            cfg = result.scalar_one_or_none()
+            if cfg:
+                cfg.staged_exemplars = None
+                await session.commit()
+
+    async def _restore_entry_to_record(self, org_id: str, model_id: str) -> Optional[Any]:
+        """Try to restore entry_to_record from the model's stored source_files.
+
+        Called when the model is in memory but entry_to_record_fn was not
+        loaded (e.g. old deploy before this field was added).  Reads
+        source_files from DB and evals encoder.py to get the function.
+        """
+        try:
+            async with self._db_session_factory() as session:
+                result = await session.execute(
+                    select(ModelConfig).where(
+                        ModelConfig.org_id == org_id,
+                        ModelConfig.model_id == model_id,
+                    )
+                )
+                cfg = result.scalar_one_or_none()
+                if cfg and cfg.source_files:
+                    _, _, entry_to_record_fn = self._load_model_fns_from_source(
+                        cfg.source_files
+                    )
+                    return entry_to_record_fn
+        except Exception as e:
+            logger.debug(f"Could not restore entry_to_record for {model_id}: {e}")
+        return None
 
     async def unload_model(
         self,
@@ -612,12 +871,15 @@ class ModelManager:
             # Try to load model fns: stored source first, then disk fallback
             encode_query_fn = None
             assess_query_fn = None
+            entry_to_record_fn = None
             if db_config.source_files:
-                encode_query_fn, assess_query_fn = self._load_model_fns_from_source(
-                    db_config.source_files
+                encode_query_fn, assess_query_fn, entry_to_record_fn = (
+                    self._load_model_fns_from_source(db_config.source_files)
                 )
             if encode_query_fn is None and db_config.model_path:
-                encode_query_fn, assess_query_fn = self._load_model_fns(db_config.model_path)
+                encode_query_fn, assess_query_fn, entry_to_record_fn = (
+                    self._load_model_fns(db_config.model_path)
+                )
             
             class RestoredModel:
                 """Minimal model proxy for DB-restored models."""
@@ -645,16 +907,27 @@ class ModelManager:
                 long_description=db_config.long_description or "",
                 encode_query_fn=encode_query_fn,
                 assess_query_fn=assess_query_fn,
+                entry_to_record_fn=entry_to_record_fn,
             )
-            
+
             self._models[(org_id, model_id)] = loaded_model
-            
+
             logger.info(
                 f"Restored model '{db_config.meta_name}' v{db_config.model_version} "
                 f"from DB for org={org_id}, model={model_id}"
                 f"{' (with custom encode_query_fn)' if encode_query_fn else ''}"
             )
-            
+
+            # Check for staged exemplars that need processing (e.g. after dyno restart)
+            if db_config.staged_exemplars:
+                logger.info(
+                    f"Found staged exemplars for {model_id}, resuming encoding"
+                )
+                asyncio.create_task(
+                    self._process_staged_exemplars(org_id, model_id),
+                    name=f"exemplar_load_{org_id}_{model_id}",
+                )
+
             return loaded_model
             
         except Exception as e:
@@ -664,12 +937,12 @@ class ModelManager:
             return None
     
     @staticmethod
-    def _load_model_fns(model_path: str) -> tuple[Optional[Any], Optional[Any]]:
-        """Load encode_query_fn and assess_query_fn from a model directory's encoder.py.
+    def _load_model_fns(model_path: str) -> tuple[Optional[Any], Optional[Any], Optional[Any]]:
+        """Load encode_query_fn, assess_query_fn, entry_to_record_fn from encoder.py.
 
         Used by load_model and _load_from_db to restore custom query functions when
-        lazy-loading a model. Returns (None, None) silently if the file doesn't exist
-        or has no matching functions.
+        lazy-loading a model. Returns (None, None, None) silently if the file doesn't
+        exist or has no matching functions.
         """
         try:
             from domains.models.loader import load_encoder_config
@@ -678,17 +951,17 @@ class ModelManager:
             if model_dir.is_file():
                 model_dir = model_dir.parent
             if not model_dir.is_dir():
-                return None, None
-            _, _, encode_query_fn, _, assess_query_fn = load_encoder_config(model_dir)
-            return encode_query_fn, assess_query_fn
+                return None, None, None
+            _, _, encode_query_fn, entry_to_record_fn, assess_query_fn = load_encoder_config(model_dir)
+            return encode_query_fn, assess_query_fn, entry_to_record_fn
         except Exception as e:
             logger.debug(f"Could not load model fns from {model_path}: {e}")
-            return None, None
+            return None, None, None
 
     @staticmethod
     def _load_encode_query_fn(model_path: str) -> Optional[Any]:
         """Backward-compat wrapper — returns only encode_query_fn."""
-        encode_query_fn, _ = ModelManager._load_model_fns(model_path)
+        encode_query_fn, _, _ = ModelManager._load_model_fns(model_path)
         return encode_query_fn
 
     @staticmethod
@@ -721,18 +994,19 @@ class ModelManager:
     @staticmethod
     def _load_model_fns_from_source(
         source_files: Dict[str, str],
-    ) -> tuple[Optional[Any], Optional[Any]]:
-        """Load encode_query_fn and assess_query_fn from stored source code.
+    ) -> tuple[Optional[Any], Optional[Any], Optional[Any]]:
+        """Load model functions from stored source code.
 
         Creates temporary module objects so local imports work
         (e.g., encoder.py can ``from intent import extract_keywords``).
-        Returns (encode_query_fn, assess_query_fn) or (None, None) on failure.
+        Returns (encode_query_fn, assess_query_fn, entry_to_record_fn)
+        or (None, None, None) on failure.
         """
         import sys
         import types
 
         if not source_files or "encoder.py" not in source_files:
-            return None, None
+            return None, None, None
 
         created_modules: list[str] = []
         try:
@@ -763,11 +1037,12 @@ class ModelManager:
 
             encode_query_fn = getattr(encoder_mod, "encode_query", None)
             assess_query_fn = getattr(encoder_mod, "assess_query", None)
-            return encode_query_fn, assess_query_fn
+            entry_to_record_fn = getattr(encoder_mod, "entry_to_record", None)
+            return encode_query_fn, assess_query_fn, entry_to_record_fn
 
         except Exception as e:
             logger.warning(f"Failed to load model fns from stored source: {e}")
-            return None, None
+            return None, None, None
         finally:
             # Clean up temporary modules from sys.modules
             for mod_name in created_modules:
