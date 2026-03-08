@@ -547,6 +547,23 @@ class NLQueryService:
 
         return template
 
+    @staticmethod
+    def _inject_stage2_filter(gql: str) -> str:
+        """Inject WHERE record_type != 'pattern' into a stage 2 GQL query.
+
+        Stage 2 searches for data records, not exemplars (patterns).
+        If the GQL already has a WHERE clause, leave it alone.
+        """
+        import re
+        # Insert WHERE before LIMIT, THRESHOLD, AT LAYER, or end of string
+        return re.sub(
+            r"(FIND SIMILAR TO .+?)((?:\s+(?:AT LAYER|LIMIT|THRESHOLD))\b)",
+            r"\1 WHERE record_type != 'pattern'\2",
+            gql,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+
     async def _get_or_build_gql_storage(
         self, org_id: str, model_id: str,
     ):
@@ -843,6 +860,12 @@ class NLQueryService:
                         resolved_gql = self._fill_slots(
                             gql_template, glyph_id, match_meta, query,
                         )
+                        # Stage 2 must exclude exemplar/pattern records —
+                        # they were the routing layer, not data.
+                        if "WHERE" not in resolved_gql.upper():
+                            # Inject exclusion after FIND SIMILAR ... target
+                            # before LIMIT/THRESHOLD/AT LAYER
+                            resolved_gql = self._inject_stage2_filter(resolved_gql)
                         stage2_tree = await self._execute_gql(
                             org_id, model_id, resolved_gql,
                         )
