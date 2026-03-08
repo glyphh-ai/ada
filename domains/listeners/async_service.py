@@ -787,6 +787,22 @@ class AsyncListenerService:
             if not encoder:
                 raise ValueError(f"Model not loaded: {org_id}/{model_id}")
             
+            # Check if model opts into hierarchical vector storage
+            store_hierarchical = False
+            try:
+                from domains.models.db_models import ModelConfig as _MC
+                async with self._session_maker() as _cfg_sess:
+                    _cfg_row = (await _cfg_sess.execute(
+                        select(_MC).where(
+                            _MC.org_id == org_id, _MC.model_id == model_id,
+                        )
+                    )).scalar_one_or_none()
+                    if _cfg_row and _cfg_row.encoder_config:
+                        _scfg = _cfg_row.encoder_config.get("_similarity_config") or {}
+                        store_hierarchical = bool(_scfg.get("store_hierarchical_vectors", False))
+            except Exception:
+                pass
+
             # Get encoder config structure for validation
             encoder_config = getattr(encoder, 'config', None)
             logger.info(f"Encoder config type: {type(encoder_config)}, has temporal_source: {hasattr(encoder_config, 'temporal_source') if encoder_config else 'N/A'}")
@@ -903,29 +919,25 @@ class AsyncListenerService:
                                 metadata=glyph_metadata,
                             )
                             
-                            # Extract and store hierarchical vectors
-                            hierarchical_vectors = _extract_hierarchical_vectors(glyph)
-                            if hierarchical_vectors:
-                                # Log first glyph's hierarchical structure for debugging
-                                if encoded == 0:
-                                    levels = {}
-                                    for v in hierarchical_vectors:
-                                        level = v['level']
-                                        if level not in levels:
-                                            levels[level] = []
-                                        levels[level].append(v['path'])
-                                    logger.info(f"Hierarchical vectors for first glyph: {levels}")
-                                
-                                await storage.create_glyph_vectors_batch(
-                                    glyph_id=glyph_response.glyph_id,
-                                    org_id=org_id,
-                                    model_id=model_id,
-                                    vectors=hierarchical_vectors,
-                                )
-                            else:
-                                # Log if no hierarchical vectors found
-                                if encoded == 0:
-                                    logger.warning(f"No hierarchical vectors extracted from glyph. Has layers: {hasattr(glyph, 'layers')}, layers: {list(glyph.layers.keys()) if hasattr(glyph, 'layers') and glyph.layers else 'None'}")
+                            # Extract and store hierarchical vectors (opt-in via config)
+                            if store_hierarchical:
+                                hierarchical_vectors = _extract_hierarchical_vectors(glyph)
+                                if hierarchical_vectors:
+                                    if encoded == 0:
+                                        levels = {}
+                                        for v in hierarchical_vectors:
+                                            level = v['level']
+                                            if level not in levels:
+                                                levels[level] = []
+                                            levels[level].append(v['path'])
+                                        logger.info(f"Hierarchical vectors for first glyph: {levels}")
+
+                                    await storage.create_glyph_vectors_batch(
+                                        glyph_id=glyph_response.glyph_id,
+                                        org_id=org_id,
+                                        model_id=model_id,
+                                        vectors=hierarchical_vectors,
+                                    )
                             
                             encoded += 1
                             processed += 1

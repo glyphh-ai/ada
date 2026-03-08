@@ -181,6 +181,18 @@ async def deploy_model_to_db(
         )
         return existing_count
 
+    # Check if model opts into hierarchical vector storage
+    store_hierarchical = False
+    try:
+        import yaml as _yaml
+        _cfg_path = model_dir / "config.yaml"
+        if _cfg_path.exists():
+            _raw = _yaml.safe_load(_cfg_path.read_text()) or {}
+            _sim = _raw.get("similarity") or {}
+            store_hierarchical = bool(_sim.get("store_hierarchical_vectors", False))
+    except Exception:
+        pass
+
     # Create encoder from model's config
     encoder = Encoder(loaded.encoder_config)
 
@@ -240,15 +252,16 @@ async def deploy_model_to_db(
                     metadata={**metadata, "record_type": "pattern"},
                 )
 
-                # Store hierarchical vectors (layer, segment, role)
-                hierarchical = _extract_hierarchical_vectors(glyph)
-                if hierarchical:
-                    await storage.create_glyph_vectors_batch(
-                        glyph_id=glyph_response.glyph_id,
-                        org_id=org_id,
-                        model_id=model_id,
-                        vectors=hierarchical,
-                    )
+                # Store hierarchical vectors (layer, segment, role) — opt-in
+                if store_hierarchical:
+                    hierarchical = _extract_hierarchical_vectors(glyph)
+                    if hierarchical:
+                        await storage.create_glyph_vectors_batch(
+                            glyph_id=glyph_response.glyph_id,
+                            org_id=org_id,
+                            model_id=model_id,
+                            vectors=hierarchical,
+                        )
 
                 created += 1
 

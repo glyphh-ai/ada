@@ -609,6 +609,35 @@ class ModelManager:
                     if entry_to_record_fn:
                         loaded_model.entry_to_record_fn = entry_to_record_fn
 
+                # Read model config to check store_hierarchical_vectors
+                store_hierarchical = False
+                try:
+                    model_path = Path(loaded_model.model_path) if loaded_model.model_path else None
+                    if model_path:
+                        config_dir = model_path.parent if model_path.is_file() else model_path
+                        _cfg_path = config_dir / "config.yaml"
+                        if _cfg_path.exists():
+                            import yaml as _yaml
+                            _raw = _yaml.safe_load(_cfg_path.read_text()) or {}
+                            _sim = _raw.get("similarity") or {}
+                            store_hierarchical = bool(_sim.get("store_hierarchical_vectors", False))
+                    # Fallback: check DB-persisted encoder_config._similarity_config
+                    if not store_hierarchical:
+                        async with self._db_session_factory() as _cfg_sess:
+                            _cfg_row = (await _cfg_sess.execute(
+                                select(ModelConfig).where(
+                                    ModelConfig.org_id == org_id,
+                                    ModelConfig.model_id == model_id,
+                                )
+                            )).scalar_one_or_none()
+                            if _cfg_row and _cfg_row.encoder_config:
+                                _scfg = _cfg_row.encoder_config.get("_similarity_config") or {}
+                                store_hierarchical = bool(_scfg.get("store_hierarchical_vectors", False))
+                except Exception:
+                    pass
+                if store_hierarchical:
+                    logger.info(f"Hierarchical vectors enabled for {model_id}")
+
                 # Check existing glyph count for resume
                 async with self._db_session_factory() as session:
                     storage = GlyphStorage(session)
@@ -694,14 +723,15 @@ class ModelManager:
                                     metadata={**metadata, "record_type": "pattern"},
                                 )
 
-                                hierarchical = _extract_hierarchical_vectors(glyph)
-                                if hierarchical:
-                                    await storage.create_glyph_vectors_batch(
-                                        glyph_id=glyph_response.glyph_id,
-                                        org_id=org_id,
-                                        model_id=model_id,
-                                        vectors=hierarchical,
-                                    )
+                                if store_hierarchical:
+                                    hierarchical = _extract_hierarchical_vectors(glyph)
+                                    if hierarchical:
+                                        await storage.create_glyph_vectors_batch(
+                                            glyph_id=glyph_response.glyph_id,
+                                            org_id=org_id,
+                                            model_id=model_id,
+                                            vectors=hierarchical,
+                                        )
 
                                 created += 1
 
