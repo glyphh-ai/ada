@@ -167,7 +167,7 @@ def resolve_runtime_url(cli_override: Optional[str] = None) -> str:
 
 def resolve_runtime_token(cli_override: Optional[str] = None) -> Optional[str]:
     """Resolve the runtime auth token using the priority chain:
-    CLI flag → GLYPHH_TOKEN env → config.json runtime_token → access_token → None.
+    CLI flag → GLYPHH_TOKEN env → runtime_tokens[endpoint] → runtime_token → access_token → None.
 
     Falls back to access_token (platform JWT) since the runtime accepts both
     platform JWTs and database tokens.
@@ -182,6 +182,15 @@ def resolve_runtime_token(cli_override: Optional[str] = None) -> Optional[str]:
     from .auth import _load_config
     config = _load_config()
 
+    # Per-endpoint token (runtime_tokens dict keyed by endpoint URL)
+    runtime_tokens = config.get("runtime_tokens", {})
+    if isinstance(runtime_tokens, dict):
+        endpoint = resolve_runtime_url()
+        endpoint_token = runtime_tokens.get(endpoint, "").strip()
+        if endpoint_token:
+            return endpoint_token
+
+    # Legacy singular runtime_token
     runtime_token = config.get("runtime_token", "").strip()
     if runtime_token:
         return runtime_token

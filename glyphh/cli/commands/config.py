@@ -147,10 +147,22 @@ def _resolve_with_source(kind: str) -> tuple:
         env_val = os.environ.get("GLYPHH_TOKEN", "").strip()
         if env_val:
             return env_val, "GLYPHH_TOKEN env var"
+        # Per-endpoint token
+        runtime_tokens = config.get("runtime_tokens", {})
+        if isinstance(runtime_tokens, dict):
+            endpoint = resolve_runtime_url()
+            endpoint_token = runtime_tokens.get(endpoint, "").strip()
+            if endpoint_token:
+                return endpoint_token, f"~/.glyphh/config.json (runtime_tokens[{endpoint}])"
+        # Legacy singular
         stored_rt = config.get("runtime_token", "").strip()
         if stored_rt:
             return stored_rt, "~/.glyphh/config.json (runtime_token)"
-        return "", "none (run: auth logout → auth login to bootstrap)"
+        # Fallback to access_token
+        access = config.get("access_token", "").strip()
+        if access:
+            return access, "~/.glyphh/config.json (access_token fallback)"
+        return "", "none (run: auth login to connect)"
 
     return "", "unknown"
 
