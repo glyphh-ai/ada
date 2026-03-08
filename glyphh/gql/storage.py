@@ -199,6 +199,27 @@ class GlyphStorageProtocol(Protocol):
         """Remove all glyphs from storage."""
         ...
 
+    def find_similar(
+        self,
+        query_vector: VectorLike,
+        limit: int = 10,
+        threshold: float = 0.0,
+        scope_layer: Optional[str] = None,
+        scope_segment: Optional[str] = None,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Native similarity search — optional optimization for backends with
+        built-in vector search (e.g. pgvector).
+
+        When implemented, returns a list of
+        ``{"glyph_id": str, "score": float, "glyph": Any}`` dicts sorted
+        by score descending.
+
+        Returning ``None`` signals "not supported" and the caller falls
+        back to the Python-loop search over list_glyphs().
+        """
+        ...
+
 
 class InMemoryGlyphStorage:
     """

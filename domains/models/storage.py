@@ -152,6 +152,24 @@ class GlyphStorage:
             updated_at=glyph.updated_at,
         )
     
+    async def get_glyph_embedding(
+        self,
+        org_id: str,
+        model_id: str,
+        glyph_id,
+    ) -> Optional[List[float]]:
+        """Fetch the embedding vector for a single glyph."""
+        gid = glyph_id if isinstance(glyph_id, UUID) else UUID(str(glyph_id))
+        result = await self._session.execute(
+            select(Glyph.embedding).where(
+                Glyph.id == gid,
+                Glyph.org_id == org_id,
+                Glyph.model_id == model_id,
+            )
+        )
+        row = result.scalar_one_or_none()
+        return list(row) if row is not None else None
+
     async def get_glyphs_by_ids(
         self,
         org_id: str,

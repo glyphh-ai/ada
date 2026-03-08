@@ -56,10 +56,11 @@ class DatabaseGlyphStorage:
         similarity_service: Optional[SimilarityService] = None,
         hierarchical_embeddings: Optional[Dict[str, Dict[str, Dict[str, List[float]]]]] = None,
         vector_fetcher: Optional[Callable] = None,
+        session_factory: Optional[Callable] = None,
     ):
         """
         Initialize database glyph storage.
-        
+
         Args:
             org_id: Organization ID for scoping
             model_id: Model ID for scoping
@@ -70,6 +71,9 @@ class DatabaseGlyphStorage:
             hierarchical_embeddings: Optional pre-fetched hierarchical embeddings
                                     {glyph_id: {level: {path: embedding}}}
             vector_fetcher: Optional async callable to fetch hierarchical vectors on demand
+            session_factory: Optional async context manager for DB sessions.
+                            When provided, find_similar() delegates to pgvector
+                            instead of iterating in-memory.
         """
         self._org_id = org_id
         self._model_id = model_id
@@ -79,7 +83,8 @@ class DatabaseGlyphStorage:
         self._similarity_service = similarity_service
         self._hierarchical_embeddings = hierarchical_embeddings or {}
         self._vector_fetcher = vector_fetcher
-        
+        self._session_factory = session_factory
+
         logger.debug(
             f"DatabaseGlyphStorage initialized: org={org_id}, model={model_id}, "
             f"glyphs={len(self._glyphs)}, embeddings={len(embeddings)}, "
@@ -138,19 +143,42 @@ class DatabaseGlyphStorage:
     def get_embedding(self, glyph_id: str) -> Optional[List[float]]:
         """
         Get the primary embedding vector for a glyph.
-        
-        Retrieves the embedding from the embeddings dict passed at construction.
-        
-        Args:
-            glyph_id: The glyph identifier
-            
-        Returns:
-            The embedding vector as a list of floats, or None if not available.
-        
-        Requirements:
-            - 5.3: Returns embedding from the embeddings dict
+
+        Retrieves from the in-memory cache first.  When session_factory is
+        available (pgvector mode), fetches from DB on cache miss — this
+        avoids pre-loading all embeddings while still supporting
+        glyph("uuid") references in GQL.
         """
-        return self._embeddings.get(str(glyph_id))
+        cached = self._embeddings.get(str(glyph_id))
+        if cached is not None:
+            return cached
+
+        # pgvector mode: fetch single embedding from DB on demand
+        if self._session_factory is not None:
+            try:
+                import asyncio
+                from concurrent.futures import ThreadPoolExecutor
+
+                async def _fetch():
+                    from domains.models.storage import GlyphStorage
+                    async with self._session_factory() as session:
+                        storage = GlyphStorage(session)
+                        return await storage.get_glyph_embedding(
+                            org_id=self._org_id,
+                            model_id=self._model_id,
+                            glyph_id=glyph_id,
+                        )
+
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    embedding = pool.submit(asyncio.run, _fetch()).result(timeout=10)
+                if embedding is not None:
+                    # Cache for future lookups
+                    self._embeddings[str(glyph_id)] = embedding
+                return embedding
+            except Exception as e:
+                logger.warning(f"Failed to fetch embedding for {glyph_id}: {e}")
+
+        return None
     
     def get_embedding_for_scope(
         self,
@@ -251,6 +279,79 @@ class DatabaseGlyphStorage:
             logger.warning(f"Similarity computation failed: {e}")
             return 0.0
     
+    def find_similar(
+        self,
+        query_vector,
+        limit: int = 10,
+        threshold: float = 0.0,
+        scope_layer: Optional[str] = None,
+        scope_segment: Optional[str] = None,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Native pgvector similarity search — avoids loading all vectors into RAM.
+
+        Returns None if no session_factory (falls back to Python loop).
+        """
+        if self._session_factory is None:
+            return None  # signal: not supported, use Python fallback
+
+        import asyncio
+
+        async def _search():
+            from domains.models.storage import GlyphStorage
+            from infrastructure.config import settings
+
+            max_dim = settings.resolved_max_vector_dimension
+            vec = query_vector.data if hasattr(query_vector, 'data') else list(query_vector)
+            if len(vec) < max_dim:
+                vec = vec + [0.0] * (max_dim - len(vec))
+
+            async with self._session_factory() as session:
+                storage = GlyphStorage(session)
+
+                if scope_layer:
+                    raw = await storage.similarity_search_by_level(
+                        org_id=self._org_id,
+                        model_id=self._model_id,
+                        query_embedding=vec,
+                        level="layer",
+                        path=scope_layer,
+                        top_k=limit,
+                    )
+                    # (glyph_id, path, score) → look up glyph from our metadata cache
+                    results = []
+                    for glyph_id, _path, score in raw:
+                        gid = str(glyph_id)
+                        if score < threshold:
+                            continue
+                        glyph = self._glyphs.get(gid)
+                        if glyph is not None:
+                            results.append({"glyph_id": gid, "score": score, "glyph": glyph})
+                    return results
+                else:
+                    raw = await storage.similarity_search(
+                        org_id=self._org_id,
+                        model_id=self._model_id,
+                        query_embedding=vec,
+                        top_k=limit,
+                    )
+                    results = []
+                    for glyph_resp, score in raw:
+                        if score < threshold:
+                            continue
+                        gid = str(glyph_resp.id)
+                        # Use cached glyph if available (has full metadata)
+                        glyph = self._glyphs.get(gid, glyph_resp)
+                        results.append({"glyph_id": gid, "score": score, "glyph": glyph})
+                    return results
+
+        # The GQL executor is sync but DB access is async.
+        # Run in a new thread with its own event loop to avoid deadlocking
+        # the caller's event loop.
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, _search())
+            return future.result(timeout=30)
+
     def get_glyph_attribute(self, glyph_id: str, attribute: str) -> Any:
         """
         Get an attribute value from a glyph.

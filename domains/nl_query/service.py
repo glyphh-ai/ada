@@ -603,14 +603,14 @@ class NLQueryService:
 
         Returns (gql_storage, pattern_glyph_ids) tuple.
 
-        Caches glyph embeddings per model to avoid reloading 22K+ vectors
-        on every request.  Uses an async lock to prevent thundering herd —
-        only one request builds the cache, others wait.
-        Cache is invalidated after 5 minutes.
+        When pgvector is available, only loads glyph metadata (lightweight)
+        and delegates similarity search to pgvector SQL via find_similar().
+        Falls back to full in-memory loading for non-pgvector backends.
         """
         import time as _time
         from domains.gql.storage import DatabaseGlyphStorage
         from domains.models.storage import GlyphStorage
+        from infrastructure.config import settings
         from shared.similarity_service import SimilarityService
 
         cache_key = (org_id, model_id)
@@ -635,32 +635,40 @@ class NLQueryService:
             if loaded_model is None:
                 raise ValueError(f"Model {org_id}/{model_id} not loaded")
 
-            async with self.query_service._session_factory() as session:
+            use_pgvector = settings.resolved_storage_backend == "pgvector"
+            session_factory = self.query_service._session_factory
+
+            async with session_factory() as session:
                 storage_db = GlyphStorage(session)
 
-                all_glyphs, all_embeddings = await storage_db.list_glyphs_with_embeddings(
-                    org_id=org_id,
-                    model_id=model_id,
-                    limit=50000,
-                )
-
-                # Include all glyphs so glyph("uuid") references resolve
-                # (Stage 2 GQL may reference the matched exemplar's vector).
-                # Pattern glyphs are filtered from results by build_two_stage_result.
-                db_glyphs = all_glyphs
-
-                embeddings = {
-                    str(g.id): all_embeddings[str(g.id)]
-                    for g in db_glyphs
-                    if str(g.id) in all_embeddings
-                }
-
-                glyph_ids = [g.id for g in db_glyphs]
-                hierarchical = await storage_db.get_hierarchical_embeddings(
-                    org_id=org_id,
-                    model_id=model_id,
-                    glyph_ids=glyph_ids,
-                )
+                if use_pgvector:
+                    # pgvector: load only glyph metadata (no embeddings).
+                    # find_similar() delegates to pgvector SQL at query time.
+                    all_glyphs = await storage_db.list_glyphs(
+                        org_id=org_id,
+                        model_id=model_id,
+                        limit=50000,
+                    )
+                    embeddings = {}
+                    hierarchical = {}
+                else:
+                    # Non-pgvector: load everything into memory (fallback).
+                    all_glyphs, all_embeddings = await storage_db.list_glyphs_with_embeddings(
+                        org_id=org_id,
+                        model_id=model_id,
+                        limit=50000,
+                    )
+                    embeddings = {
+                        str(g.id): all_embeddings[str(g.id)]
+                        for g in all_glyphs
+                        if str(g.id) in all_embeddings
+                    }
+                    glyph_ids = [g.id for g in all_glyphs]
+                    hierarchical = await storage_db.get_hierarchical_embeddings(
+                        org_id=org_id,
+                        model_id=model_id,
+                        glyph_ids=glyph_ids,
+                    )
 
             similarity_service = SimilarityService(
                 similarity_calculator=getattr(loaded_model, 'similarity_calculator', None),
@@ -669,22 +677,23 @@ class NLQueryService:
             gql_storage = DatabaseGlyphStorage(
                 org_id=org_id,
                 model_id=model_id,
-                glyphs=db_glyphs,
+                glyphs=all_glyphs,
                 embeddings=embeddings,
                 similarity_service=similarity_service,
                 hierarchical_embeddings=hierarchical,
+                session_factory=session_factory if use_pgvector else None,
             )
 
             # Collect all pattern glyph IDs for stage 2 exclusion.
-            # Patterns have record_type="pattern" in metadata (set by deploy_models.py).
             pattern_glyph_ids = {
-                str(g.id) for g in db_glyphs
+                str(g.id) for g in all_glyphs
                 if (g.metadata or {}).get("record_type") == "pattern"
             }
 
             self._gql_storage_cache[cache_key] = (gql_storage, pattern_glyph_ids, _time.time())
             logger.info(f"Built GQL storage cache for {org_id}/{model_id}: "
-                         f"{len(db_glyphs)} glyphs, {len(embeddings)} embeddings, "
+                         f"{len(all_glyphs)} glyphs, "
+                         f"{'pgvector' if use_pgvector else f'{len(embeddings)} embeddings'}, "
                          f"{len(pattern_glyph_ids)} patterns")
             return gql_storage, pattern_glyph_ids
 

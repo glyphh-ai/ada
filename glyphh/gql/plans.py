@@ -94,32 +94,47 @@ class SimilaritySearchPlan(ExecutionPlan):
         else:
             raise ValueError("No target specified for similarity search")
         
-        # Perform similarity search
-        results = []
-        for glyph_id, glyph in context.list_glyphs().items():
-            # Get comparison vector based on scope using storage abstraction
-            if self.scope_layer or self.scope_segment:
-                compare_vector = context.get_embedding_for_scope(
-                    glyph_id, layer=self.scope_layer, segment=self.scope_segment
-                )
-            else:
-                compare_vector = context.get_embedding(glyph_id)
+        # Perform similarity search — try native (pgvector) first,
+        # fall back to Python loop for in-memory backends.
+        native_results = None
+        storage = getattr(context, '_storage', None)
+        if storage is not None and hasattr(storage, 'find_similar'):
+            native_results = storage.find_similar(
+                query_vector=search_vector,
+                limit=self.limit * 3 if self.predicate else self.limit,
+                threshold=self.threshold,
+                scope_layer=self.scope_layer,
+                scope_segment=self.scope_segment,
+            )
 
-            if compare_vector is None:
-                continue
+        if native_results is not None:
+            results = native_results
+        else:
+            results = []
+            for glyph_id, glyph in context.list_glyphs().items():
+                # Get comparison vector based on scope using storage abstraction
+                if self.scope_layer or self.scope_segment:
+                    compare_vector = context.get_embedding_for_scope(
+                        glyph_id, layer=self.scope_layer, segment=self.scope_segment
+                    )
+                else:
+                    compare_vector = context.get_embedding(glyph_id)
 
-            # Compute similarity
-            score = context.compute_similarity(search_vector, compare_vector)
+                if compare_vector is None:
+                    continue
 
-            if score >= self.threshold:
-                results.append({
-                    "glyph_id": glyph_id,
-                    "score": score,
-                    "glyph": glyph
-                })
-        
-        # Sort by score descending
-        results.sort(key=lambda x: x["score"], reverse=True)
+                # Compute similarity
+                score = context.compute_similarity(search_vector, compare_vector)
+
+                if score >= self.threshold:
+                    results.append({
+                        "glyph_id": glyph_id,
+                        "score": score,
+                        "glyph": glyph
+                    })
+
+            # Sort by score descending
+            results.sort(key=lambda x: x["score"], reverse=True)
         
         # Apply predicate filter AFTER ranking (Requirement 1.4)
         if self.predicate:
