@@ -234,41 +234,52 @@ class DatabaseGlyphStorage:
             if level in glyph_hier and path in glyph_hier[level]:
                 return glyph_hier[level][path]
 
-        # pgvector mode: fetch from glyph_vectors table on cache miss
-        if self._session_factory is not None:
-            try:
-                import asyncio
-                from concurrent.futures import ThreadPoolExecutor
-
-                async def _fetch():
-                    from domains.models.storage import GlyphStorage
-                    from uuid import UUID as _UUID
-                    gid = glyph_id if isinstance(glyph_id, _UUID) else _UUID(str(glyph_id))
-                    async with self._session_factory() as session:
-                        storage = GlyphStorage(session)
-                        vectors = await storage.get_glyph_vectors_by_level(
-                            org_id=self._org_id,
-                            model_id=self._model_id,
-                            glyph_id=gid,
-                            level=level,
-                        )
-                        return vectors.get(path)
-
-                with ThreadPoolExecutor(max_workers=1) as pool:
-                    embedding = pool.submit(asyncio.run, _fetch()).result(timeout=10)
-                if embedding is not None:
-                    # Cache for future lookups
-                    if glyph_id_str not in self._hierarchical_embeddings:
-                        self._hierarchical_embeddings[glyph_id_str] = {}
-                    if level not in self._hierarchical_embeddings[glyph_id_str]:
-                        self._hierarchical_embeddings[glyph_id_str][level] = {}
-                    self._hierarchical_embeddings[glyph_id_str][level][path] = embedding
-                return embedding
-            except Exception as e:
-                logger.warning(f"Failed to fetch scoped embedding for {glyph_id}/{level}/{path}: {e}")
-
+        # Not found — caller must pre-fetch via prefetch_hierarchical_embedding()
         return None
-    
+
+    async def prefetch_hierarchical_embedding(
+        self, glyph_id: str, layer: str,
+    ) -> None:
+        """Pre-fetch hierarchical embeddings from DB into cache.
+
+        Must be called from an async context BEFORE the sync GQL executor
+        runs, because get_embedding_for_scope() is sync and cannot make
+        DB calls itself.
+        """
+        if self._session_factory is None:
+            return
+
+        glyph_id_str = str(glyph_id)
+
+        # Already cached?
+        if glyph_id_str in self._hierarchical_embeddings:
+            if "layer" in self._hierarchical_embeddings[glyph_id_str]:
+                if layer in self._hierarchical_embeddings[glyph_id_str]["layer"]:
+                    return
+
+        from domains.models.storage import GlyphStorage
+        from uuid import UUID as _UUID
+
+        gid = _UUID(glyph_id_str)
+        async with self._session_factory() as session:
+            storage = GlyphStorage(session)
+            vectors = await storage.get_glyph_vectors_by_level(
+                org_id=self._org_id,
+                model_id=self._model_id,
+                glyph_id=gid,
+                level="layer",
+            )
+
+        if vectors:
+            if glyph_id_str not in self._hierarchical_embeddings:
+                self._hierarchical_embeddings[glyph_id_str] = {}
+            if "layer" not in self._hierarchical_embeddings[glyph_id_str]:
+                self._hierarchical_embeddings[glyph_id_str]["layer"] = {}
+            self._hierarchical_embeddings[glyph_id_str]["layer"].update(vectors)
+            logger.debug(
+                f"Pre-fetched {len(vectors)} layer embeddings for glyph {glyph_id_str}"
+            )
+
     def compute_similarity(self, v1: Any, v2: Any) -> float:
         """
         Compute similarity between two vectors.

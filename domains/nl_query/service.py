@@ -706,7 +706,10 @@ class NLQueryService:
         """Execute a GQL query string through the GQL executor engine.
 
         Uses cached glyph storage to avoid reloading embeddings per request.
+        Pre-fetches any hierarchical embeddings needed by AT LAYER / AT SEGMENT
+        clauses before entering the sync GQL executor.
         """
+        import re as _re
         from glyphh.gql import GQLExecutor, ExecutionContext
 
         loaded_model = await self.query_service._model_manager.get_model(org_id, model_id)
@@ -714,6 +717,17 @@ class NLQueryService:
             raise ValueError(f"Model {org_id}/{model_id} not loaded")
 
         gql_storage, _pattern_ids = await self._get_or_build_gql_storage(org_id, model_id)
+
+        # Pre-fetch hierarchical embeddings for AT LAYER clauses.
+        # The sync GQL executor cannot make async DB calls, so we must
+        # populate the cache here while we're still in an async context.
+        glyph_match = _re.search(r'glyph\("([^"]+)"\)', gql_query)
+        layer_match = _re.search(r'AT\s+LAYER\s+(\w+)', gql_query, _re.IGNORECASE)
+        if glyph_match and layer_match and hasattr(gql_storage, 'prefetch_hierarchical_embedding'):
+            await gql_storage.prefetch_hierarchical_embedding(
+                glyph_id=glyph_match.group(1),
+                layer=layer_match.group(1),
+            )
 
         context = ExecutionContext(
             model=loaded_model.sdk_model,
