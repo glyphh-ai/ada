@@ -738,10 +738,10 @@ class NLQueryService:
             # Step 1b: Gap analysis — if top results cluster within min_gap,
             # the query is ambiguous.  Return ASK with the top candidates.
             # Skip when confirmed=True (user already picked from disambiguation).
-            # Skip for two-stage models — stage 1 is routing, stage 2 produces
-            # the final list.  Clustered exemplar scores are expected.
+            # For two-stage models this is Stage 1 disambiguation: show top
+            # exemplar matches as numbered options so the user can refine.
             top_scores = _extract_top_scores(fact_tree)
-            if not self._two_stage and not confirmed and len(top_scores) >= 2 and (top_scores[0] - top_scores[1]) < self._min_gap:
+            if not confirmed and len(top_scores) >= 2 and (top_scores[0] - top_scores[1]) < self._min_gap:
                 top_matches = _extract_top_matches(fact_tree, n=3)
                 logger.info(
                     f"Gap too small ({top_scores[0]:.3f} vs {top_scores[1]:.3f}) "
