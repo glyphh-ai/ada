@@ -252,57 +252,23 @@ class QueryService:
         config = await self._model_manager.get_config(org_id, model_id)
         similarity_weights = config.similarity_weights
 
-        # Read query_scope from config.yaml: similarity.query_scope
-        # e.g. "semantic" or "semantic.context" — scopes NL query embedding
-        # to a specific layer/segment so irrelevant layers don't add noise.
-        query_scope: Optional[str] = None
-        try:
-            model_path = Path(loaded_model.model_path)
-            config_dir = model_path.parent if model_path.is_file() else model_path
-            model_config_path = config_dir / "config.yaml"
-            if model_config_path.exists():
-                import yaml
-                with open(model_config_path) as _f:
-                    _raw = yaml.safe_load(_f) or {}
-                query_scope = _raw.get("similarity", {}).get("query_scope")
-        except Exception:
-            pass
-
-        # Encode query text using SDK encoder with lexicon matching.
-        # encode_query may also return model-provided metadata filters
-        # (e.g. app_slug extracted from the query text).
-        query_embedding, query_filters = await self._encode_query(
-            loaded_model.encoder,
-            request.query,
-            org_id=org_id,
-            model_id=model_id,
-            query_scope=query_scope,
-        )
-
-        # Read default_filter from model's config.yaml (e.g. similarity.default_filter)
-        # Merge: request filters > query filters > config defaults
-        effective_filters = dict(request.filters or {})
-        for k, v in query_filters.items():
-            if k not in effective_filters:
-                effective_filters[k] = v
-
-        default_filter: dict = {}
+        # Read similarity config: query_scope, default_filter
         # 1. Try filesystem: config.yaml in model directory
+        sim_config: dict = {}
         try:
             model_path = Path(loaded_model.model_path)
-            # If model_path is a .glyphh file, check parent directory
             config_dir = model_path.parent if model_path.is_file() else model_path
             model_config_path = config_dir / "config.yaml"
             if model_config_path.exists():
                 import yaml
                 with open(model_config_path) as _f:
                     _raw = yaml.safe_load(_f) or {}
-                default_filter = _raw.get("similarity", {}).get("default_filter") or {}
+                sim_config = _raw.get("similarity") or {}
         except Exception:
             pass
 
         # 2. Fallback: read from DB-persisted encoder_config._similarity_config
-        if not default_filter:
+        if not sim_config:
             try:
                 async with self._session_factory() as _sess:
                     from domains.models.db_models import ModelConfig as _MC
@@ -312,10 +278,31 @@ class QueryService:
                         )
                     )).scalar_one_or_none()
                     if _row and _row.encoder_config:
-                        _sim = _row.encoder_config.get("_similarity_config") or {}
-                        default_filter = _sim.get("default_filter") or {}
+                        sim_config = _row.encoder_config.get("_similarity_config") or {}
             except Exception:
                 pass
+
+        query_scope = sim_config.get("query_scope")
+        default_filter = sim_config.get("default_filter") or {}
+        if query_scope:
+            logger.info("Using query_scope=%s for similarity search", query_scope)
+
+        # Encode query text using SDK encoder with lexicon matching.
+        # query_scope scopes the embedding to a specific layer/segment
+        # so irrelevant layers don't add noise to NL similarity scores.
+        query_embedding, query_filters = await self._encode_query(
+            loaded_model.encoder,
+            request.query,
+            org_id=org_id,
+            model_id=model_id,
+            query_scope=query_scope,
+        )
+
+        # Merge filters: request filters > query filters > config defaults
+        effective_filters = dict(request.filters or {})
+        for k, v in query_filters.items():
+            if k not in effective_filters:
+                effective_filters[k] = v
 
         for k, v in default_filter.items():
             if k not in effective_filters:
