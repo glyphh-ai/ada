@@ -165,8 +165,12 @@ def model_deploy(path):
         click.secho("  Not a model directory (no manifest.yaml) or .glyphh file.", fg=theme.ERROR)
         return
 
-    # Resolve model_id from manifest or filename
-    model_id = manifest.get("model_id") or manifest.get("name") or glyphh_file.stem
+    # Resolve model_id: prefer explicit model_id, then directory name, then file stem.
+    # Never use manifest "name" — that's a display label, not a technical identifier.
+    if target.is_dir():
+        model_id = manifest.get("model_id") or target.name
+    else:
+        model_id = manifest.get("model_id") or glyphh_file.stem
     model_id = model_id.replace(".glyphh", "")
 
     # Upload to runtime (local or remote)

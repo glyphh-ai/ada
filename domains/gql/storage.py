@@ -298,9 +298,9 @@ class DatabaseGlyphStorage:
 
         async def _search():
             from domains.models.storage import GlyphStorage
-            from infrastructure.config import settings
+            from infrastructure.config import get_settings
 
-            max_dim = settings.resolved_max_vector_dimension
+            max_dim = get_settings().resolved_max_vector_dimension
             vec = query_vector.data if hasattr(query_vector, 'data') else list(query_vector)
             if len(vec) < max_dim:
                 vec = vec + [0.0] * (max_dim - len(vec))

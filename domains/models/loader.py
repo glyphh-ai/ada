@@ -86,7 +86,7 @@ def load_manifest(model_dir: Path) -> ModelManifest:
     try:
         data = yaml.safe_load(manifest_path.read_text()) or {}
         return ModelManifest(
-            model_id=model_id,
+            model_id=data.get("model_id", model_id),
             name=data.get("name", model_id),
             description=data.get("description", ""),
             version=data.get("version", ""),

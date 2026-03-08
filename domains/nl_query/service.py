@@ -610,7 +610,7 @@ class NLQueryService:
         import time as _time
         from domains.gql.storage import DatabaseGlyphStorage
         from domains.models.storage import GlyphStorage
-        from infrastructure.config import settings
+        from infrastructure.config import get_settings
         from shared.similarity_service import SimilarityService
 
         cache_key = (org_id, model_id)
@@ -635,7 +635,7 @@ class NLQueryService:
             if loaded_model is None:
                 raise ValueError(f"Model {org_id}/{model_id} not loaded")
 
-            use_pgvector = settings.resolved_storage_backend == "pgvector"
+            use_pgvector = get_settings().resolved_storage_backend == "pgvector"
             session_factory = self.query_service._session_factory
 
             async with session_factory() as session:
