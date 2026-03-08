@@ -801,7 +801,7 @@ class ModelManager:
                 cfg = result.scalar_one_or_none()
                 if cfg and cfg.source_files:
                     _, _, entry_to_record_fn = self._load_model_fns_from_source(
-                        cfg.source_files
+                        cfg.source_files, model_id=model_id
                     )
                     return entry_to_record_fn
         except Exception as e:
@@ -931,7 +931,7 @@ class ModelManager:
             entry_to_record_fn = None
             if db_config.source_files:
                 encode_query_fn, assess_query_fn, entry_to_record_fn = (
-                    self._load_model_fns_from_source(db_config.source_files)
+                    self._load_model_fns_from_source(db_config.source_files, model_id=model_id)
                 )
             if encode_query_fn is None and db_config.model_path:
                 encode_query_fn, assess_query_fn, entry_to_record_fn = (
@@ -1044,46 +1044,119 @@ class ModelManager:
     @staticmethod
     def _load_model_fns_from_source(
         source_files: Dict[str, str],
+        model_id: str = "",
     ) -> tuple[Optional[Any], Optional[Any], Optional[Any]]:
         """Load model functions from stored source code.
 
-        Creates temporary module objects so local imports work
-        (e.g., encoder.py can ``from intent import extract_keywords``).
+        Each model's modules are registered under a unique namespace prefix
+        ``_glm_{model_id}.{module}`` so multiple models can coexist without
+        clobbering each other's ``encoder`` / ``intent`` in sys.modules.
+
+        Bare imports like ``from intent import ...`` and lazy imports like
+        ``from encoder import extract_app`` are rewritten in the source to
+        use the namespaced module name before exec.
+
         Returns (encode_query_fn, assess_query_fn, entry_to_record_fn)
         or (None, None, None) on failure.
         """
+        import re as _re
         import sys
         import types
 
         if not source_files or "encoder.py" not in source_files:
             return None, None, None
 
-        created_modules: list[str] = []
-        try:
-            # Load all non-encoder .py files first as importable modules.
-            # Skip build.py — it's a build-time script that imports from
-            # encoder.py (circular at this stage) and is never needed at runtime.
-            for filename, source in sorted(source_files.items()):
-                if filename in ("encoder.py", "build.py") or not filename.endswith(".py"):
-                    continue
-                mod_name = filename[:-3]  # "intent.py" → "intent"
-                mod = types.ModuleType(mod_name)
-                mod.__file__ = f"<db:{filename}>"
-                try:
-                    exec(compile(source, f"<db:{filename}>", "exec"), mod.__dict__)
-                except Exception as mod_err:
-                    logger.debug(f"Skipping {filename} during source restore: {mod_err}")
-                    continue
-                sys.modules[mod_name] = mod
-                created_modules.append(mod_name)
+        # Build the namespace prefix and the set of local module names
+        safe_id = _re.sub(r"[^a-zA-Z0-9_]", "_", model_id) if model_id else "default"
+        prefix = f"_glm_{safe_id}"
+        local_names: set[str] = set()
+        for filename in source_files:
+            if filename.endswith(".py") and filename not in ("build.py",):
+                local_names.add(filename[:-3])  # "intent.py" → "intent"
 
-            # Now load encoder.py — it can import from the modules above
-            encoder_mod = types.ModuleType("model_encoder_db")
-            encoder_mod.__file__ = "<db:encoder.py>"
-            exec(
-                compile(source_files["encoder.py"], "<db:encoder.py>", "exec"),
-                encoder_mod.__dict__,
-            )
+        def _rewrite_imports(source: str) -> str:
+            """Rewrite bare local imports to use the namespaced prefix.
+
+            Handles:
+              from intent import foo        → from _glm_X.intent import foo
+              from encoder import bar       → from _glm_X.encoder import bar
+              import intent                 → import _glm_X.intent as intent
+            """
+            lines = source.split("\n")
+            result = []
+            for line in lines:
+                stripped = line.lstrip()
+                # "from <local> import ..."
+                m = _re.match(r"^(\s*)from\s+(" + "|".join(_re.escape(n) for n in local_names) + r")\s+import\s+(.+)", line)
+                if m:
+                    indent, mod, rest = m.group(1), m.group(2), m.group(3)
+                    result.append(f"{indent}from {prefix}.{mod} import {rest}")
+                    continue
+                # "import <local>"
+                m2 = _re.match(r"^(\s*)import\s+(" + "|".join(_re.escape(n) for n in local_names) + r")\s*$", line)
+                if m2:
+                    indent, mod = m2.group(1), m2.group(2)
+                    result.append(f"{indent}import {prefix}.{mod} as {mod}")
+                    continue
+                result.append(line)
+            return "\n".join(result)
+
+        # Create the namespace package
+        pkg = types.ModuleType(prefix)
+        pkg.__path__ = []
+        pkg.__package__ = prefix
+        sys.modules[prefix] = pkg
+
+        def _load_module(filename: str, source: str) -> bool:
+            """Load a single source file as a namespaced module. Returns True on success."""
+            mod_name = filename[:-3]
+            fqn = f"{prefix}.{mod_name}"
+            mod = types.ModuleType(fqn)
+            mod.__file__ = f"<db:{model_id}/{filename}>"
+            mod.__package__ = prefix
+            try:
+                rewritten = _rewrite_imports(source)
+                exec(compile(rewritten, mod.__file__, "exec"), mod.__dict__)
+            except Exception as mod_err:
+                logger.debug(f"Deferring {filename} during source restore: {mod_err}")
+                return False
+            sys.modules[fqn] = mod
+            setattr(pkg, mod_name, mod)
+            return True
+
+        try:
+            # Skip build-time and test files — only load runtime modules.
+            skip = {"build.py", "tests.py", "test.py"}
+            py_files = {
+                fn: src for fn, src in source_files.items()
+                if fn.endswith(".py") and fn not in skip
+            }
+
+            # Two-pass loading: first pass loads files without circular deps,
+            # second pass retries deferred files (now that encoder is loaded).
+            deferred: dict[str, str] = {}
+
+            # Pass 1: load non-encoder files
+            for filename, source in sorted(py_files.items()):
+                if filename == "encoder.py":
+                    continue
+                if not _load_module(filename, source):
+                    deferred[filename] = source
+
+            # Load encoder.py
+            enc_fqn = f"{prefix}.encoder"
+            encoder_mod = types.ModuleType(enc_fqn)
+            encoder_mod.__file__ = f"<db:{model_id}/encoder.py>"
+            encoder_mod.__package__ = prefix
+            rewritten = _rewrite_imports(py_files["encoder.py"])
+            exec(compile(rewritten, encoder_mod.__file__, "exec"), encoder_mod.__dict__)
+            sys.modules[enc_fqn] = encoder_mod
+            setattr(pkg, "encoder", encoder_mod)
+
+            # Pass 2: retry deferred files (they likely import from encoder)
+            for filename, source in deferred.items():
+                if not _load_module(filename, source):
+                    logger.debug(f"Skipping {filename} after retry: still fails")
 
             encode_query_fn = getattr(encoder_mod, "encode_query", None)
             assess_query_fn = getattr(encoder_mod, "assess_query", None)
@@ -1093,10 +1166,6 @@ class ModelManager:
         except Exception as e:
             logger.warning(f"Failed to load model fns from stored source: {e}")
             return None, None, None
-        finally:
-            # Clean up temporary modules from sys.modules
-            for mod_name in created_modules:
-                sys.modules.pop(mod_name, None)
 
     async def list_models(self) -> List[ModelInfoResponse]:
         """List all currently loaded models."""
