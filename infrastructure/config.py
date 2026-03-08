@@ -244,6 +244,9 @@ class Settings(BaseSettings):
             "https://studio.glyphh.com",
             "https://app.glyphh.com",
             "https://*.glyphh.com",
+            "https://www.glyphh.ai",
+            "https://glyphh.ai",
+            "https://*.glyphh.ai",
         ],
         description="Allowed CORS origins for production deployments"
     )
