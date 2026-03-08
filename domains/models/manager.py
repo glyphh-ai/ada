@@ -559,169 +559,170 @@ class ModelManager:
 
         BATCH_SIZE = 500
         # Advisory lock ID derived from model_id — prevents duplicate encoding
-        # across Heroku worker processes (WEB_CONCURRENCY > 1)
+        # across Heroku worker processes (WEB_CONCURRENCY > 1).
+        # The lock session must stay open for the entire encoding duration.
         lock_id = hash(f"exemplar_load_{org_id}_{model_id}") & 0x7FFFFFFF
+        from sqlalchemy import text
 
         try:
-            # Acquire DB advisory lock — skip if another worker is already encoding
-            async with self._db_session_factory() as session:
-                from sqlalchemy import text
-                lock_result = await session.execute(text(f"SELECT pg_try_advisory_lock({lock_id})"))
-                acquired = lock_result.scalar()
-                if not acquired:
+            # Open a dedicated session that holds the advisory lock for the
+            # entire encoding run. Other workers will skip immediately.
+            async with self._db_session_factory() as lock_session:
+                lock_result = await lock_session.execute(
+                    text(f"SELECT pg_try_advisory_lock({lock_id})")
+                )
+                if not lock_result.scalar():
                     logger.info(f"Another worker is already encoding {model_id}, skipping")
                     return
 
-            # Read staged JSONL from DB
-            async with self._db_session_factory() as session:
-                result = await session.execute(
-                    select(ModelConfig).where(
-                        ModelConfig.org_id == org_id,
-                        ModelConfig.model_id == model_id,
+                # Read staged JSONL from DB
+                async with self._db_session_factory() as session:
+                    result = await session.execute(
+                        select(ModelConfig).where(
+                            ModelConfig.org_id == org_id,
+                            ModelConfig.model_id == model_id,
+                        )
                     )
-                )
-                cfg = result.scalar_one_or_none()
-                if not cfg or not cfg.staged_exemplars:
-                    logger.info(f"No staged exemplars for {org_id}/{model_id}")
-                    return
-                raw_jsonl = cfg.staged_exemplars
+                    cfg = result.scalar_one_or_none()
+                    if not cfg or not cfg.staged_exemplars:
+                        logger.info(f"No staged exemplars for {org_id}/{model_id}")
+                        return
+                    raw_jsonl = cfg.staged_exemplars
 
-            lines = [ln for ln in raw_jsonl.split("\n") if ln.strip()]
-            total = len(lines)
-            # Free the raw text — lines list is sufficient
-            del raw_jsonl
-            logger.info(f"Processing {total} staged exemplars for {model_id}")
-
-            # Get the loaded model's encoder and entry_to_record_fn
-            key = (org_id, model_id)
-            loaded_model = self._models.get(key)
-            if not loaded_model:
-                logger.error(f"Model {model_id} not in memory, cannot encode exemplars")
-                return
-
-            encoder = loaded_model.encoder
-            entry_to_record_fn = loaded_model.entry_to_record_fn
-
-            # If not available (e.g. model restored from DB after restart),
-            # try to reconstruct from stored source_files
-            if entry_to_record_fn is None:
-                entry_to_record_fn = await self._restore_entry_to_record(org_id, model_id)
-                if entry_to_record_fn:
-                    loaded_model.entry_to_record_fn = entry_to_record_fn
-
-            # Check existing glyph count for resume
-            async with self._db_session_factory() as session:
-                storage = GlyphStorage(session)
-                existing_count = await storage.count_glyphs(org_id, model_id)
-
-            if existing_count >= total:
-                logger.info(
-                    f"Exemplars already loaded for {org_id}/{model_id} "
-                    f"({existing_count} glyphs), clearing staged data"
-                )
-                await self._clear_staged_exemplars(org_id, model_id)
-                return
-
-            # Check license limits
-            from glyphh.licensing import get_current_license
-            license_info = get_current_license()
-            max_glyphs = license_info.max_glyphs_per_model
-            if max_glyphs >= 0 and total > max_glyphs:
-                logger.warning(
-                    f"Model {model_id} has {total:,} entries but "
-                    f"{license_info.tier} tier allows {max_glyphs:,}. "
-                    f"Encoding first {max_glyphs:,}."
-                )
-                lines = lines[:max_glyphs]
+                lines = [ln for ln in raw_jsonl.split("\n") if ln.strip()]
                 total = len(lines)
+                del raw_jsonl
+                logger.info(f"Processing {total} staged exemplars for {model_id}")
 
-            # Resume: skip already-encoded entries
-            start_index = existing_count if 0 < existing_count < total else 0
-            if existing_count > 0 and start_index == 0:
+                # Get the loaded model's encoder and entry_to_record_fn
+                key = (org_id, model_id)
+                loaded_model = self._models.get(key)
+                if not loaded_model:
+                    logger.error(f"Model {model_id} not in memory, cannot encode exemplars")
+                    return
+
+                encoder = loaded_model.encoder
+                entry_to_record_fn = loaded_model.entry_to_record_fn
+
+                if entry_to_record_fn is None:
+                    entry_to_record_fn = await self._restore_entry_to_record(org_id, model_id)
+                    if entry_to_record_fn:
+                        loaded_model.entry_to_record_fn = entry_to_record_fn
+
+                # Check existing glyph count for resume
                 async with self._db_session_factory() as session:
                     storage = GlyphStorage(session)
-                    logger.info(f"Re-deploying {model_id}: clearing {existing_count} old glyphs")
-                    await storage.delete_model_data(org_id, model_id)
-            elif start_index > 0:
-                logger.info(f"Resuming exemplar load for {model_id}: {start_index}/{total}")
+                    existing_count = await storage.count_glyphs(org_id, model_id)
 
-            created = start_index
+                if existing_count >= total:
+                    logger.info(
+                        f"Exemplars already loaded for {org_id}/{model_id} "
+                        f"({existing_count} glyphs), clearing staged data"
+                    )
+                    await self._clear_staged_exemplars(org_id, model_id)
+                    return
 
-            for batch_start in range(start_index, total, BATCH_SIZE):
-                batch_end = min(batch_start + BATCH_SIZE, total)
+                # Check license limits
+                from glyphh.licensing import get_current_license
+                license_info = get_current_license()
+                max_glyphs = license_info.max_glyphs_per_model
+                if max_glyphs >= 0 and total > max_glyphs:
+                    logger.warning(
+                        f"Model {model_id} has {total:,} entries but "
+                        f"{license_info.tier} tier allows {max_glyphs:,}. "
+                        f"Encoding first {max_glyphs:,}."
+                    )
+                    lines = lines[:max_glyphs]
+                    total = len(lines)
 
-                async with self._db_session_factory() as session:
-                    storage = GlyphStorage(session)
+                # Resume: skip already-encoded entries
+                start_index = existing_count if 0 < existing_count < total else 0
+                if existing_count > 0 and start_index == 0:
+                    async with self._db_session_factory() as session:
+                        storage = GlyphStorage(session)
+                        logger.info(f"Re-deploying {model_id}: clearing {existing_count} old glyphs")
+                        await storage.delete_model_data(org_id, model_id)
+                elif start_index > 0:
+                    logger.info(f"Resuming exemplar load for {model_id}: {start_index}/{total}")
 
-                    for i in range(batch_start, batch_end):
-                        try:
-                            entry = json_mod.loads(lines[i])
+                created = start_index
 
-                            if entry_to_record_fn:
-                                record = entry_to_record_fn(entry)
-                                concept_text = record["concept_text"]
-                                metadata = record["metadata"]
-                                attrs = record["attributes"]
-                            else:
-                                concept_text = entry.get("question", entry.get("text", ""))
-                                metadata = {k: v for k, v in entry.items() if k != "question"}
-                                attrs = {"text": concept_text}
+                for batch_start in range(start_index, total, BATCH_SIZE):
+                    batch_end = min(batch_start + BATCH_SIZE, total)
 
-                            concept = Concept(
-                                name=f"entry_{created}",
-                                attributes=attrs,
-                                metadata=metadata,
-                            )
-                            glyph = encoder.encode(concept)
+                    async with self._db_session_factory() as session:
+                        storage = GlyphStorage(session)
 
-                            non_temporal = [
-                                layer.cortex.data
-                                for name, layer in glyph.layers.items()
-                                if name != "_temporal"
-                                and hasattr(layer, "cortex")
-                                and layer.cortex is not None
-                            ]
-                            if non_temporal:
-                                embedding = bundle(non_temporal).astype(float).tolist()
-                            else:
-                                embedding = glyph.global_cortex.data.astype(float).tolist()
+                        for i in range(batch_start, batch_end):
+                            try:
+                                entry = json_mod.loads(lines[i])
 
-                            glyph_response = await storage.create_glyph(
-                                org_id=org_id,
-                                model_id=model_id,
-                                concept_text=concept_text,
-                                embedding=embedding,
-                                metadata={**metadata, "record_type": "pattern"},
-                            )
+                                if entry_to_record_fn:
+                                    record = entry_to_record_fn(entry)
+                                    concept_text = record["concept_text"]
+                                    metadata = record["metadata"]
+                                    attrs = record["attributes"]
+                                else:
+                                    concept_text = entry.get("question", entry.get("text", ""))
+                                    metadata = {k: v for k, v in entry.items() if k != "question"}
+                                    attrs = {"text": concept_text}
 
-                            hierarchical = _extract_hierarchical_vectors(glyph)
-                            if hierarchical:
-                                await storage.create_glyph_vectors_batch(
-                                    glyph_id=glyph_response.glyph_id,
+                                concept = Concept(
+                                    name=f"entry_{created}",
+                                    attributes=attrs,
+                                    metadata=metadata,
+                                )
+                                glyph = encoder.encode(concept)
+
+                                non_temporal = [
+                                    layer.cortex.data
+                                    for name, layer in glyph.layers.items()
+                                    if name != "_temporal"
+                                    and hasattr(layer, "cortex")
+                                    and layer.cortex is not None
+                                ]
+                                if non_temporal:
+                                    embedding = bundle(non_temporal).astype(float).tolist()
+                                else:
+                                    embedding = glyph.global_cortex.data.astype(float).tolist()
+
+                                glyph_response = await storage.create_glyph(
                                     org_id=org_id,
                                     model_id=model_id,
-                                    vectors=hierarchical,
+                                    concept_text=concept_text,
+                                    embedding=embedding,
+                                    metadata={**metadata, "record_type": "pattern"},
                                 )
 
-                            created += 1
+                                hierarchical = _extract_hierarchical_vectors(glyph)
+                                if hierarchical:
+                                    await storage.create_glyph_vectors_batch(
+                                        glyph_id=glyph_response.glyph_id,
+                                        org_id=org_id,
+                                        model_id=model_id,
+                                        vectors=hierarchical,
+                                    )
 
-                        except Exception as e:
-                            logger.warning(f"Failed to encode entry {i} in {model_id}: {e}")
-                            continue
+                                created += 1
 
-                    await session.commit()
+                            except Exception as e:
+                                logger.warning(f"Failed to encode entry {i} in {model_id}: {e}")
+                                continue
 
-                logger.info(f"Encoded {created}/{total} exemplars for {model_id}")
-                # Yield control to event loop so queries can be served
-                await asyncio.sleep(0)
+                        await session.commit()
 
-            # Done — clear staged data
-            await self._clear_staged_exemplars(org_id, model_id)
+                    logger.info(f"Encoded {created}/{total} exemplars for {model_id}")
+                    await asyncio.sleep(0)
 
-            logger.info(
-                f"Background exemplar load complete for {org_id}/{model_id}: "
-                f"{created} glyphs from {total} entries"
-            )
+                # Done — clear staged data
+                await self._clear_staged_exemplars(org_id, model_id)
+
+                logger.info(
+                    f"Background exemplar load complete for {org_id}/{model_id}: "
+                    f"{created} glyphs from {total} entries"
+                )
+
+                # Lock released when lock_session closes
 
         except Exception as e:
             logger.error(
@@ -730,13 +731,6 @@ class ModelManager:
             )
         finally:
             self._encoding_in_progress.discard((org_id, model_id))
-            # Release advisory lock
-            try:
-                async with self._db_session_factory() as session:
-                    from sqlalchemy import text
-                    await session.execute(text(f"SELECT pg_advisory_unlock({lock_id})"))
-            except Exception:
-                pass
 
     async def resume_staged_encoding(self) -> None:
         """Resume any incomplete exemplar encoding from a previous run.
