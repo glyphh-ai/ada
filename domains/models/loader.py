@@ -108,7 +108,11 @@ def load_encoder_config(model_dir: Path) -> tuple[Any, bool, Any, Any, Any]:
 
     Returns (encoder_config, is_custom, encode_query_fn, entry_to_record_fn, assess_query_fn).
     If encoder.py exists, imports ENCODER_CONFIG and optional functions.
-    Otherwise returns (None, False, None, None).
+    Otherwise returns (None, False, None, None, None).
+
+    Each model's sibling .py modules (intent.py, scorer.py, etc.) are loaded
+    into isolated sys.modules entries to prevent cross-model contamination when
+    multiple models have identically-named files.
     """
     encoder_path = model_dir / "encoder.py"
     if not encoder_path.exists():
@@ -117,8 +121,21 @@ def load_encoder_config(model_dir: Path) -> tuple[Any, bool, Any, Any, Any]:
     import sys
 
     try:
-        # Add model directory to sys.path so encoder.py can import sibling modules
-        # (e.g., `from intent import extract_intent` in pipedream's encoder.py)
+        # Identify bare module names that exist as sibling .py files.
+        # These must be isolated per-model to prevent cross-contamination
+        # (e.g., toolrouter/intent.py vs pipedream/intent.py).
+        local_names = {
+            p.stem for p in model_dir.glob("*.py")
+            if not p.name.startswith(".")
+        }
+
+        # Save any existing sys.modules entries for these names so we can
+        # restore them after loading (don't clobber other models' modules).
+        saved_modules = {}
+        for name in local_names:
+            if name in sys.modules:
+                saved_modules[name] = sys.modules.pop(name)
+
         model_dir_str = str(model_dir)
         added_to_path = False
         if model_dir_str not in sys.path:
@@ -150,6 +167,14 @@ def load_encoder_config(model_dir: Path) -> tuple[Any, bool, Any, Any, Any]:
         finally:
             if added_to_path:
                 sys.path.remove(model_dir_str)
+            # Clean up bare module names that were loaded as side effects
+            # (e.g., `import intent` cached in sys.modules). The functions
+            # we extracted still hold references to their module's globals,
+            # so they keep working even after the sys.modules entry is removed.
+            for name in local_names:
+                sys.modules.pop(name, None)
+            # Restore any previously-existing modules we saved
+            sys.modules.update(saved_modules)
 
     except Exception as e:
         logger.warning(f"Failed to load encoder.py for {model_dir.name}: {e}")
