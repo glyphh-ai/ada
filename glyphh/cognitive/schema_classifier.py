@@ -131,9 +131,13 @@ class SchemaIntentClassifier:
                 scorer_result = self._glyph_space.find_similar(query_glyph)
                 return self._scorer_result_to_dict(scorer_result, source="glyph_space")
 
-        # ── Fallback: direct ModelScorer.score() (backwards compat) ──
+        # ── Fallback: direct ModelScorer scoring ──
         if self._scorer is not None:
-            scorer_result = self._scorer.score(query)
+            # Prefer score_multi() for multi-function detection (gap analysis)
+            if hasattr(self._scorer, "score_multi"):
+                scorer_result = self._scorer.score_multi(query)
+            else:
+                scorer_result = self._scorer.score(query)
 
             if scorer_result.is_irrelevant:
                 logger.debug("ModelScorer: irrelevant (conf=%.3f)", scorer_result.confidence)
