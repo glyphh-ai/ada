@@ -324,7 +324,9 @@ def _print_result(data):
 
     # Similarity search / list matches (skip if exemplar already shown for single result)
     matches = _match_nodes(ft)
-    if matches and not (exemplar and len(matches) <= 1):
+    # Skip duplicate display if exemplar already shown for the same single result
+    skip_matches = exemplar and matches and len(matches) <= 1
+    if matches and not skip_matches:
         for match in matches:
             v = match.get("value") or {}
             concept = v.get("concept_text", "—")
@@ -346,7 +348,7 @@ def _print_result(data):
             response_text = meta.get("response", "")
             if response_text:
                 click.secho(f"          {response_text}", fg=theme.TEXT_DIM)
-    else:
+    elif not matches and not exemplar:
         click.secho("  No matches found.", fg=theme.WARNING)
 
     # Timing / method footer
