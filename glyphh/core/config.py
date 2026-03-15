@@ -198,6 +198,73 @@ class NumericConfig:
 
 
 # ============================================================================
+# ContinuousConfig Dataclass
+# ============================================================================
+
+@dataclass
+class ContinuousConfig:
+    """
+    Configuration for continuous vector projection on a role.
+
+    When enabled, continuous float vectors (e.g., embeddings from neural networks)
+    are projected into bipolar HDC space via random projection + sign quantization.
+    The projection is deterministic: same input always produces the same output.
+
+    Attributes:
+        source_dim: Dimensionality of the input float vector (e.g., 512 for ArcFace)
+        projection_seed: Seed for the deterministic projection matrix
+
+    Example:
+        >>> # Face embedding from ArcFace (512-dim float vector)
+        >>> config = ContinuousConfig(source_dim=512, projection_seed=100)
+        >>> # Depth map pooled to 8x8 grid (64-dim float vector)
+        >>> config = ContinuousConfig(source_dim=64, projection_seed=300)
+    """
+    source_dim: int
+    projection_seed: int = 42
+
+    def __post_init__(self):
+        """Validate continuous config on initialization."""
+        self._validate()
+
+    def _validate(self):
+        """Validate all continuous config fields."""
+        if not isinstance(self.source_dim, int):
+            raise ConfigurationException(
+                "source_dim",
+                f"Must be an integer, got {type(self.source_dim).__name__}"
+            )
+        if self.source_dim <= 0:
+            raise ConfigurationException(
+                "source_dim",
+                f"Must be positive, got {self.source_dim}"
+            )
+        if not isinstance(self.projection_seed, int):
+            raise ConfigurationException(
+                "projection_seed",
+                f"Must be an integer, got {type(self.projection_seed).__name__}"
+            )
+
+    def to_dict(self) -> dict:
+        """Serialize continuous config to dictionary."""
+        return {
+            "source_dim": self.source_dim,
+            "projection_seed": self.projection_seed,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'ContinuousConfig':
+        """Create ContinuousConfig from dictionary."""
+        return cls(
+            source_dim=data["source_dim"],
+            projection_seed=data.get("projection_seed", 42),
+        )
+
+    def __repr__(self) -> str:
+        return f"ContinuousConfig(source_dim={self.source_dim}, projection_seed={self.projection_seed})"
+
+
+# ============================================================================
 # Role Dataclass
 # ============================================================================
 
@@ -250,12 +317,18 @@ class Role:
         ...     text_encoding="bag_of_words",
         ...     similarity_weight=0.8,
         ... )
+        >>> # Role with continuous vector projection (e.g., face embedding)
+        >>> role = Role(
+        ...     name="face_embedding",
+        ...     continuous_config=ContinuousConfig(source_dim=512, projection_seed=100),
+        ... )
     """
     name: str
     similarity_weight: float = 1.0
     security_weight: float = 1.0
     key_part: bool = False
     numeric_config: Optional['NumericConfig'] = None
+    continuous_config: Optional['ContinuousConfig'] = None
     lexicons: Optional[List[str]] = None
     text_encoding: Optional[str] = None
     
@@ -313,6 +386,8 @@ class Role:
         }
         if self.numeric_config is not None:
             result["numeric_config"] = self.numeric_config.to_dict()
+        if self.continuous_config is not None:
+            result["continuous_config"] = self.continuous_config.to_dict()
         if self.lexicons is not None and len(self.lexicons) > 0:
             result["lexicons"] = self.lexicons
         if self.text_encoding is not None:
@@ -331,18 +406,24 @@ class Role:
         numeric_config = None
         if "numeric_config" in data and data["numeric_config"] is not None:
             numeric_config = NumericConfig.from_dict(data["numeric_config"])
-        
+
+        # Parse continuous_config if present
+        continuous_config = None
+        if "continuous_config" in data and data["continuous_config"] is not None:
+            continuous_config = ContinuousConfig.from_dict(data["continuous_config"])
+
         # Parse lexicons if present
         lexicons = data.get("lexicons")
         if lexicons is not None and not isinstance(lexicons, list):
             lexicons = None
-        
+
         return cls(
             name=data["name"],
             similarity_weight=data.get("similarity_weight", 1.0),
             security_weight=data.get("security_weight", 1.0),
             key_part=key_part,
             numeric_config=numeric_config,
+            continuous_config=continuous_config,
             lexicons=lexicons,
             text_encoding=data.get("text_encoding"),
         )

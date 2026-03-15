@@ -39,6 +39,7 @@ from .core import (
     Role,
     LayerConfig,
     SegmentConfig,
+    ContinuousConfig,
     migrate_legacy_config,
 )
 
@@ -65,7 +66,7 @@ from .core.ops import (
     generate_symbol,
 )
 
-from .encoder import Encoder
+from .encoder import Encoder, ContinuousProjector
 from .encoder.intent import IntentEncoder, IntentPattern, IntentMatch
 from .encoder.default_intents import DEFAULT_INTENT_PATTERNS
 
@@ -141,9 +142,11 @@ __all__ = [
     "Role",
     "LayerConfig",
     "SegmentConfig",
+    "ContinuousConfig",
     "migrate_legacy_config",
     # Encoder
     "Encoder",
+    "ContinuousProjector",
     # Intent Encoder (HDC pattern matching)
     "IntentEncoder",
     "IntentPattern",

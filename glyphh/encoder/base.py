@@ -711,9 +711,70 @@ class Encoder:
         
         # Generate base vector for this bin
         base_vector = self.generate_symbol(bin_key)
-        
+
         return base_vector
-    
+
+    def _encode_continuous_value(
+        self,
+        value: Any,
+        continuous_config: 'ContinuousConfig'
+    ) -> Vector:
+        """
+        Encode a continuous float vector using random projection.
+
+        Projects a dense float vector (e.g., neural network embedding) into
+        bipolar HDC space via deterministic random projection + sign quantization.
+        Similar input vectors produce similar bipolar vectors.
+
+        Args:
+            value: Float vector as list, tuple, or numpy array of shape (source_dim,)
+            continuous_config: ContinuousConfig with source_dim and projection_seed
+
+        Returns:
+            Bipolar Vector representing the projected embedding
+
+        Raises:
+            EncodingException: If value cannot be converted to a float array
+
+        Example:
+            >>> from glyphh.core.config import ContinuousConfig
+            >>> encoder = Encoder(EncoderConfig(dimension=10000, seed=42))
+            >>> config = ContinuousConfig(source_dim=512, projection_seed=100)
+            >>> embedding = np.random.randn(512).astype(np.float32)
+            >>> v = encoder._encode_continuous_value(embedding, config)
+        """
+        import numpy as np
+        import logging
+        from glyphh.encoder.projection import ContinuousProjector
+
+        try:
+            arr = np.asarray(value, dtype=np.float32).flatten()
+        except (TypeError, ValueError) as e:
+            logging.warning(
+                f"Cannot convert value to float array, falling back to symbolic: {e}"
+            )
+            return self.generate_symbol(str(value))
+
+        if arr.shape[0] != continuous_config.source_dim:
+            logging.warning(
+                f"Expected {continuous_config.source_dim} elements, "
+                f"got {arr.shape[0]}, falling back to symbolic encoding"
+            )
+            return self.generate_symbol(str(value))
+
+        projector = ContinuousProjector(
+            source_dim=continuous_config.source_dim,
+            target_dim=self.dimension,
+            seed=continuous_config.projection_seed,
+        )
+        bipolar = projector.project(arr)
+
+        return Vector(
+            data=bipolar,
+            dimension=self.dimension,
+            space_id=self.space_id,
+        )
+
     def _get_morphology_engine(self):
         """Lazily initialize MorphologyEngine for BoW normalization.
 
@@ -1165,8 +1226,10 @@ class Encoder:
                         # Create role binding
                         role_vector = self.generate_symbol(role_def.name)
                         
-                        # Check if role has numeric_config for numeric binning
-                        if role_def.numeric_config is not None:
+                        # Check encoding type: continuous > numeric > bag_of_words > symbolic
+                        if role_def.continuous_config is not None:
+                            value_vector = self._encode_continuous_value(value, role_def.continuous_config)
+                        elif role_def.numeric_config is not None:
                             value_vector = self._encode_numeric_value(value, role_def.numeric_config)
                         elif role_def.text_encoding == "bag_of_words":
                             value_vector = self._encode_bag_of_words(str(value))

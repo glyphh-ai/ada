@@ -28,6 +28,7 @@ from glyphh.encoder.numeric import (
     encode_numeric_value,
     compute_similarity,
 )
+from glyphh.encoder.projection import ContinuousProjector
 
 __all__ = [
     "Encoder",
@@ -45,4 +46,6 @@ __all__ = [
     "gray_encode",
     "encode_numeric_value",
     "compute_similarity",
+    # Continuous projection
+    "ContinuousProjector",
 ]

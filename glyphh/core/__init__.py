@@ -22,6 +22,7 @@ from .config import (
     TemporalConfig,
     Role,
     NumericConfig,
+    ContinuousConfig,
     EncodingStrategy,
     migrate_legacy_config,
     # Temporal layer constants
@@ -51,6 +52,7 @@ __all__ = [
     "TemporalConfig",
     "Role",
     "NumericConfig",
+    "ContinuousConfig",
     "EncodingStrategy",
     "LayerConfig",
     "SegmentConfig",
