@@ -177,8 +177,8 @@ def load_encoder_config(model_dir: Path) -> tuple[Any, bool, Any, Any, Any]:
             sys.modules.update(saved_modules)
 
     except Exception as e:
-        logger.warning(f"Failed to load encoder.py for {model_dir.name}: {e}")
-        return None, False, None, None, None
+        logger.error(f"Failed to load encoder.py for {model_dir.name}: {e}")
+        raise
 
 
 def count_exemplars(model_dir: Path) -> int:

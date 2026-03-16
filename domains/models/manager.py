@@ -354,7 +354,14 @@ class ModelManager:
         if not model_dir.is_dir():
             raise ModelLoadException(f"Model directory not found: {model_dir}")
 
-        loaded = load_model_def(model_dir)
+        try:
+            loaded = load_model_def(model_dir)
+        except ModelLoadException:
+            raise
+        except Exception as e:
+            raise ModelLoadException(
+                f"Failed to load model: {e}"
+            ) from e
 
         if loaded.encoder_config is None:
             raise ModelLoadException(
