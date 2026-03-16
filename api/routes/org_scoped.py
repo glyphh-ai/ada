@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from domains.auth.service import AuthService
@@ -204,6 +204,58 @@ async def list_mcp_tools(
     current_user: AuthenticatedUser = Depends(validate_token_access),
 ) -> Dict[str, Any]:
     return {"tools": await mcp_server.get_tools_list(org_id, model_id)}
+
+
+# ── File Query Endpoint ──
+
+@router.post("/query/file")
+async def query_with_file(
+    org_id: str,
+    model_id: str,
+    file: UploadFile = File(...),
+    top_k: int = Form(default=10),
+    current_user: AuthenticatedUser = Depends(validate_org_access),
+) -> Dict[str, Any]:
+    """
+    Query a model using a file upload (multipart/form-data).
+
+    The file is saved to a temporary path and passed to the model's
+    encode_query() function as the query string. The model decides
+    what to do with it — e.g., Iris extracts visual features from
+    images, another model could parse PDFs or audio.
+
+    Returns similarity search results against the deployed model's data.
+    """
+    from domains.models.schemas import SimilaritySearchRequest
+    from infrastructure.database import async_session_maker
+
+    model_manager = await get_model_manager()
+
+    # Preserve original extension so encode_query can detect file type
+    original_name = file.filename or "upload"
+    _, ext = os.path.splitext(original_name)
+    suffix = ext if ext else ""
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+    try:
+        content = await file.read()
+        os.write(tmp_fd, content)
+        os.close(tmp_fd)
+
+        query_service = QueryService(model_manager, async_session_maker)
+        request = SimilaritySearchRequest(
+            query=tmp_path,
+            top_k=min(max(top_k, 1), 100),
+        )
+        fact_tree = await query_service.similarity_search(
+            org_id=org_id,
+            model_id=model_id,
+            request=request,
+        )
+        return fact_tree.to_json() if hasattr(fact_tree, 'to_json') else fact_tree
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 # Model Lifecycle Endpoints
