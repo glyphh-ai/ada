@@ -1304,14 +1304,33 @@ class NLQueryService:
         """Execute Stage 2 using a directly-selected glyph from ASK disambiguation.
 
         Skips similarity search — the user already chose the exemplar they want.
-        Loads the glyph from storage and runs the two-stage GQL pipeline directly.
+        Looks up the glyph directly from pgvector (single row fetch) and only
+        builds the full GQL storage if a GQL template exists for Stage 2.
         """
-        gql_storage, pattern_ids = await self._get_or_build_gql_storage(org_id, model_id)
+        from domains.models.storage import GlyphStorage
 
-        # Look up the selected glyph
+        # Look up the selected glyph directly from DB (single row, no bulk load)
+        session_factory = self.query_service._session_factory
         try:
-            glyph = gql_storage.get_glyph(glyph_id)
-        except KeyError:
+            glyph_uuid = uuid.UUID(glyph_id)
+        except ValueError:
+            return NLQueryResult(
+                state=ResponseState.ERROR,
+                query_type="similarity_search",
+                match_method="none",
+                confidence=0.0,
+                query_time_ms=(time.time() - start_time) * 1000,
+                error=ErrorPayload(
+                    code="GLYPH_NOT_FOUND",
+                    message=f"Invalid glyph ID: {glyph_id}",
+                ),
+            )
+
+        try:
+            async with session_factory() as session:
+                storage_db = GlyphStorage(session)
+                glyph = await storage_db.get_glyph(org_id, model_id, glyph_uuid)
+        except Exception:
             logger.warning(f"Selected glyph {glyph_id} not found in storage")
             return NLQueryResult(
                 state=ResponseState.ERROR,
@@ -1339,6 +1358,8 @@ class NLQueryService:
         gql_template = await self._resolve_gql_template(org_id, model_id, match_meta)
 
         if gql_template:
+            # Only build GQL storage when we actually need Stage 2
+            gql_storage, pattern_ids = await self._get_or_build_gql_storage(org_id, model_id)
             try:
                 resolved_gql = self._fill_slots(gql_template, glyph_id, match_meta, query)
                 stage2_tree = await self._execute_gql(org_id, model_id, resolved_gql)
@@ -1362,7 +1383,7 @@ class NLQueryService:
                     total_query_time_ms=(time.time() - start_time) * 1000,
                 )
         else:
-            # No GQL template — return the exemplar match directly
+            # No GQL template — return the exemplar match directly (no bulk load needed)
             result_tree = FactTreeBuilder.build_two_stage_result(
                 exemplar_match=match_detail,
                 data_results=None,
