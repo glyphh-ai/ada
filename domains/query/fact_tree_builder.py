@@ -353,6 +353,16 @@ class FactTreeBuilder:
                                 continue
                             score = item.get("score", 0.0)
                             concept = item.get("concept_text", glyph_id)
+                            # Create citation for this match
+                            meta_str = str(meta) if meta else ""
+                            data_hash = hashlib.sha256(meta_str.encode()).hexdigest()[:16]
+                            match_citation = SDKCitation(
+                                glyph_id=glyph_id,
+                                component="cortex",
+                                timestamp=datetime.utcnow(),
+                                version="v1",
+                                data_hash=data_hash,
+                            )
                             fact_tree.add_fact(
                                 path=["results", f"match_{match_idx}"],
                                 description=f"Match {match_idx}",
@@ -363,16 +373,42 @@ class FactTreeBuilder:
                                     "final_score": score,
                                     "metadata": meta,
                                 },
+                                citations=[match_citation],
                             )
                             match_idx += 1
                             has_data_results = True
                     # Also handle child nodes (from QueryService path)
                     for match_node in child.get("children", []):
+                        # Extract citations from serialized node
+                        node_citations = []
+                        for cit in match_node.get("citations", []):
+                            if isinstance(cit, dict) and cit.get("glyph_id"):
+                                node_citations.append(SDKCitation(
+                                    glyph_id=cit["glyph_id"],
+                                    component=cit.get("component", "cortex"),
+                                    timestamp=datetime.utcnow(),
+                                    version=cit.get("version", "v1"),
+                                    data_hash=cit.get("data_hash", ""),
+                                ))
+                        # If no citations in serialized data, create from value
+                        if not node_citations:
+                            node_val = match_node.get("value") or {}
+                            node_glyph_id = node_val.get("glyph_id", "") if isinstance(node_val, dict) else ""
+                            if node_glyph_id:
+                                node_meta_str = str(node_val.get("metadata", ""))
+                                node_citations.append(SDKCitation(
+                                    glyph_id=node_glyph_id,
+                                    component="cortex",
+                                    timestamp=datetime.utcnow(),
+                                    version="v1",
+                                    data_hash=hashlib.sha256(node_meta_str.encode()).hexdigest()[:16],
+                                ))
                         fact_tree.add_fact(
                             path=["results", f"match_{match_idx}"],
                             description=f"Match {match_idx}",
                             value=match_node.get("value"),
                             data_context=match_node.get("data_context"),
+                            citations=node_citations if node_citations else None,
                         )
                         match_idx += 1
                         has_data_results = True
@@ -383,16 +419,26 @@ class FactTreeBuilder:
         # (pattern-only models without gql_query still return the match).
         if not has_data_results:
             exemplar_meta = exemplar_match.get("metadata") or {}
+            ex_glyph_id = exemplar_match.get("glyph_id", "")
+            ex_meta_str = str(exemplar_meta) if exemplar_meta else ""
+            ex_citation = SDKCitation(
+                glyph_id=ex_glyph_id,
+                component="cortex",
+                timestamp=datetime.utcnow(),
+                version="v1",
+                data_hash=hashlib.sha256(ex_meta_str.encode()).hexdigest()[:16],
+            )
             fact_tree.add_fact(
                 path=["results", "match_1"],
                 description="Match 1",
                 value={
-                    "glyph_id": exemplar_match.get("glyph_id", ""),
+                    "glyph_id": ex_glyph_id,
                     "concept_text": exemplar_match.get("concept_text", ""),
                     "similarity_score": exemplar_match.get("score", 0.0),
                     "final_score": exemplar_match.get("score", 0.0),
                     "metadata": exemplar_meta,
                 },
+                citations=[ex_citation],
             )
 
         # Metadata — includes exemplar context for reference
