@@ -1076,6 +1076,11 @@ class ModelManager:
         "gap_analysis.py", "run_bfcl.py",
     }
 
+    # File basenames excluded at any depth (build/test artifacts, not runtime)
+    _SOURCE_EXCLUDE_FILENAMES = {
+        "tests.jsonl", "test_queries.jsonl",
+    }
+
     # File extensions to capture (text files needed at runtime)
     _SOURCE_INCLUDE_EXTENSIONS = {
         ".py", ".yaml", ".yml", ".json", ".jsonl",
@@ -1116,6 +1121,10 @@ class ModelManager:
 
             # Skip .glyphh files (packages)
             if rel.suffix == ".glyphh":
+                continue
+
+            # Skip build/test files at any depth
+            if rel.name in ModelManager._SOURCE_EXCLUDE_FILENAMES:
                 continue
 
             # Only capture known text file extensions

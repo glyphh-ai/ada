@@ -81,17 +81,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     resource_manager = ResourceManager(async_session_maker)
     logger.info("Resource manager initialized")
 
-    # Register in-memory encoders for models already deployed in the DB.
-    # Models are deployed explicitly via `glyphh model deploy`.
-    try:
-        from scripts.deploy_models import register_model_encoders
-        await register_model_encoders(
-            model_manager=model_manager,
-            session_factory=async_session_maker,
-        )
-    except Exception as e:
-        logger.warning(f"Model encoder registration failed: {e}")
-
     yield
 
     # Graceful shutdown
@@ -107,7 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="Glyphh Runtime",
     description="Execution environment for directory-based models",
-    version="0.2.11",
+    version="1.1.0",
     docs_url="/docs" if settings.deployment_mode == "local" else None,
     redoc_url="/redoc" if settings.deployment_mode == "local" else None,
     lifespan=lifespan,

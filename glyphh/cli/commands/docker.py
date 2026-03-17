@@ -38,16 +38,6 @@ def _detect_model_dir(directory: Path) -> str | None:
     return None
 
 
-def _inject_model_volume(compose_text: str, model_id: str) -> str:
-    """Add a volume mount for the current model directory to the runtime service."""
-    volume_line = f"      - .:/app/custom_models/{model_id}:ro"
-    # Insert after the existing ~/.glyphh volume line
-    compose_text = compose_text.replace(
-        "      - ${HOME}/.glyphh:/home/glyphh/.glyphh:ro",
-        f"      - ${{HOME}}/.glyphh:/home/glyphh/.glyphh:ro\n{volume_line}",
-    )
-    return compose_text
-
 
 @click.group("docker")
 def docker_group():
@@ -77,21 +67,20 @@ def docker_init(force: bool):
         src = resources.files(DOCKER_PKG).joinpath(filename)
         content = src.read_text()
 
-        # If this is a model directory, inject the volume mount
-        if filename == "docker-compose.yml" and model_id:
-            content = _inject_model_volume(content, model_id)
-
         target.write_text(content)
         click.secho(f"  ✓ {filename}", fg=theme.SUCCESS)
-
-    if model_id:
-        click.secho(f"  ✓ Detected model: {model_id} (will auto-deploy)", fg=theme.SUCCESS)
 
     click.echo()
     click.secho("  Ready. Run:", fg=theme.TEXT)
     click.echo()
     click.secho("    docker compose up -d --wait", fg=theme.ACCENT)
-    click.secho("    # waits until runtime is healthy (models deployed)", fg=theme.TEXT_DIM)
+    if model_id:
+        click.echo()
+        click.secho("  Deploy your model:", fg=theme.TEXT)
+        click.echo()
+        click.secho("    glyphh model package .", fg=theme.ACCENT)
+        click.secho("    glyphh model deploy .", fg=theme.ACCENT)
+
     click.echo()
     click.secho("  Your ~/.glyphh/ directory is shared with Docker.", fg=theme.TEXT_DIM)
     click.secho("  Log in (auth login) to use your plan's full limits.", fg=theme.TEXT_DIM)

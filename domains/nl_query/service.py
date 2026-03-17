@@ -435,16 +435,9 @@ class NLQueryService:
             pass
 
     def _resolve_model_paths(self, model_path: str) -> list:
-        """Return candidate model directories (model_path + dev model dir)."""
-        import os
+        """Return candidate model directories."""
         from pathlib import Path
-        paths = [Path(model_path)]
-        # Dev mode: GLYPHH_DEV_MODEL_DIR points to the actual source directory
-        # (model_path may be a temp extraction dir from .glyphh package)
-        dev_dir = os.environ.get("GLYPHH_DEV_MODEL_DIR", "").strip()
-        if dev_dir:
-            paths.append(Path(dev_dir))
-        return paths
+        return [Path(model_path)]
 
     def _load_gql_procedures(self, model_path: str) -> dict:
         """Load procedure registry from model's gql.json."""
