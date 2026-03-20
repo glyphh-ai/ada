@@ -97,13 +97,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize MCP session manager
     from domains.auth.service import AuthService
     from domains.query.service import QueryService
-    from domains.mcp.app import create_mcp_session_manager
+    from domains.mcp.app import create_mcp_session_managers
 
     query_service = QueryService(model_manager, async_session_maker)
     auth_service = AuthService()
-    mcp_session_manager = create_mcp_session_manager(query_service, auth_service)
-    app.state.mcp_session_manager = mcp_session_manager
-    logger.info("MCP Streamable HTTP server initialized")
+    json_manager, sse_manager = create_mcp_session_managers(query_service, auth_service)
+    app.state.mcp_session_managers = (json_manager, sse_manager)
+    logger.info("MCP Streamable HTTP server initialized (JSON + SSE)")
 
     # Resume any incomplete staged exemplar encoding from a previous run
     try:
@@ -111,9 +111,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Staged encoding resume failed: {e}")
 
-    # Start MCP session manager lifecycle (task group for handling requests)
-    async with mcp_session_manager.run():
-        yield
+    # Start both MCP session manager lifecycles
+    async with json_manager.run():
+        async with sse_manager.run():
+            yield
     
     # Graceful shutdown
     logger.info("Shutting down Glyphh Runtime...")
@@ -248,7 +249,7 @@ app.include_router(org_scoped_router)
 # requests and forward them to the MCP SDK's Streamable HTTP handler.
 from domains.mcp.app import MCPRoutingMiddleware
 
-app.add_middleware(MCPRoutingMiddleware, mcp_app_getter=lambda: getattr(app.state, "mcp_session_manager", None))
+app.add_middleware(MCPRoutingMiddleware, mcp_app_getter=lambda: getattr(app.state, "mcp_session_managers", None))
 
 
 if __name__ == "__main__":
