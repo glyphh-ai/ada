@@ -6,7 +6,7 @@ and provides an ASGI middleware that routes /{org_id}/{model_id}/mcp to the
 correct handler based on the client's Accept header.
 
 - Accept: application/json (no SSE) → JSON transport (Studio, Platform)
-- Accept: text/event-stream         → SSE transport (Claude Code, CLI agents)
+- Default / Accept: text/event-stream → SSE transport (Claude Code, CLI agents)
 """
 
 import logging
@@ -23,11 +23,19 @@ logger = logging.getLogger(__name__)
 _MCP_PATH_RE = re.compile(r"^/([^/]+)/([^/]+)/mcp(/.*)?$")
 
 
-def _wants_sse(scope: Scope) -> bool:
-    """Return True if the client Accept header includes text/event-stream."""
+def _wants_json(scope: Scope) -> bool:
+    """Return True if the client explicitly accepts application/json without SSE.
+
+    Studio and Platform send Accept: application/json explicitly.
+    Claude Code and other MCP clients may send no Accept header or
+    Accept: text/event-stream — both default to SSE transport.
+    """
     for key, value in scope.get("headers", []):
         if key == b"accept":
-            return b"text/event-stream" in value
+            return (
+                b"application/json" in value
+                and b"text/event-stream" not in value
+            )
     return False
 
 
@@ -60,7 +68,9 @@ class MCPRoutingMiddleware:
                     model_id = match.group(2)
 
                     # Pick transport based on Accept header
-                    manager = sse_manager if _wants_sse(scope) else json_manager
+                    # JSON only when client explicitly asks for it (Studio, Platform)
+                    # SSE for everything else (Claude Code, CLI agents, no header)
+                    manager = json_manager if _wants_json(scope) else sse_manager
 
                     # Set context variables for the tool handlers
                     org_token = current_org_id.set(org_id)
