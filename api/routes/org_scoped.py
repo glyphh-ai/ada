@@ -18,12 +18,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from domains.auth.service import AuthService
-from domains.mcp.server import MCPServer
 from domains.query.service import QueryService
 from infrastructure.config import get_settings
-from fastapi.security import HTTPAuthorizationCredentials
-from shared.auth import AuthenticatedUser, get_current_user, require_token, security
+from shared.auth import AuthenticatedUser, get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/{org_id}/{model_id}", tags=["org-scoped"])
@@ -32,10 +29,6 @@ settings = get_settings()
 
 
 # Dependency injection
-async def get_auth_service() -> AuthService:
-    return AuthService()
-
-
 async def validate_org_access(
     org_id: str,
     model_id: str,
@@ -59,41 +52,6 @@ async def validate_org_access(
     return current_user
 
 
-async def validate_token_access(
-    org_id: str,
-    model_id: str,
-    current_user: AuthenticatedUser = Depends(require_token),
-) -> AuthenticatedUser:
-    """
-    Always require a valid JWT token — no local mode bypass.
-
-    Used for data and query endpoints (listener, MCP) that external
-    services like Boomi, Make.com, or agents call with API tokens.
-    """
-    if current_user.org_id != org_id:
-        raise HTTPException(
-            status_code=403,
-            detail="Organization mismatch - you don't have access to this organization"
-        )
-
-    return current_user
-
-
-async def get_mcp_server(
-    org_id: str,
-    model_id: str,
-) -> MCPServer:
-    """Get MCP server for org/model."""
-    from glyphh.server import model_manager
-    from infrastructure.database import async_session_maker
-
-    if model_manager is None:
-        raise HTTPException(status_code=503, detail="Model manager not initialized")
-
-    query_service = QueryService(model_manager, async_session_maker)
-    auth_service = AuthService()
-
-    return MCPServer(query_service, auth_service)
 
 
 
@@ -147,63 +105,6 @@ async def get_model_manager():
     return model_manager
 
 
-
-
-# MCP Endpoint
-@router.post("/mcp")
-async def mcp_endpoint(
-    org_id: str,
-    model_id: str,
-    request: Dict[str, Any],
-    mcp_server: MCPServer = Depends(get_mcp_server),
-    current_user: AuthenticatedUser = Depends(validate_token_access),
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-) -> Dict[str, Any]:
-    """
-    MCP endpoint for org-scoped model access.
-
-    Requires a valid JWT token (even in local mode). External services
-    like Boomi, Make.com, and agents use API tokens to query models.
-    """
-    tool_name = request.get("tool")
-    arguments = request.get("arguments", {})
-
-    if not tool_name:
-        raise HTTPException(status_code=400, detail="Missing 'tool' field")
-
-    arguments["org_id"] = org_id
-    arguments["model_id"] = model_id
-
-    # Auth already validated by validate_token_access — pass pre-validated
-    # user to skip MCP's internal double-auth.
-    from domains.auth.service import User, Permission
-    perms = {Permission.READ, Permission.WRITE}
-    if current_user.role == "admin":
-        perms.add(Permission.ADMIN)
-    pre_user = User(
-        user_id=current_user.user_id,
-        org_id=current_user.org_id,
-        org_permissions={org_id: perms},
-    )
-
-    response = await mcp_server.handle_tool_call(
-        tool_name=tool_name,
-        arguments=arguments,
-        auth_token=credentials.credentials if credentials else "",
-        pre_authenticated_user=pre_user,
-    )
-
-    return response.to_dict()
-
-
-@router.get("/mcp/tools")
-async def list_mcp_tools(
-    org_id: str,
-    model_id: str,
-    mcp_server: MCPServer = Depends(get_mcp_server),
-    current_user: AuthenticatedUser = Depends(validate_token_access),
-) -> Dict[str, Any]:
-    return {"tools": await mcp_server.get_tools_list(org_id, model_id)}
 
 
 # ── File Query Endpoint ──

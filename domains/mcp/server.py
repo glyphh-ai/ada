@@ -1,18 +1,28 @@
 """
 MCP Server Implementation for Glyphh Runtime.
 
-Implements the Model Context Protocol (MCP) for agent integration.
+Proper MCP protocol implementation using the official mcp Python SDK.
 Exposes core tools (nl_query, gql_query) plus model-specific tools
 defined in each model's encoder.py via MCP_TOOLS / handle_mcp_tool.
+
+Uses the low-level Server class for dynamic tool registration since
+tools vary per org/model (model-specific tools from encoder.py).
 """
 
+import json
 import logging
-from dataclasses import dataclass
+from contextvars import ContextVar
 from datetime import datetime
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from domains.auth.service import AuthService, User
-from domains.mcp.progress import MCPProgressHandler
+from mcp.server.lowlevel.server import Server
+from mcp.types import (
+    CallToolResult,
+    TextContent,
+    Tool,
+)
+
+from domains.auth.service import AuthService, User, Permission
 from domains.query.service import QueryService
 from shared.exceptions import (
     AuthenticationException,
@@ -24,64 +34,54 @@ from shared.exceptions import (
 
 logger = logging.getLogger(__name__)
 
-
-# Type alias for notification sender
-NotificationSender = Optional[Callable[[dict], Coroutine[Any, Any, None]]]
-
-
-@dataclass
-class MCPToolSchema:
-    """Schema definition for an MCP tool."""
-    name: str
-    description: str
-    input_schema: Dict[str, Any]
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to MCP-compatible dict."""
-        return {
-            "name": self.name,
-            "description": self.description,
-            "inputSchema": self.input_schema,
-        }
+# Context variables set by the ASGI middleware before each request.
+# The MCP SDK's handler callbacks read these to know which org/model
+# the current request is scoped to.
+current_org_id: ContextVar[str] = ContextVar("current_org_id", default="")
+current_model_id: ContextVar[str] = ContextVar("current_model_id", default="")
 
 
-@dataclass
-class MCPResponse:
-    """Response from an MCP tool invocation."""
-    content: List[Dict[str, Any]]
-    is_error: bool = False
-    error: Optional[str] = None
-    result: Optional[Any] = None
-    query_type: Optional[str] = None
-    match_method: Optional[str] = None
-    confidence: float = 0.0
-    query_time_ms: float = 0.0
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to MCP-compatible dict with consistent JSON structure."""
-        response = {
-            "content": self.content,
-            "isError": self.is_error,
-            "result": self.result,
-            "query_type": self.query_type,
-            "match_method": self.match_method,
-            "confidence": self.confidence,
-            "query_time_ms": self.query_time_ms,
-        }
-        if self.error is not None:
-            response["error"] = self.error
-        return response
-
-
-class MCPServer:
+def create_mcp_server(
+    query_service: QueryService,
+    auth_service: AuthService,
+) -> Server:
     """
-    MCP Server for Glyphh Runtime.
+    Create an MCP Server using the official SDK.
 
-    Core tools (all models): nl_query, gql_query
-    Optional tools (config-driven):
-      - confirm:  when cognitive_loop.enabled = true
-      - execute:  when execute.provider is set
-    Model-specific tools: defined in encoder.py via MCP_TOOLS + handle_mcp_tool
+    Returns a low-level Server instance with on_list_tools and on_call_tool
+    handlers registered. The handlers delegate to the same tool logic that
+    was previously in the custom MCPServer class.
+    """
+    handler = ToolHandler(query_service, auth_service)
+
+    app = Server("glyphh-runtime")
+
+    @app.list_tools()
+    async def list_tools() -> list[Tool]:
+        org_id = current_org_id.get()
+        model_id = current_model_id.get()
+        return await handler.get_tools(org_id, model_id)
+
+    @app.call_tool()
+    async def call_tool(name: str, arguments: dict) -> CallToolResult:
+        org_id = current_org_id.get()
+        model_id = current_model_id.get()
+        return await handler.call_tool(
+            tool_name=name,
+            arguments=dict(arguments or {}),
+            org_id=org_id,
+            model_id=model_id,
+        )
+
+    return app
+
+
+class ToolHandler:
+    """
+    Tool dispatch logic for the Glyphh runtime.
+
+    Handles core tools (nl_query, gql_query, confirm, execute) plus
+    model-specific tools defined in encoder.py MCP_TOOLS.
     """
 
     def __init__(
@@ -91,94 +91,104 @@ class MCPServer:
     ):
         self._query_service = query_service
         self._auth_service = auth_service
-        self._tools = self._build_tool_schemas()
 
-    def _build_tool_schemas(self) -> Dict[str, MCPToolSchema]:
-        """Build MCP tool schemas. Only nl_query and gql_query are registered."""
-        return {
-            "nl_query": MCPToolSchema(
-                name="nl_query",
-                description="Execute a natural language query. Matches stored procedures first, falls back to similarity search.",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "org_id": {
-                            "type": "string",
-                            "description": "Organization ID"
-                        },
-                        "model_id": {
-                            "type": "string",
-                            "description": "Model ID"
-                        },
-                        "query": {
-                            "type": "string",
-                            "description": "Natural language query"
-                        },
-                        "debug": {
-                            "type": "boolean",
-                            "description": "Include translation details in response",
-                            "default": False
-                        },
-                        "stage": {
-                            "type": "string",
-                            "description": "Query stage mode: 'auto' (full two-stage), 'patterns' (Stage 1 exemplar match only), 'data' (Stage 2 data search only)",
-                            "enum": ["auto", "patterns", "data"],
-                            "default": "auto"
-                        },
-                        "selected_glyph_id": {
-                            "type": "string",
-                            "description": "Glyph ID from ASK disambiguation — skips re-query and uses this glyph directly for Stage 2"
-                        }
-                    },
-                    "required": ["org_id", "model_id", "query"]
-                }
+    # ------------------------------------------------------------------
+    # Tool listing
+    # ------------------------------------------------------------------
+
+    async def get_tools(self, org_id: str, model_id: str) -> List[Tool]:
+        """Return MCP Tool objects for the given org/model scope."""
+        cfg = await self._load_model_config(org_id, model_id) if org_id else {}
+
+        # Determine which optional tools are enabled
+        cl = cfg.get("cognitive_loop", False)
+        has_cognitive = (
+            (isinstance(cl, dict) and cl.get("enabled", False))
+            or (not isinstance(cl, dict) and bool(cl))
+        )
+        has_execute = bool(cfg.get("execute", {}).get("provider"))
+
+        tools: List[Tool] = []
+
+        # Core tools — always present
+        tools.append(Tool(
+            name="nl_query",
+            description=(
+                "Execute a natural language query. Matches stored procedures "
+                "first, falls back to similarity search."
             ),
-            "gql_query": MCPToolSchema(
-                name="gql_query",
-                description="Execute a GQL (Glyph Query Language) query directly. Returns results as a Fact Tree.",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "org_id": {
-                            "type": "string",
-                            "description": "Organization ID"
-                        },
-                        "model_id": {
-                            "type": "string",
-                            "description": "Model ID"
-                        },
-                        "query": {
-                            "type": "string",
-                            "description": "GQL query string (e.g., 'FIND SIMILAR TO \"red car\" LIMIT 10')"
-                        },
-                        "enable_cache": {
-                            "type": "boolean",
-                            "description": "Enable semantic query caching",
-                            "default": True
-                        }
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural language query",
                     },
-                    "required": ["org_id", "model_id", "query"]
-                }
+                    "debug": {
+                        "type": "boolean",
+                        "description": "Include translation details in response",
+                        "default": False,
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": (
+                            "Query stage mode: 'auto' (full two-stage), "
+                            "'patterns' (Stage 1 exemplar match only), "
+                            "'data' (Stage 2 data search only)"
+                        ),
+                        "enum": ["auto", "patterns", "data"],
+                        "default": "auto",
+                    },
+                    "selected_glyph_id": {
+                        "type": "string",
+                        "description": (
+                            "Glyph ID from ASK disambiguation — skips re-query "
+                            "and uses this glyph directly for Stage 2"
+                        ),
+                    },
+                },
+                "required": ["query"],
+            },
+        ))
+
+        tools.append(Tool(
+            name="gql_query",
+            description=(
+                "Execute a GQL (Glyph Query Language) query directly. "
+                "Returns results as a Fact Tree."
             ),
-            "confirm": MCPToolSchema(
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            'GQL query string (e.g., \'FIND SIMILAR TO "red car" LIMIT 10\')'
+                        ),
+                    },
+                    "enable_cache": {
+                        "type": "boolean",
+                        "description": "Enable semantic query caching",
+                        "default": True,
+                    },
+                },
+                "required": ["query"],
+            },
+        ))
+
+        # Optional: confirm (episodic memory)
+        if has_cognitive:
+            tools.append(Tool(
                 name="confirm",
                 description=(
                     "Confirm or correct the last nl_query result. "
                     "Call after executing a DONE action (was_correct=true) "
-                    "or after resolving an ASK (was_correct=false, correct_action=...)."
-                    " Enables episodic memory: confirmed patterns route faster over time."
+                    "or after resolving an ASK (was_correct=false, correct_action=...). "
+                    "Enables episodic memory: confirmed patterns route faster over time."
                 ),
-                input_schema={
+                inputSchema={
                     "type": "object",
                     "properties": {
-                        "org_id": {
-                            "type": "string",
-                            "description": "Organization ID",
-                        },
-                        "model_id": {
-                            "type": "string",
-                            "description": "Model ID",
-                        },
                         "was_correct": {
                             "type": "boolean",
                             "description": "True if the DONE result was correct, false if not",
@@ -188,27 +198,22 @@ class MCPServer:
                             "description": "The correct action key (required when was_correct=false)",
                         },
                     },
-                    "required": ["org_id", "model_id", "was_correct"],
+                    "required": ["was_correct"],
                 },
-            ),
-            "execute": MCPToolSchema(
+            ))
+
+        # Optional: execute (provider actions)
+        if has_execute:
+            tools.append(Tool(
                 name="execute",
                 description=(
                     "Execute an action via the model's configured provider "
                     "(e.g. Pipedream Connect). Pass the action_key from a "
                     "DONE nl_query result along with the required props."
                 ),
-                input_schema={
+                inputSchema={
                     "type": "object",
                     "properties": {
-                        "org_id": {
-                            "type": "string",
-                            "description": "Organization ID",
-                        },
-                        "model_id": {
-                            "type": "string",
-                            "description": "Model ID",
-                        },
                         "action_key": {
                             "type": "string",
                             "description": "Action component key from nl_query result",
@@ -223,16 +228,142 @@ class MCPServer:
                             "description": "Your end-user's ID (for provider auth)",
                         },
                     },
-                    "required": [
-                        "org_id", "model_id", "action_key", "external_user_id",
-                    ],
+                    "required": ["action_key", "external_user_id"],
                 },
-            ),
+            ))
+
+        # Model-specific tools from encoder.py MCP_TOOLS
+        if org_id and model_id:
+            loaded_model = await self._query_service._model_manager.get_model(
+                org_id, model_id,
+            )
+            if loaded_model and getattr(loaded_model, "mcp_tools", None):
+                for tool_def in loaded_model.mcp_tools:
+                    tools.append(Tool(
+                        name=tool_def["name"],
+                        description=tool_def.get("description", ""),
+                        inputSchema=tool_def.get("input_schema", {}),
+                    ))
+
+        return tools
+
+    # ------------------------------------------------------------------
+    # Tool dispatch
+    # ------------------------------------------------------------------
+
+    async def call_tool(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        org_id: str,
+        model_id: str,
+    ) -> CallToolResult:
+        """Dispatch a tool call and return an MCP-spec CallToolResult."""
+        # Inject org/model into arguments for handler compatibility
+        arguments["org_id"] = org_id
+        arguments["model_id"] = model_id
+
+        start_time = datetime.utcnow()
+
+        try:
+            # Core tool dispatch
+            if tool_name == "nl_query":
+                result = await self._handle_nl_query(arguments)
+            elif tool_name == "gql_query":
+                result = await self._handle_gql_query(arguments)
+            elif tool_name == "confirm":
+                result = await self._handle_confirm(arguments)
+            elif tool_name == "execute":
+                result = await self._handle_execute(arguments)
+            else:
+                # Model-specific tool
+                result = await self._handle_model_tool(
+                    tool_name, arguments, org_id, model_id,
+                )
+
+            elapsed = (datetime.utcnow() - start_time).total_seconds() * 1000
+            logger.info(f"MCP tool {tool_name} completed in {elapsed:.2f}ms")
+
+            # Return as MCP-spec CallToolResult with JSON text content
+            return CallToolResult(
+                content=[TextContent(
+                    type="text",
+                    text=json.dumps(result, default=str),
+                )],
+                isError=False,
+            )
+
+        except (ModelNotFoundException, GlyphNotFoundException, ValidationException) as e:
+            logger.warning(f"MCP tool {tool_name} error: {e}")
+            return CallToolResult(
+                content=[TextContent(type="text", text=str(e))],
+                isError=True,
+            )
+        except Exception as e:
+            logger.error(f"MCP tool {tool_name} error: {e}", exc_info=True)
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"Internal error: {e}")],
+                isError=True,
+            )
+
+    # ------------------------------------------------------------------
+    # Model-specific tool handler
+    # ------------------------------------------------------------------
+
+    async def _handle_model_tool(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        org_id: str,
+        model_id: str,
+    ) -> Dict[str, Any]:
+        """Dispatch to a model-specific MCP tool handler."""
+        loaded_model = await self._query_service._model_manager.get_model(
+            org_id, model_id,
+        )
+        if not loaded_model:
+            raise ModelNotFoundException(org_id, model_id)
+
+        model_tool_names = {
+            t["name"] for t in getattr(loaded_model, "mcp_tools", []) or []
         }
-    
+        if tool_name not in model_tool_names:
+            raise ValidationException(f"Unknown tool: {tool_name}")
+        if not getattr(loaded_model, "handle_mcp_tool_fn", None):
+            raise ValidationException(
+                f"Model defines tool '{tool_name}' but has no handle_mcp_tool handler"
+            )
+
+        context = {
+            "org_id": org_id,
+            "model_id": model_id,
+            "encoder": loaded_model.encoder,
+            "encode_query_fn": loaded_model.encode_query_fn,
+            "similarity_calculator": loaded_model.similarity_calculator,
+            "model_manager": self._query_service._model_manager,
+            "session_factory": self._query_service._session_factory,
+        }
+
+        import asyncio as _aio
+
+        handler_fn = loaded_model.handle_mcp_tool_fn
+        if _aio.iscoroutinefunction(handler_fn):
+            result = await handler_fn(tool_name, arguments, context)
+        else:
+            result = handler_fn(tool_name, arguments, context)
+
+        if not isinstance(result, dict):
+            result = {"result": result}
+        return result
+
+    # ------------------------------------------------------------------
+    # Core tool handlers (logic preserved from original implementation)
+    # ------------------------------------------------------------------
+
     async def _load_model_config(self, org_id: str, model_id: str) -> dict:
         """Load a model's config.yaml — tries disk first, falls back to DB source_files."""
         import yaml
+
         try:
             loaded_model = await self._query_service._model_manager.get_model(
                 org_id, model_id,
@@ -242,6 +373,7 @@ class MCPServer:
             # Try disk first
             if loaded_model.model_path:
                 from pathlib import Path as _Path
+
                 mp = _Path(loaded_model.model_path)
                 cfg_path = (mp if mp.is_dir() else mp.parent) / "config.yaml"
                 if cfg_path.exists():
@@ -250,6 +382,7 @@ class MCPServer:
             mgr = self._query_service._model_manager
             from domains.models.db_models import ModelConfig
             from sqlalchemy import select
+
             async with mgr._db_session_factory() as session:
                 result = await session.execute(
                     select(ModelConfig.source_files).where(
@@ -266,217 +399,8 @@ class MCPServer:
             pass
         return {}
 
-    def get_tool_schemas(self) -> List[MCPToolSchema]:
-        """Return MCP tool schemas for all exposed tools."""
-        return list(self._tools.values())
-
-    async def get_tools_list(
-        self, org_id: str = "", model_id: str = "",
-    ) -> List[Dict[str, Any]]:
-        """Return tools list in MCP format, filtered by model config.
-
-        - nl_query, gql_query: always included
-        - confirm: included when cognitive_loop.enabled = true
-        - execute: included when execute.provider is set
-        - model-specific tools: from encoder.py MCP_TOOLS (when model is loaded)
-        """
-        cfg = await self._load_model_config(org_id, model_id) if org_id else {}
-
-        # Determine which optional tools are enabled
-        cl = cfg.get("cognitive_loop", False)
-        has_cognitive = (
-            (isinstance(cl, dict) and cl.get("enabled", False)) or
-            (not isinstance(cl, dict) and bool(cl))
-        )
-        has_execute = bool(cfg.get("execute", {}).get("provider"))
-
-        tools = []
-        for name, schema in self._tools.items():
-            if name == "confirm" and not has_cognitive:
-                continue
-            if name == "execute" and not has_execute:
-                continue
-            tools.append(schema.to_dict())
-
-        # Append model-specific tools from the loaded model
-        if org_id and model_id:
-            loaded_model = await self._query_service._model_manager.get_model(org_id, model_id)
-            if loaded_model and getattr(loaded_model, "mcp_tools", None):
-                for tool_def in loaded_model.mcp_tools:
-                    tools.append({
-                        "name": tool_def["name"],
-                        "description": tool_def.get("description", ""),
-                        "inputSchema": tool_def.get("input_schema", {}),
-                    })
-
-        return tools
-
-    async def handle_tool_call(
-        self,
-        tool_name: str,
-        arguments: Dict[str, Any],
-        auth_token: str,
-        progress_token: Optional[str] = None,
-        send_notification: NotificationSender = None,
-        pre_authenticated_user: Any = None,
-    ) -> MCPResponse:
-        """
-        Handle MCP tool invocation with authentication and optional progress.
-
-        Args:
-            tool_name: Name of the tool to invoke
-            arguments: Tool arguments
-            auth_token: Authentication token
-            progress_token: Optional MCP progress token for long-running ops
-            send_notification: Optional async function to send notifications
-            pre_authenticated_user: Skip internal auth if already validated by route
-        """
-        start_time = datetime.utcnow()
-
-        # Create progress handler if token provided
-        progress_handler = None
-        if progress_token and send_notification:
-            progress_handler = MCPProgressHandler(send_notification)
-
-        try:
-            # Authenticate (skip if already validated by FastAPI dependency)
-            if pre_authenticated_user is not None:
-                user = pre_authenticated_user
-            else:
-                user = await self._auth_service.validate_token(auth_token)
-            
-            # Get org_id/model_id and check authorization
-            org_id = arguments.get("org_id")
-            model_id = arguments.get("model_id")
-            if org_id:
-                await self._auth_service.check_access(user, org_id, model_id or "", "read")
-
-            # Check if this is a core tool or a model-specific tool
-            is_core_tool = tool_name in self._tools
-            loaded_model = None
-
-            if not is_core_tool:
-                # Look for model-specific tool
-                if not org_id or not model_id:
-                    return self._error_response(
-                        f"Unknown tool: {tool_name}. org_id and model_id are required for model-specific tools."
-                    )
-                loaded_model = await self._query_service._model_manager.get_model(org_id, model_id)
-                if not loaded_model:
-                    return self._error_response(f"Model not found: {org_id}/{model_id}")
-
-                model_tool_names = {t["name"] for t in getattr(loaded_model, "mcp_tools", []) or []}
-                if tool_name not in model_tool_names:
-                    return self._error_response(f"Unknown tool: {tool_name}")
-                if not getattr(loaded_model, "handle_mcp_tool_fn", None):
-                    return self._error_response(
-                        f"Model defines tool '{tool_name}' but has no handle_mcp_tool handler"
-                    )
-
-            if is_core_tool:
-                # Validate arguments against core schema
-                validation_error = self._validate_arguments(tool_name, arguments)
-                if validation_error:
-                    return self._error_response(validation_error)
-
-                # Dispatch to built-in handler
-                handler = getattr(self, f"_handle_{tool_name}", None)
-                if handler is None:
-                    return self._error_response(f"Handler not implemented: {tool_name}")
-
-                result = await handler(
-                    arguments,
-                    user,
-                    progress_handler=progress_handler,
-                    progress_token=progress_token,
-                )
-            else:
-                # Dispatch to model-specific handler
-                assert loaded_model is not None
-                context = {
-                    "org_id": org_id,
-                    "model_id": model_id,
-                    "encoder": loaded_model.encoder,
-                    "encode_query_fn": loaded_model.encode_query_fn,
-                    "similarity_calculator": loaded_model.similarity_calculator,
-                    "model_manager": self._query_service._model_manager,
-                    "session_factory": self._query_service._session_factory,
-                }
-                import asyncio as _aio
-                handler_fn = loaded_model.handle_mcp_tool_fn
-                if _aio.iscoroutinefunction(handler_fn):
-                    result = await handler_fn(tool_name, arguments, context)
-                else:
-                    result = handler_fn(tool_name, arguments, context)
-                if not isinstance(result, dict):
-                    result = {"result": result}
-
-            # Log success
-            elapsed = (datetime.utcnow() - start_time).total_seconds() * 1000
-            logger.info(f"MCP tool {tool_name} completed in {elapsed:.2f}ms")
-
-            return MCPResponse(
-                content=[{"type": "json", "data": result}],
-                is_error=False,
-                result=result.get("fact_tree") or result.get("result"),
-                query_type=result.get("query_type"),
-                match_method=result.get("match_method"),
-                confidence=result.get("confidence", 0.0),
-                query_time_ms=result.get("query_time_ms", elapsed),
-            )
-            
-        except AuthenticationException as e:
-            logger.warning(f"MCP authentication failed: {e}")
-            return self._error_response(f"Authentication failed: {e.message}")
-        except AuthorizationException as e:
-            logger.warning(f"MCP authorization failed: {e}")
-            return self._error_response(f"Not authorized: {e.message}")
-        except ModelNotFoundException as e:
-            logger.warning(f"MCP model not found: {e}")
-            return self._error_response(f"Model not found: {e.message}. Deploy the model to the runtime first.")
-        except ValidationException as e:
-            return self._error_response(f"Validation error: {e.message}")
-        except GlyphNotFoundException as e:
-            return self._error_response(f"Glyph not found: {e.message}")
-        except Exception as e:
-            logger.error(f"MCP tool error: {e}", exc_info=True)
-            return self._error_response(f"Internal error: {str(e)}")
-    
-    def _validate_arguments(self, tool_name: str, arguments: Dict[str, Any]) -> Optional[str]:
-        """Validate tool arguments against schema."""
-        schema = self._tools[tool_name].input_schema
-        required = schema.get("required", [])
-        for field in required:
-            if field not in arguments:
-                return f"Missing required field: {field}"
-        return None
-    
-    def _error_response(self, message: str) -> MCPResponse:
-        """Create an error response."""
-        return MCPResponse(
-            content=[{"type": "text", "text": message}],
-            is_error=True,
-            error=message,
-        )
-    
-
-    # =========================================================================
-    # Tool Handlers
-    # =========================================================================
-    
-    async def _handle_nl_query(
-        self,
-        arguments: Dict[str, Any],
-        user: User,
-        progress_handler: Optional[MCPProgressHandler] = None,
-        progress_token: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        Handle nl_query tool. Routes: NLQueryService → stored procedure match → QueryService → HDC Engine.
-
-        Requires the model to be loaded in the runtime — no fallbacks.
-        Sends progress notifications if progress_token is provided.
-        """
+    async def _handle_nl_query(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle nl_query tool."""
         from domains.nl_query.service import NLQueryService
 
         org_id = arguments["org_id"]
@@ -487,34 +411,18 @@ class MCPServer:
         confirmed = arguments.get("confirmed", False)
         selected_glyph_id = arguments.get("selected_glyph_id")
 
-        # Send initial progress if token provided
-        if progress_handler and progress_token:
-            await progress_handler.notify(
-                progress_token, 
-                progress=10, 
-                message="Analyzing query..."
-            )
-
-        # Verify model is loaded — fail early with clear error
-        loaded_model = await self._query_service._model_manager.get_model(org_id, model_id)
+        loaded_model = await self._query_service._model_manager.get_model(
+            org_id, model_id,
+        )
         if loaded_model is None:
             raise ModelNotFoundException(org_id, model_id)
 
-        if progress_handler and progress_token:
-            await progress_handler.notify(
-                progress_token, 
-                progress=30, 
-                message="Processing query..."
-            )
-
-        # Create NL service — deterministic, no LLM fallback.
-        # Pass the model's assess_query_fn (if any) for semantic slot checking,
-        # and min_gap from config for gap-based disambiguation.
-        min_gap = 0.03  # default; overridden by model's disambiguation.min_gap
-        similarity_threshold = 0.5  # default; overridden by model's similarity.threshold
-        top_k = 10  # default; overridden by model's similarity.top_k
+        # Load config for NL service parameters
+        min_gap = 0.03
+        similarity_threshold = 0.5
+        top_k = 10
         two_stage = False
-        result_field = None  # metadata field to surface as display result
+        result_field = None
         cognitive_loop_enabled = False
         cognitive_loop_config: dict = {}
         _cfg = await self._load_model_config(org_id, model_id)
@@ -545,13 +453,6 @@ class MCPServer:
             cognitive_loop_config=cognitive_loop_config,
         )
 
-        if progress_handler and progress_token:
-            await progress_handler.notify(
-                progress_token, 
-                progress=50, 
-                message="Executing query..."
-            )
-
         result = await nl_service.execute_nl_query(
             org_id=org_id,
             model_id=model_id,
@@ -562,105 +463,47 @@ class MCPServer:
             selected_glyph_id=selected_glyph_id,
         )
 
-        if progress_handler and progress_token:
-            await progress_handler.notify(
-                progress_token, 
-                progress=100, 
-                message="Complete"
-            )
-
-        # Build response with consistent output shape: {state, fact_tree, confidence, match_method}
         response = result.to_dict()
 
-        # Include procedure_name if matched via stored procedure
-        if result.match_method == "stored_procedure" and hasattr(result, 'procedure_name'):
+        if result.match_method == "stored_procedure" and hasattr(result, "procedure_name"):
             response["procedure_name"] = result.procedure_name
-
         if result.match_method == "none":
             response["error"] = "No intent match found for query"
 
         return response
 
-
-    async def _handle_gql_query(
-        self,
-        arguments: Dict[str, Any],
-        user: User,
-        progress_handler: Optional[MCPProgressHandler] = None,
-        progress_token: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        Handle gql_query tool. Routes: QueryService → HDC Engine.
-
-        Parses the GQL query, creates an execution plan, and returns
-        results with the same output shape as nl_query: {state, fact_tree, confidence, match_method}.
-        """
+    async def _handle_gql_query(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle gql_query tool."""
         org_id = arguments["org_id"]
         model_id = arguments["model_id"]
         query = arguments["query"]
         enable_cache = arguments.get("enable_cache", True)
 
-        # Send initial progress
-        if progress_handler and progress_token:
-            await progress_handler.notify(
-                progress_token, 
-                progress=10, 
-                message="Parsing query..."
-            )
-
-        # Verify model is loaded
-        loaded_model = await self._query_service._model_manager.get_model(org_id, model_id)
+        loaded_model = await self._query_service._model_manager.get_model(
+            org_id, model_id,
+        )
         if loaded_model is None:
             raise ModelNotFoundException(org_id, model_id)
 
-        if progress_handler and progress_token:
-            await progress_handler.notify(
-                progress_token, 
-                progress=30, 
-                message="Building execution context..."
-            )
-
         try:
-            # Import GQL components
-            from glyphh.gql import (
-                parse,
-                GQLExecutor,
-                ExecutionContext,
-                GQLError,
-            )
+            from glyphh.gql import GQLExecutor, ExecutionContext
             from domains.gql.storage import DatabaseGlyphStorage
             from domains.models.storage import GlyphStorage
             from shared.similarity_service import SimilarityService
 
-            # Fetch cortex + hierarchical embeddings in one session
             async with self._query_service._session_factory() as session:
                 db_storage = GlyphStorage(session)
-
                 db_glyphs, embeddings = await db_storage.list_glyphs_with_embeddings(
-                    org_id=org_id,
-                    model_id=model_id,
-                    limit=10000,
+                    org_id=org_id, model_id=model_id, limit=10000,
                 )
-
-                # Fetch layer/segment vectors for AT LAYER queries
                 glyph_ids = [g.id for g in db_glyphs]
                 hierarchical = await db_storage.get_hierarchical_embeddings(
-                    org_id=org_id,
-                    model_id=model_id,
-                    glyph_ids=glyph_ids,
+                    org_id=org_id, model_id=model_id, glyph_ids=glyph_ids,
                 )
 
-            logger.info(
-                f"Fetched {len(db_glyphs)} glyphs with {len(embeddings)} cortex "
-                f"and {len(hierarchical)} hierarchical embeddings from database"
-            )
-
-            # Create SimilarityService for similarity computations
             similarity_service = SimilarityService(
-                similarity_calculator=getattr(loaded_model, 'similarity_calculator', None)
+                similarity_calculator=getattr(loaded_model, "similarity_calculator", None)
             )
-
-            # Create DatabaseGlyphStorage with hierarchical vectors
             storage = DatabaseGlyphStorage(
                 org_id=org_id,
                 model_id=model_id,
@@ -669,40 +512,14 @@ class MCPServer:
                 similarity_service=similarity_service,
                 hierarchical_embeddings=hierarchical,
             )
-
-            logger.info(f"GQL context built with {len(db_glyphs)} glyphs from database using DatabaseGlyphStorage")
-
-            # Create ExecutionContext with storage parameter
             context = ExecutionContext(
                 model=loaded_model.sdk_model,
                 storage=storage,
-                encoder=getattr(loaded_model, 'encoder', None),
+                encoder=getattr(loaded_model, "encoder", None),
             )
-
-            if progress_handler and progress_token:
-                await progress_handler.notify(
-                    progress_token, 
-                    progress=50, 
-                    message="Executing query..."
-                )
-
-            # Create executor and run query
-            executor = GQLExecutor(
-                context=context,
-                enable_cache=enable_cache,
-            )
-
+            executor = GQLExecutor(context=context, enable_cache=enable_cache)
             fact_tree = executor.execute(query)
-
-            if progress_handler and progress_token:
-                await progress_handler.notify(
-                    progress_token, 
-                    progress=100, 
-                    message="Complete"
-                )
-
-            # Return consistent output shape: {state, fact_tree, confidence, match_method}
-            fact_tree_json = fact_tree.to_json() if hasattr(fact_tree, 'to_json') else {}
+            fact_tree_json = fact_tree.to_json() if hasattr(fact_tree, "to_json") else {}
 
             return {
                 "state": "DONE",
@@ -725,18 +542,8 @@ class MCPServer:
                 "error": str(e),
             }
 
-    async def _handle_confirm(
-        self,
-        arguments: Dict[str, Any],
-        user: User,
-        progress_handler: Optional[MCPProgressHandler] = None,
-        progress_token: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Confirm or correct the last nl_query result for episodic memory.
-
-        When was_correct=True:  strengthens the recalled idea (Hebbian reinforcement).
-        When was_correct=False: stores a correction so future similar queries route correctly.
-        """
+    async def _handle_confirm(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle confirm tool (episodic memory)."""
         from domains.nl_query.service import NLQueryService
 
         org_id = arguments["org_id"]
@@ -750,23 +557,10 @@ class MCPServer:
                 "error": "correct_action is required when was_correct=false",
             }
 
-        result = NLQueryService.confirm_last(
-            org_id, model_id, was_correct, correct_action,
-        )
-        return result
+        return NLQueryService.confirm_last(org_id, model_id, was_correct, correct_action)
 
-    async def _handle_execute(
-        self,
-        arguments: Dict[str, Any],
-        user: User,
-        progress_handler: Optional[MCPProgressHandler] = None,
-        progress_token: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Execute an action via the model's configured provider.
-
-        Loads the provider from model config (execute.provider), then
-        calls provider.execute(action_key, props, external_user_id).
-        """
+    async def _handle_execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle execute tool (provider actions)."""
         from shared.providers import get_provider
 
         org_id = arguments["org_id"]
@@ -775,7 +569,6 @@ class MCPServer:
         props = arguments.get("props", {})
         external_user_id = arguments["external_user_id"]
 
-        # Load model config to get execute section
         cfg = await self._load_model_config(org_id, model_id)
         execute_config = cfg.get("execute", {})
         if not execute_config.get("provider"):
@@ -783,13 +576,6 @@ class MCPServer:
                 "state": "ERROR",
                 "error": f"Model {org_id}/{model_id} has no execute provider configured",
             }
-
-        if progress_handler and progress_token:
-            await progress_handler.notify(
-                progress_token,
-                progress=30,
-                message=f"Executing {action_key}...",
-            )
 
         try:
             provider = get_provider(org_id, model_id, execute_config)
@@ -804,11 +590,6 @@ class MCPServer:
             logger.error(f"Execute failed: {e}", exc_info=True)
             return {"state": "ERROR", "error": f"Execution failed: {e}"}
 
-        if progress_handler and progress_token:
-            await progress_handler.notify(
-                progress_token, progress=100, message="Complete",
-            )
-
         return {
             "state": "DONE" if result.get("success") else "ERROR",
             "provider": execute_config["provider"],
@@ -818,5 +599,3 @@ class MCPServer:
             "match_method": "execute",
             "query_type": "execute",
         }
-
-
