@@ -9,16 +9,7 @@ from uuid import uuid4
 from domains.models.storage import GlyphStorage
 from shared.exceptions import GlyphNotFoundException, ValidationException
 
-# test_db fixture requires runtime deps (asyncpg/aiosqlite + Base import).
-# Skip DB-dependent tests when the fixture isn't available (e.g. CI without DB).
-_has_test_db = True
-try:
-    from infrastructure.database.connection import Base  # noqa: F401
-except Exception:
-    _has_test_db = False
 
-
-@pytest.mark.skipif(not _has_test_db, reason="Requires database deps (asyncpg/aiosqlite)")
 class TestGlyphStorage:
     """Tests for GlyphStorage CRUD operations."""
     
