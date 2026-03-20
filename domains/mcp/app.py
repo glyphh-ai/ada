@@ -77,7 +77,7 @@ def create_mcp_session_manager(query_service, auth_service):
     session_manager = StreamableHTTPSessionManager(
         app=server,
         stateless=True,
-        json_response=True,
+        json_response=False,
         security_settings=TransportSecuritySettings(
             enable_dns_rebinding_protection=False,
         ),
