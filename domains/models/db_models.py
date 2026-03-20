@@ -280,7 +280,7 @@ class ModelConfig(Base):
     
     # Model metadata for marketplace display
     meta_name = Column(String(255), nullable=True)
-    short_description = Column(String(200), nullable=True)
+    short_description = Column(Text, nullable=True)
     long_description = Column(Text, nullable=True)
     
     # Full encoder config for reconstructing the model without the .glyphh file
