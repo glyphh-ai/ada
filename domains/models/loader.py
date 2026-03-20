@@ -56,6 +56,8 @@ class LoadedModel:
     encode_query_fn: Any = None  # callable(query: str) -> Concept
     entry_to_record_fn: Any = None  # callable(entry: dict) -> dict
     assess_query_fn: Any = None  # callable(query: str) -> dict (completeness check)
+    mcp_tools: list = field(default_factory=list)  # list[dict] — model-specific MCP tool schemas
+    handle_mcp_tool_fn: Any = None  # async callable(tool_name, arguments, context) -> dict
     source: str = "core"  # "core" or "custom"
     exemplar_count: int = 0
 
@@ -103,12 +105,12 @@ def load_manifest(model_dir: Path) -> ModelManifest:
         return ModelManifest(model_id=model_id, name=model_id)
 
 
-def load_encoder_config(model_dir: Path) -> tuple[Any, bool, Any, Any, Any]:
+def load_encoder_config(model_dir: Path) -> tuple[Any, bool, Any, Any, Any, list, Any]:
     """Load encoder config from a model directory.
 
-    Returns (encoder_config, is_custom, encode_query_fn, entry_to_record_fn, assess_query_fn).
+    Returns (encoder_config, is_custom, encode_query_fn, entry_to_record_fn, assess_query_fn, mcp_tools, handle_mcp_tool_fn).
     If encoder.py exists, imports ENCODER_CONFIG and optional functions.
-    Otherwise returns (None, False, None, None, None).
+    Otherwise returns (None, False, None, None, None, [], None).
 
     Each model's sibling .py modules (intent.py, scorer.py, etc.) are loaded
     into isolated sys.modules entries to prevent cross-model contamination when
@@ -116,7 +118,7 @@ def load_encoder_config(model_dir: Path) -> tuple[Any, bool, Any, Any, Any]:
     """
     encoder_path = model_dir / "encoder.py"
     if not encoder_path.exists():
-        return None, False, None, None, None
+        return None, False, None, None, None, [], None
 
     import sys
 
@@ -147,7 +149,7 @@ def load_encoder_config(model_dir: Path) -> tuple[Any, bool, Any, Any, Any]:
                 f"model_encoder_{model_dir.name}", encoder_path
             )
             if spec is None or spec.loader is None:
-                return None, False, None, None, None
+                return None, False, None, None, None, [], None
 
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
@@ -155,14 +157,21 @@ def load_encoder_config(model_dir: Path) -> tuple[Any, bool, Any, Any, Any]:
             encoder_config = getattr(module, "ENCODER_CONFIG", None)
             if encoder_config is None:
                 logger.warning(f"encoder.py in {model_dir.name} has no ENCODER_CONFIG")
-                return None, False, None, None, None
+                return None, False, None, None, None, [], None
 
             encode_query_fn = getattr(module, "encode_query", None)
             entry_to_record_fn = getattr(module, "entry_to_record", None)
             assess_query_fn = getattr(module, "assess_query", None)
+            mcp_tools = getattr(module, "MCP_TOOLS", []) or []
+            handle_mcp_tool_fn = getattr(module, "handle_mcp_tool", None)
+
+            if mcp_tools:
+                logger.info(
+                    f"Loaded {len(mcp_tools)} model-specific MCP tool(s) for {model_dir.name}"
+                )
 
             logger.info(f"Loaded custom encoder for {model_dir.name}")
-            return encoder_config, True, encode_query_fn, entry_to_record_fn, assess_query_fn
+            return encoder_config, True, encode_query_fn, entry_to_record_fn, assess_query_fn, mcp_tools, handle_mcp_tool_fn
 
         finally:
             if added_to_path:
@@ -198,7 +207,7 @@ def count_exemplars(model_dir: Path) -> int:
 def load_model(model_dir: Path, source: str = "core") -> LoadedModel:
     """Load a model from its directory."""
     manifest = load_manifest(model_dir)
-    encoder_config, has_custom, encode_query_fn, entry_to_record_fn, assess_query_fn = load_encoder_config(model_dir)
+    encoder_config, has_custom, encode_query_fn, entry_to_record_fn, assess_query_fn, mcp_tools, handle_mcp_tool_fn = load_encoder_config(model_dir)
     glyphh_files = list(model_dir.glob("*.glyphh"))
 
     return LoadedModel(
@@ -212,6 +221,8 @@ def load_model(model_dir: Path, source: str = "core") -> LoadedModel:
         encode_query_fn=encode_query_fn,
         entry_to_record_fn=entry_to_record_fn,
         assess_query_fn=assess_query_fn,
+        mcp_tools=mcp_tools,
+        handle_mcp_tool_fn=handle_mcp_tool_fn,
         source=source,
         exemplar_count=count_exemplars(model_dir),
     )

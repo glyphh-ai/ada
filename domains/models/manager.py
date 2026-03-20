@@ -67,6 +67,8 @@ class LoadedModel:
         encode_query_fn: Optional[Any] = None,
         assess_query_fn: Optional[Any] = None,
         entry_to_record_fn: Optional[Any] = None,
+        mcp_tools: Optional[List] = None,
+        handle_mcp_tool_fn: Optional[Any] = None,
     ):
         self.org_id = org_id
         self.model_id = model_id
@@ -82,6 +84,8 @@ class LoadedModel:
         self.encode_query_fn = encode_query_fn
         self.assess_query_fn = assess_query_fn
         self.entry_to_record_fn = entry_to_record_fn
+        self.mcp_tools: List = mcp_tools or []
+        self.handle_mcp_tool_fn = handle_mcp_tool_fn
         self.deploy_dir: Optional[Path] = None  # Materialized temp dir (cleaned on unload)
 
 
@@ -205,7 +209,7 @@ class ModelManager:
         short_description = getattr(sdk_model, 'short_description', '') or ''
         long_description = getattr(sdk_model, 'long_description', '') or ''
         
-        _enc_fn, _assess_fn, _etr_fn = self._load_model_fns(str(path))
+        _enc_fn, _assess_fn, _etr_fn, _mcp_tools, _handle_mcp_fn = self._load_model_fns(str(path))
         loaded_model = LoadedModel(
             org_id=org_id,
             model_id=model_id,
@@ -220,6 +224,8 @@ class ModelManager:
             encode_query_fn=_enc_fn,
             assess_query_fn=_assess_fn,
             entry_to_record_fn=_etr_fn,
+            mcp_tools=_mcp_tools,
+            handle_mcp_tool_fn=_handle_mcp_fn,
         )
         
         # Serialize encoder config for DB storage
@@ -428,6 +434,8 @@ class ModelManager:
             long_description="",
             encode_query_fn=loaded.encode_query_fn,
             assess_query_fn=loaded.assess_query_fn,
+            mcp_tools=loaded.mcp_tools,
+            handle_mcp_tool_fn=loaded.handle_mcp_tool_fn,
             entry_to_record_fn=loaded.entry_to_record_fn,
         )
 
@@ -840,7 +848,7 @@ class ModelManager:
                 )
                 cfg = result.scalar_one_or_none()
                 if cfg and cfg.source_files:
-                    _, _, entry_to_record_fn, _tmp = self._load_model_fns_from_source(
+                    _, _, entry_to_record_fn, _, _, _tmp = self._load_model_fns_from_source(
                         cfg.source_files, model_id=model_id
                     )
                     # Clean up any materialized dir — we only needed the function
@@ -977,13 +985,15 @@ class ModelManager:
             encode_query_fn = None
             assess_query_fn = None
             entry_to_record_fn = None
+            mcp_tools: list = []
+            handle_mcp_tool_fn = None
             deploy_dir = None
             if db_config.source_files:
-                encode_query_fn, assess_query_fn, entry_to_record_fn, deploy_dir = (
+                encode_query_fn, assess_query_fn, entry_to_record_fn, mcp_tools, handle_mcp_tool_fn, deploy_dir = (
                     self._load_model_fns_from_source(db_config.source_files, model_id=model_id)
                 )
             if encode_query_fn is None and db_config.model_path:
-                encode_query_fn, assess_query_fn, entry_to_record_fn = (
+                encode_query_fn, assess_query_fn, entry_to_record_fn, mcp_tools, handle_mcp_tool_fn = (
                     self._load_model_fns(db_config.model_path)
                 )
             
@@ -1014,6 +1024,8 @@ class ModelManager:
                 encode_query_fn=encode_query_fn,
                 assess_query_fn=assess_query_fn,
                 entry_to_record_fn=entry_to_record_fn,
+                mcp_tools=mcp_tools,
+                handle_mcp_tool_fn=handle_mcp_tool_fn,
             )
             loaded_model.deploy_dir = deploy_dir
 
@@ -1037,12 +1049,13 @@ class ModelManager:
             return None
     
     @staticmethod
-    def _load_model_fns(model_path: str) -> tuple[Optional[Any], Optional[Any], Optional[Any]]:
-        """Load encode_query_fn, assess_query_fn, entry_to_record_fn from encoder.py.
+    def _load_model_fns(model_path: str) -> tuple[Optional[Any], Optional[Any], Optional[Any], list, Optional[Any]]:
+        """Load model functions from encoder.py.
 
+        Returns (encode_query_fn, assess_query_fn, entry_to_record_fn, mcp_tools, handle_mcp_tool_fn).
         Used by load_model and _load_from_db to restore custom query functions when
-        lazy-loading a model. Returns (None, None, None) silently if the file doesn't
-        exist or has no matching functions.
+        lazy-loading a model. Returns (None, None, None, [], None) silently if the file
+        doesn't exist or has no matching functions.
         """
         try:
             from domains.models.loader import load_encoder_config
@@ -1051,17 +1064,17 @@ class ModelManager:
             if model_dir.is_file():
                 model_dir = model_dir.parent
             if not model_dir.is_dir():
-                return None, None, None
-            _, _, encode_query_fn, entry_to_record_fn, assess_query_fn = load_encoder_config(model_dir)
-            return encode_query_fn, assess_query_fn, entry_to_record_fn
+                return None, None, None, [], None
+            _, _, encode_query_fn, entry_to_record_fn, assess_query_fn, mcp_tools, handle_mcp_tool_fn = load_encoder_config(model_dir)
+            return encode_query_fn, assess_query_fn, entry_to_record_fn, mcp_tools, handle_mcp_tool_fn
         except Exception as e:
             logger.debug(f"Could not load model fns from {model_path}: {e}")
-            return None, None, None
+            return None, None, None, [], None
 
     @staticmethod
     def _load_encode_query_fn(model_path: str) -> Optional[Any]:
         """Backward-compat wrapper — returns only encode_query_fn."""
-        encode_query_fn, _, _ = ModelManager._load_model_fns(model_path)
+        encode_query_fn, _, _, _, _ = ModelManager._load_model_fns(model_path)
         return encode_query_fn
 
     # Directories excluded from source capture (mirrors packaging.py blocklist)
@@ -1162,7 +1175,7 @@ class ModelManager:
         source_files: Dict[str, str],
         model_id: str = "",
         model_path: str = "",
-    ) -> tuple[Optional[Any], Optional[Any], Optional[Any], Optional[Path]]:
+    ) -> tuple[Optional[Any], Optional[Any], Optional[Any], list, Optional[Any], Optional[Path]]:
         """Load model functions from stored source code.
 
         For complex models with subdirectory files (apps/, data/, classes/),
@@ -1172,7 +1185,7 @@ class ModelManager:
         For simple models (flat root-only files), uses the existing in-memory
         exec() approach with namespaced modules.
 
-        Returns (encode_query_fn, assess_query_fn, entry_to_record_fn, deploy_dir)
+        Returns (encode_query_fn, assess_query_fn, entry_to_record_fn, mcp_tools, handle_mcp_tool_fn, deploy_dir)
         where deploy_dir is a Path to the materialized temp directory (or None
         for simple models). Caller must track deploy_dir for cleanup on unload.
         """
@@ -1181,7 +1194,7 @@ class ModelManager:
         import types
 
         if not source_files or "encoder.py" not in source_files:
-            return None, None, None, None
+            return None, None, None, [], None, None
 
         # Complex models with subdirectory files: materialize and load from filesystem
         if ModelManager._has_subdirectory_files(source_files):
@@ -1286,42 +1299,44 @@ class ModelManager:
             encode_query_fn = getattr(encoder_mod, "encode_query", None)
             assess_query_fn = getattr(encoder_mod, "assess_query", None)
             entry_to_record_fn = getattr(encoder_mod, "entry_to_record", None)
-            return encode_query_fn, assess_query_fn, entry_to_record_fn, None
+            mcp_tools = getattr(encoder_mod, "MCP_TOOLS", []) or []
+            handle_mcp_tool_fn = getattr(encoder_mod, "handle_mcp_tool", None)
+            return encode_query_fn, assess_query_fn, entry_to_record_fn, mcp_tools, handle_mcp_tool_fn, None
 
         except Exception as e:
             logger.warning(f"Failed to load model fns from stored source: {e}")
-            return None, None, None, None
+            return None, None, None, [], None, None
 
     @staticmethod
     def _load_model_fns_materialized(
         source_files: Dict[str, str],
         model_id: str,
-    ) -> tuple[Optional[Any], Optional[Any], Optional[Any], Optional[Path]]:
+    ) -> tuple[Optional[Any], Optional[Any], Optional[Any], list, Optional[Any], Optional[Path]]:
         """Load model functions by materializing source files to a temp directory.
 
         Used for complex models with subdirectories (apps/, data/, classes/).
         Writes all source_files to disk, then imports encoder.py via importlib
         so Path(__file__).parent resolves to the real temp directory.
 
-        Returns (encode_query_fn, assess_query_fn, entry_to_record_fn, deploy_dir).
+        Returns (encode_query_fn, assess_query_fn, entry_to_record_fn, mcp_tools, handle_mcp_tool_fn, deploy_dir).
         """
         try:
             tmp_dir = ModelManager._materialize_source_files(source_files, model_id)
             logger.info(f"Materialized {len(source_files)} source files for {model_id} -> {tmp_dir}")
 
             from domains.models.loader import load_encoder_config
-            _, _, encode_query_fn, entry_to_record_fn, assess_query_fn = load_encoder_config(tmp_dir)
+            _, _, encode_query_fn, entry_to_record_fn, assess_query_fn, mcp_tools, handle_mcp_tool_fn = load_encoder_config(tmp_dir)
 
             if encode_query_fn is None:
                 logger.warning(f"Materialized restore for {model_id}: no encode_query_fn found")
                 shutil.rmtree(tmp_dir, ignore_errors=True)
-                return None, None, None, None
+                return None, None, None, [], None, None
 
-            return encode_query_fn, assess_query_fn, entry_to_record_fn, tmp_dir
+            return encode_query_fn, assess_query_fn, entry_to_record_fn, mcp_tools, handle_mcp_tool_fn, tmp_dir
 
         except Exception as e:
             logger.warning(f"Failed materialized restore for {model_id}: {e}")
-            return None, None, None, None
+            return None, None, None, [], None, None
 
     async def list_models(self) -> List[ModelInfoResponse]:
         """List all currently loaded models."""

@@ -2,7 +2,8 @@
 MCP Server Implementation for Glyphh Runtime.
 
 Implements the Model Context Protocol (MCP) for agent integration.
-Exposes two tools: nl_query and gql_query.
+Exposes core tools (nl_query, gql_query) plus model-specific tools
+defined in each model's encoder.py via MCP_TOOLS / handle_mcp_tool.
 """
 
 import logging
@@ -80,6 +81,7 @@ class MCPServer:
     Optional tools (config-driven):
       - confirm:  when cognitive_loop.enabled = true
       - execute:  when execute.provider is set
+    Model-specific tools: defined in encoder.py via MCP_TOOLS + handle_mcp_tool
     """
 
     def __init__(
@@ -276,6 +278,7 @@ class MCPServer:
         - nl_query, gql_query: always included
         - confirm: included when cognitive_loop.enabled = true
         - execute: included when execute.provider is set
+        - model-specific tools: from encoder.py MCP_TOOLS (when model is loaded)
         """
         cfg = await self._load_model_config(org_id, model_id) if org_id else {}
 
@@ -294,6 +297,18 @@ class MCPServer:
             if name == "execute" and not has_execute:
                 continue
             tools.append(schema.to_dict())
+
+        # Append model-specific tools from the loaded model
+        if org_id and model_id:
+            loaded_model = await self._query_service._model_manager.get_model(org_id, model_id)
+            if loaded_model and getattr(loaded_model, "mcp_tools", None):
+                for tool_def in loaded_model.mcp_tools:
+                    tools.append({
+                        "name": tool_def["name"],
+                        "description": tool_def.get("description", ""),
+                        "inputSchema": tool_def.get("input_schema", {}),
+                    })
+
         return tools
 
     async def handle_tool_call(
@@ -330,38 +345,76 @@ class MCPServer:
             else:
                 user = await self._auth_service.validate_token(auth_token)
             
-            # Validate tool exists
-            if tool_name not in self._tools:
-                return self._error_response(f"Unknown tool: {tool_name}")
-            
-            # Validate arguments
-            validation_error = self._validate_arguments(tool_name, arguments)
-            if validation_error:
-                return self._error_response(validation_error)
-            
             # Get org_id/model_id and check authorization
             org_id = arguments.get("org_id")
             model_id = arguments.get("model_id")
             if org_id:
                 await self._auth_service.check_access(user, org_id, model_id or "", "read")
-            
-            # Dispatch to handler with progress support
-            handler = getattr(self, f"_handle_{tool_name}", None)
-            if handler is None:
-                return self._error_response(f"Handler not implemented: {tool_name}")
-            
-            # Pass progress handler to tool handlers that support it
-            result = await handler(
-                arguments, 
-                user, 
-                progress_handler=progress_handler,
-                progress_token=progress_token,
-            )
-            
+
+            # Check if this is a core tool or a model-specific tool
+            is_core_tool = tool_name in self._tools
+            loaded_model = None
+
+            if not is_core_tool:
+                # Look for model-specific tool
+                if not org_id or not model_id:
+                    return self._error_response(
+                        f"Unknown tool: {tool_name}. org_id and model_id are required for model-specific tools."
+                    )
+                loaded_model = await self._query_service._model_manager.get_model(org_id, model_id)
+                if not loaded_model:
+                    return self._error_response(f"Model not found: {org_id}/{model_id}")
+
+                model_tool_names = {t["name"] for t in getattr(loaded_model, "mcp_tools", []) or []}
+                if tool_name not in model_tool_names:
+                    return self._error_response(f"Unknown tool: {tool_name}")
+                if not getattr(loaded_model, "handle_mcp_tool_fn", None):
+                    return self._error_response(
+                        f"Model defines tool '{tool_name}' but has no handle_mcp_tool handler"
+                    )
+
+            if is_core_tool:
+                # Validate arguments against core schema
+                validation_error = self._validate_arguments(tool_name, arguments)
+                if validation_error:
+                    return self._error_response(validation_error)
+
+                # Dispatch to built-in handler
+                handler = getattr(self, f"_handle_{tool_name}", None)
+                if handler is None:
+                    return self._error_response(f"Handler not implemented: {tool_name}")
+
+                result = await handler(
+                    arguments,
+                    user,
+                    progress_handler=progress_handler,
+                    progress_token=progress_token,
+                )
+            else:
+                # Dispatch to model-specific handler
+                assert loaded_model is not None
+                context = {
+                    "org_id": org_id,
+                    "model_id": model_id,
+                    "encoder": loaded_model.encoder,
+                    "encode_query_fn": loaded_model.encode_query_fn,
+                    "similarity_calculator": loaded_model.similarity_calculator,
+                    "model_manager": self._query_service._model_manager,
+                    "session_factory": self._query_service._session_factory,
+                }
+                import asyncio as _aio
+                handler_fn = loaded_model.handle_mcp_tool_fn
+                if _aio.iscoroutinefunction(handler_fn):
+                    result = await handler_fn(tool_name, arguments, context)
+                else:
+                    result = handler_fn(tool_name, arguments, context)
+                if not isinstance(result, dict):
+                    result = {"result": result}
+
             # Log success
             elapsed = (datetime.utcnow() - start_time).total_seconds() * 1000
             logger.info(f"MCP tool {tool_name} completed in {elapsed:.2f}ms")
-            
+
             return MCPResponse(
                 content=[{"type": "json", "data": result}],
                 is_error=False,
