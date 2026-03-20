@@ -50,6 +50,7 @@ def _resolve_query_context(model_id_override=None):
         "model_id": model_id,
         "headers": {
             "Content-Type": "application/json",
+            "Accept": "application/json",
             "Authorization": f"Bearer {token}",
         },
     }

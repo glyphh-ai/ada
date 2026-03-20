@@ -92,7 +92,10 @@ def _resolve_context(model_id_override=None, url_override=None, token_override=N
         except Exception:
             pass
 
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
