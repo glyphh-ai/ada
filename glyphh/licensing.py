@@ -104,7 +104,7 @@ class LicenseInfo:
     org_id: str = "default"
     tier: str = "free"
     max_models: int = 3
-    max_glyphs_per_model: int = 10_000
+    max_glyphs_per_model: int = 25_000
     rate_limit_per_minute: int = 60
     license_id: Optional[str] = None
     issued_at: Optional[str] = None
@@ -151,7 +151,7 @@ def get_current_license() -> LicenseInfo:
     return _current_license or FREE_TIER
 
 _TIER_DEFAULTS = {
-    "free": {"max_models": 3, "max_glyphs_per_model": 10_000, "rate_limit_per_minute": 60},
+    "free": {"max_models": 3, "max_glyphs_per_model": 25_000, "rate_limit_per_minute": 60},
     "advanced": {"max_models": 10, "max_glyphs_per_model": 250_000, "rate_limit_per_minute": 300},
     "pro": {"max_models": -1, "max_glyphs_per_model": -1, "rate_limit_per_minute": 1_000},
     "enterprise": {"max_models": -1, "max_glyphs_per_model": -1, "rate_limit_per_minute": -1},
