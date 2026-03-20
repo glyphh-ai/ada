@@ -378,7 +378,7 @@ def _do_query(ctx, query_text, tool="nl_query", stage="auto", confirmed=False, s
     """POST one query to the MCP endpoint and print the result.
     Returns a list of disambiguation option dicts if ASK state, else None.
     """
-    import httpx
+    from ..mcp_client import call_tool
 
     if not ctx["model_id"]:
         click.secho(
@@ -395,34 +395,31 @@ def _do_query(ctx, query_text, tool="nl_query", stage="auto", confirmed=False, s
         args["confirmed"] = True
     if selected_glyph_id:
         args["selected_glyph_id"] = selected_glyph_id
-    payload = {"tool": tool, "arguments": args}
 
     try:
         from ..spinner import GridSpinner
         with GridSpinner():
-            with httpx.Client(timeout=30) as client:
-                res = client.post(url, json=payload, headers=ctx["headers"])
+            data = call_tool(url, ctx["headers"], tool, args)
 
-        if res.status_code == 200:
-            return _print_result(res.json())
-        elif res.status_code == 401:
-            click.secho(
-                "  401 Unauthorized — pass --token or set GLYPHH_TOKEN.",
-                fg=theme.ERROR,
-            )
-        elif res.status_code == 404:
-            click.secho(
-                f"  404 — model '{ctx['model_id']}' not found at {ctx['runtime_url']}. "
-                "Is the server running?",
-                fg=theme.ERROR,
-            )
-        else:
-            detail = res.text
-            try:
-                detail = res.json().get("detail", detail)
-            except Exception:
-                pass
-            click.secho(f"  Error {res.status_code}: {detail}", fg=theme.ERROR)
+        status = data.get("_status_code")
+        if data.get("isError"):
+            error_msg = data.get("error", "Unknown error")
+            if status == 401:
+                click.secho(
+                    "  401 Unauthorized — pass --token or set GLYPHH_TOKEN.",
+                    fg=theme.ERROR,
+                )
+            elif status == 404:
+                click.secho(
+                    f"  404 — model '{ctx['model_id']}' not found at {ctx['runtime_url']}. "
+                    "Is the server running?",
+                    fg=theme.ERROR,
+                )
+            else:
+                click.secho(f"  Error: {error_msg}", fg=theme.ERROR)
+            return None
+
+        return _print_result(data)
 
     except Exception as exc:
         if "connect" in str(exc).lower() or "connection" in str(exc).lower():

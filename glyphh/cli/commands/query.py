@@ -58,46 +58,46 @@ def _resolve_query_context(model_id_override=None):
 
 def _do_query(ctx, query_text, tool="nl_query", debug=False):
     """Execute a single query against the MCP endpoint."""
-    import httpx
+    from ..mcp_client import call_tool
 
     url = f"{ctx['runtime_url']}/{ctx['org_id']}/{ctx['model_id']}/mcp"
-    payload = {
-        "tool": tool,
-        "arguments": {"query": query_text},
-    }
+    args = {"query": query_text}
     if debug:
-        payload["arguments"]["debug"] = True
+        args["debug"] = True
 
     try:
-        with httpx.Client(timeout=30) as client:
-            res = client.post(url, json=payload, headers=ctx["headers"])
+        data = call_tool(url, ctx["headers"], tool, args)
 
-        if res.status_code == 200:
-            data = res.json()
-            _print_result(data, tool)
-        elif res.status_code == 401:
-            click.secho("  Authentication failed. Check your GLYPHH_TOKEN.", fg=theme.ERROR)
-        else:
-            detail = res.text
-            try:
-                detail = res.json().get("detail", detail)
-            except Exception:
-                pass
-            click.secho(f"  Error: {detail}", fg=theme.ERROR)
+        if data.get("isError"):
+            status = data.get("_status_code")
+            if status == 401:
+                click.secho("  Authentication failed. Check your GLYPHH_TOKEN.", fg=theme.ERROR)
+            else:
+                click.secho(f"  Error: {data.get('error', 'Unknown error')}", fg=theme.ERROR)
+            return
 
-    except httpx.ConnectError:
-        click.secho(f"  Could not connect to runtime at {ctx['runtime_url']}", fg=theme.ERROR)
+        _print_result(data, tool)
+
     except Exception as e:
-        click.secho(f"  Query failed: {e}", fg=theme.ERROR)
+        if "connect" in str(e).lower():
+            click.secho(f"  Could not connect to runtime at {ctx['runtime_url']}", fg=theme.ERROR)
+        else:
+            click.secho(f"  Query failed: {e}", fg=theme.ERROR)
 
 
 def _print_result(data, tool):
     """Pretty-print a query result."""
-    state = data.get("state", "")
-    confidence = data.get("confidence")
+    # Extract from JSON-RPC unwrapped structure
+    content_data = {}
+    content = (data.get("content") or [{}])[0]
+    if content.get("type") == "json":
+        content_data = content.get("data", {})
+
+    state = content_data.get("state", "")
+    confidence = content_data.get("confidence")
     query_time = data.get("query_time_ms")
-    fact_tree = data.get("fact_tree", {})
-    children = fact_tree.get("children", [])
+    fact_tree = data.get("result") or content_data.get("fact_tree", {})
+    children = (fact_tree or {}).get("children", [])
 
     click.echo()
 
