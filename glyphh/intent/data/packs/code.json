@@ -1,0 +1,158 @@
+{
+  "pack": "code",
+  "description": "Codebase navigation vocabulary — finding, reading, editing, and understanding source code files",
+  "actions": [
+    {
+      "canonical": "find_file",
+      "synonyms": ["find", "locate", "find file", "find the file", "where is", "which file", "look up file", "navigate to"],
+      "phrases": ["find the file that", "where is the", "which file has", "locate the", "find the module", "find the class", "navigate to the"]
+    },
+    {
+      "canonical": "understand",
+      "synonyms": ["understand", "explain", "how does", "what does", "describe", "walk through", "trace", "follow"],
+      "phrases": ["how does the", "what does the", "explain the", "walk me through", "how is the", "how are", "trace the flow of", "walk through the"]
+    },
+    {
+      "canonical": "debug",
+      "synonyms": ["debug", "troubleshoot", "diagnose", "investigate bug", "trace error", "fix bug", "find bug", "root cause"],
+      "phrases": ["debug the", "why is the", "trace the error", "find the bug in", "root cause of", "investigate the", "troubleshoot the"]
+    },
+    {
+      "canonical": "refactor",
+      "synonyms": ["refactor", "restructure", "reorganize", "clean up", "simplify", "extract method", "inline", "decompose"],
+      "phrases": ["refactor the", "clean up the", "simplify the", "extract into", "decompose the", "restructure the"]
+    },
+    {
+      "canonical": "implement",
+      "synonyms": ["implement", "add feature", "build feature", "wire up", "hook up", "integrate", "add support for"],
+      "phrases": ["implement the", "add support for", "wire up the", "hook up the", "add a new", "implement a"]
+    }
+  ],
+  "targets": [
+    {
+      "canonical": "middleware",
+      "synonyms": ["middleware", "middlewares", "request handler", "request pipeline", "interceptor", "filter chain"],
+      "phrases": ["the middleware", "middleware that", "middleware for", "the request handler"]
+    },
+    {
+      "canonical": "handler",
+      "synonyms": ["handler", "endpoint", "route handler", "request handler", "controller", "view function", "api endpoint"],
+      "phrases": ["the handler for", "the endpoint that", "the route that", "the controller for"]
+    },
+    {
+      "canonical": "transport",
+      "synonyms": ["transport", "connection", "socket", "protocol handler", "client transport", "server transport", "sse", "websocket", "http transport"],
+      "phrases": ["the transport for", "the connection handler", "the protocol handler"]
+    },
+    {
+      "canonical": "decorator",
+      "synonyms": ["decorator", "annotation", "wrapper", "function decorator", "method decorator", "class decorator"],
+      "phrases": ["the decorator for", "decorator that", "the wrapper for"]
+    },
+    {
+      "canonical": "parser",
+      "synonyms": ["parser", "parsing", "argument parser", "function parser", "input parser", "schema parser", "deserializer"],
+      "phrases": ["the parser for", "parsing logic for", "the argument parser", "the schema parser"]
+    },
+    {
+      "canonical": "validator",
+      "synonyms": ["validator", "validation", "input validation", "schema validation", "type checker", "constraint checker"],
+      "phrases": ["the validator for", "validation logic for", "the input validator"]
+    },
+    {
+      "canonical": "resource",
+      "synonyms": ["resource", "resource handler", "resource provider", "resource manager", "data source", "resource endpoint"],
+      "phrases": ["the resource for", "the resource that", "the resource handler"]
+    },
+    {
+      "canonical": "tool",
+      "synonyms": ["tool", "tool handler", "tool definition", "tool function", "mcp tool", "tool registration", "tool dispatch"],
+      "phrases": ["the tool that", "tool registration", "tool dispatch", "the tool handler"]
+    },
+    {
+      "canonical": "module",
+      "synonyms": ["module", "package", "library", "subsystem", "component", "system"],
+      "phrases": ["the module for", "the package that", "the subsystem for"]
+    },
+    {
+      "canonical": "config",
+      "synonyms": ["config", "configuration", "settings", "options", "preferences", "env config", "app config"],
+      "phrases": ["the config for", "the configuration of", "the settings for"]
+    },
+    {
+      "canonical": "schema",
+      "synonyms": ["schema", "model", "data model", "type definition", "pydantic model", "json schema", "openapi schema"],
+      "phrases": ["the schema for", "the data model for", "the type definition"]
+    },
+    {
+      "canonical": "test",
+      "synonyms": ["test", "test file", "test suite", "test case", "unit test", "integration test", "test module"],
+      "phrases": ["the test for", "tests for", "the test file for"]
+    },
+    {
+      "canonical": "error_handler",
+      "synonyms": ["error handler", "error handling", "exception handler", "error middleware", "error boundary", "fault handler"],
+      "phrases": ["the error handler", "error handling for", "exception handling in"]
+    },
+    {
+      "canonical": "auth",
+      "synonyms": ["auth", "authentication", "authorization", "oauth", "token", "session", "login handler", "auth middleware", "pkce", "jwt"],
+      "phrases": ["the auth handler", "authentication for", "the authorization middleware", "oauth flow"]
+    },
+    {
+      "canonical": "cache",
+      "synonyms": ["cache", "caching", "cache layer", "memoize", "cache middleware", "response cache"],
+      "phrases": ["the cache for", "caching logic", "the cache middleware"]
+    },
+    {
+      "canonical": "telemetry",
+      "synonyms": ["telemetry", "instrumentation", "observability", "tracing", "metrics", "logging", "log handler", "logger"],
+      "phrases": ["the telemetry module", "logging for", "instrumentation in", "the tracing code"]
+    },
+    {
+      "canonical": "serializer",
+      "synonyms": ["serializer", "serialization", "marshaller", "encoder", "formatter", "converter", "transformer"],
+      "phrases": ["the serializer for", "serialization of", "the converter for"]
+    }
+  ],
+  "phrases": [
+    {"phrase": "find the middleware", "action": "find_file"},
+    {"phrase": "find the handler", "action": "find_file"},
+    {"phrase": "find the module", "action": "find_file"},
+    {"phrase": "where is the", "action": "find_file"},
+    {"phrase": "which file has", "action": "find_file"},
+    {"phrase": "how does the middleware", "action": "understand"},
+    {"phrase": "how are tools registered", "action": "understand"},
+    {"phrase": "how does the chain", "action": "understand"},
+    {"phrase": "trace the error in", "action": "debug"},
+    {"phrase": "debug the connection", "action": "debug"},
+    {"phrase": "add a parameter to", "action": "implement"},
+    {"phrase": "add logging to", "action": "implement"},
+    {"phrase": "add support for", "action": "implement"},
+    {"phrase": "fix the handler", "action": "debug"},
+    {"phrase": "update the module", "action": "update"},
+    {"phrase": "refactor the", "action": "refactor"},
+    {"phrase": "function argument parsing", "action": "find_file"},
+    {"phrase": "tool decorator and registration", "action": "find_file"},
+    {"phrase": "resource that returns", "action": "find_file"},
+    {"phrase": "openapi schema to", "action": "find_file"},
+    {"phrase": "telemetry and logging", "action": "find_file"},
+    {"phrase": "rate limiting", "action": "find_file"},
+    {"phrase": "error handling middleware", "action": "find_file"},
+    {"phrase": "caching middleware", "action": "find_file"},
+    {"phrase": "connection handler", "action": "find_file"},
+    {"phrase": "token validation", "action": "find_file"}
+  ],
+  "domain_signals": {
+    "code": {
+      "middleware": 5, "handler": 4, "decorator": 5, "parser": 4,
+      "transport": 4, "resource": 3, "validator": 4, "schema": 3,
+      "module": 3, "endpoint": 3, "controller": 4, "serializer": 4,
+      "mcp": 5, "oauth": 4, "pkce": 5, "jwt": 4, "sse": 4,
+      "websocket": 4, "openapi": 5, "pydantic": 4, "fastapi": 4,
+      "telemetry": 4, "instrumentation": 5, "observability": 5,
+      "rate limit": 5, "caching": 4, "error handling": 4,
+      "tool registration": 5, "function parsing": 5
+    }
+  }
+}

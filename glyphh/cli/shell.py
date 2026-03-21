@@ -236,6 +236,11 @@ def shell(ctx):
                 elif line.lower() == "help":
                     _print_help()
                     continue
+                elif line.startswith("!"):
+                    # Shell escape: run arbitrary system commands
+                    import subprocess
+                    subprocess.run(line[1:].strip(), shell=True)
+                    continue
 
                 # Parse <category> <function> [args] format
                 parts = line.split(None, 2)
@@ -322,6 +327,7 @@ def _print_help():
     click.echo()
     click.secho("  general", fg=theme.ACCENT)
     click.secho("    clear, home             Clear screen and show banner", fg=theme.MUTED)
+    click.secho("    !<command>              Run a shell command (e.g. !python3 script.py)", fg=theme.MUTED)
     click.secho("    exit, quit, q           Exit the shell", fg=theme.MUTED)
     click.secho("    help                    Show this message", fg=theme.MUTED)
     click.echo()
