@@ -33,22 +33,21 @@ database_url = database_url.replace("sslmode=", "ssl=")
 _is_sqlite = "sqlite" in database_url
 
 if _is_sqlite:
+    # Set per-connection PRAGMAs via sqlite3's init_command equivalent.
+    # aiosqlite passes connect_args through to sqlite3.connect().
+    # timeout=5 sets the busy timeout to 5 seconds (same as PRAGMA busy_timeout=5000).
     engine = create_async_engine(
         database_url,
         echo=settings.log_level == "DEBUG",
-        # SQLite: no pool args (uses StaticPool internally for :memory:, NullPool otherwise)
+        connect_args={"timeout": 5},
     )
 
-    # SQLite requires per-connection PRAGMAs:
-    #   foreign_keys = ON   — CASCADE deletes work
-    #   journal_mode = WAL  — concurrent reads + single writer (prevents "database is locked")
-    #   busy_timeout = 5000 — wait up to 5s for locks instead of failing immediately
+    # Also set foreign_keys and WAL via the sync engine connect event.
     @event.listens_for(engine.sync_engine, "connect")
     def _enable_sqlite_pragmas(dbapi_conn, connection_record):
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA foreign_keys = ON")
         cursor.execute("PRAGMA journal_mode = WAL")
-        cursor.execute("PRAGMA busy_timeout = 5000")
         cursor.close()
 else:
     engine = create_async_engine(
@@ -88,7 +87,7 @@ async def init_db() -> None:
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             logger.info("pgvector extension enabled")
 
-    # ── SQLite: create tables directly, skip Alembic ──────────────────────────
+    # ── SQLite: set pragmas and create tables directly, skip Alembic ──────────
     if _is_sqlite:
         from domains.models.db_models import Glyph, GlyphVector, Edge, ModelConfig, Token  # noqa: F401
         try:
@@ -96,8 +95,13 @@ async def init_db() -> None:
         except ImportError:
             pass
         async with engine.begin() as conn:
+            # WAL mode persists on the database file — only needs to be set once
+            # but is safe to re-run. Enables concurrent readers + single writer.
+            await conn.execute(text("PRAGMA journal_mode = WAL"))
+            await conn.execute(text("PRAGMA busy_timeout = 5000"))
+            await conn.execute(text("PRAGMA foreign_keys = ON"))
             await conn.run_sync(Base.metadata.create_all)
-        logger.info("SQLite: database tables created via metadata.create_all()")
+        logger.info("SQLite: database tables created, WAL mode enabled")
         return
 
     # ── pgvector: run Alembic migrations ─────────────────────────────────────
