@@ -6,13 +6,13 @@ import logging
 import subprocess
 from typing import AsyncGenerator
 
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 from sqlalchemy.orm import declarative_base
-from sqlalchemy import text
 
 from infrastructure.config import get_settings
 
@@ -38,6 +38,13 @@ if _is_sqlite:
         echo=settings.log_level == "DEBUG",
         # SQLite: no pool args (uses StaticPool internally for :memory:, NullPool otherwise)
     )
+
+    # SQLite requires PRAGMA foreign_keys = ON per connection for CASCADE to work.
+    @event.listens_for(engine.sync_engine, "connect")
+    def _enable_sqlite_fks(dbapi_conn, connection_record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.close()
 else:
     engine = create_async_engine(
         database_url,

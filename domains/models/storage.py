@@ -988,8 +988,8 @@ class GlyphStorage:
     
     async def delete_model_data(self, org_id: str, model_id: str) -> Tuple[int, int]:
         """
-        Delete all glyphs and edges for an org/model.
-        
+        Delete all glyphs, vectors, and edges for an org/model.
+
         Returns:
             Tuple of (glyphs_deleted, edges_deleted)
         """
@@ -1001,7 +1001,16 @@ class GlyphStorage:
             )
         )
         edges_deleted = edge_result.rowcount
-        
+
+        # Explicitly delete vectors before glyphs — SQLite does not
+        # enforce ON DELETE CASCADE unless PRAGMA foreign_keys is ON.
+        await self._session.execute(
+            delete(GlyphVector).where(
+                GlyphVector.org_id == org_id,
+                GlyphVector.model_id == model_id,
+            )
+        )
+
         glyph_result = await self._session.execute(
             delete(Glyph).where(
                 Glyph.org_id == org_id,
@@ -1009,12 +1018,12 @@ class GlyphStorage:
             )
         )
         glyphs_deleted = glyph_result.rowcount
-        
+
         logger.info(
             f"Deleted model data org={org_id}, model={model_id}: "
             f"{glyphs_deleted} glyphs, {edges_deleted} edges"
         )
-        
+
         return glyphs_deleted, edges_deleted
     
     # =========================================================================

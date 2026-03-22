@@ -21,7 +21,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from domains.models.db_models import Edge, Glyph, ModelConfig
+from domains.models.db_models import Edge, Glyph, GlyphVector, ModelConfig
 from domains.models.schemas import (
     ClearDataResponse,
     ModelConfigResponse,
@@ -1669,9 +1669,9 @@ class ModelManager:
         )
     
     async def clear_model_data(self, org_id: str, model_id: str) -> ClearDataResponse:
-        """Clear all glyphs and edges for an org/model, preserving config."""
+        """Clear all glyphs, vectors, and edges for an org/model, preserving config."""
         key = (org_id, model_id)
-        
+
         # Check if model exists (in memory or DB)
         if key not in self._models:
             # Try to load from DB
@@ -1687,7 +1687,7 @@ class ModelManager:
                     )
                     if result.scalar_one_or_none() is None:
                         raise ModelNotFoundException(org_id, model_id)
-        
+
         async with self._db_session_factory() as session:
             edge_result = await session.execute(
                 delete(Edge).where(
@@ -1696,7 +1696,17 @@ class ModelManager:
                 )
             )
             edges_deleted = edge_result.rowcount
-            
+
+            # Explicitly delete vectors before glyphs — SQLite does not
+            # enforce ON DELETE CASCADE unless PRAGMA foreign_keys is ON,
+            # so this prevents orphaned vectors on any backend.
+            await session.execute(
+                delete(GlyphVector).where(
+                    GlyphVector.org_id == org_id,
+                    GlyphVector.model_id == model_id,
+                )
+            )
+
             glyph_result = await session.execute(
                 delete(Glyph).where(
                     Glyph.org_id == org_id,
