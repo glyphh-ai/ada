@@ -39,11 +39,16 @@ if _is_sqlite:
         # SQLite: no pool args (uses StaticPool internally for :memory:, NullPool otherwise)
     )
 
-    # SQLite requires PRAGMA foreign_keys = ON per connection for CASCADE to work.
+    # SQLite requires per-connection PRAGMAs:
+    #   foreign_keys = ON   — CASCADE deletes work
+    #   journal_mode = WAL  — concurrent reads + single writer (prevents "database is locked")
+    #   busy_timeout = 5000 — wait up to 5s for locks instead of failing immediately
     @event.listens_for(engine.sync_engine, "connect")
-    def _enable_sqlite_fks(dbapi_conn, connection_record):
+    def _enable_sqlite_pragmas(dbapi_conn, connection_record):
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.execute("PRAGMA journal_mode = WAL")
+        cursor.execute("PRAGMA busy_timeout = 5000")
         cursor.close()
 else:
     engine = create_async_engine(

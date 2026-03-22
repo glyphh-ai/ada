@@ -905,9 +905,10 @@ class AsyncListenerService:
                             )
                             
                             # Store with original record as metadata (user's format)
-                            # Use concept name (composite key from key_part roles) as display text
-                            concept_text = concept.name
-                            glyph_metadata = dict(record)  # Copy original flat format
+                            # Prefer the record's concept_text if provided (e.g. file path),
+                            # fall back to concept.name (composite key from key_part roles)
+                            concept_text = record.get("concept_text") or concept.name
+                            glyph_metadata = record.get("metadata") or dict(record)
                             if concept.metadata.get("temporal_value") is not None:
                                 glyph_metadata["temporal_value"] = concept.metadata["temporal_value"]
                             
