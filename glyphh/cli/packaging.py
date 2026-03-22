@@ -40,9 +40,20 @@ PACKAGE_EXCLUDE_ROOT_FILES = {
 }
 
 
+def _find_manifest(path: Path) -> Optional[Path]:
+    """Find manifest.yaml in a directory — checks root then .glyphh/."""
+    root = path / "manifest.yaml"
+    if root.exists():
+        return root
+    glyphh = path / ".glyphh" / "manifest.yaml"
+    if glyphh.exists():
+        return glyphh
+    return None
+
+
 def is_model_dir(path: Path) -> bool:
     """Check if a directory is a glyphh model project."""
-    return path.is_dir() and (path / "manifest.yaml").exists()
+    return path.is_dir() and _find_manifest(path) is not None
 
 
 def find_model_dir(start: Optional[Path] = None) -> Optional[Path]:
@@ -60,8 +71,8 @@ def find_model_dir(start: Optional[Path] = None) -> Optional[Path]:
 
 def read_manifest(model_dir: Path) -> dict:
     """Read manifest.yaml from a model directory."""
-    manifest_path = model_dir / "manifest.yaml"
-    if not manifest_path.exists():
+    manifest_path = _find_manifest(model_dir)
+    if not manifest_path:
         return {}
     try:
         return yaml.safe_load(manifest_path.read_text()) or {}
