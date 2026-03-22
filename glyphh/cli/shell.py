@@ -43,6 +43,44 @@ COMMAND_HANDLERS = {
 }
 
 
+def _discover_plugins():
+    """Discover installed model plugins via entry points.
+
+    Plugins register under the 'glyphh.plugins' group:
+        [project.entry-points."glyphh.plugins"]
+        code = "glyphh_code.plugin:register"
+
+    Each register() function returns a dict:
+        {"handler": callable, "subcommands": ["init", "compile", "status"]}
+    """
+    try:
+        from importlib.metadata import entry_points
+        eps = entry_points()
+        # Python 3.12+ returns a SelectableGroups, older returns dict
+        if hasattr(eps, "select"):
+            plugin_eps = eps.select(group="glyphh.plugins")
+        else:
+            plugin_eps = eps.get("glyphh.plugins", [])
+
+        for ep in plugin_eps:
+            try:
+                register_fn = ep.load()
+                plugin = register_fn()
+                handler = plugin.get("handler")
+                subcommands = plugin.get("subcommands", [])
+                if handler:
+                    COMMAND_HANDLERS[ep.name] = handler
+                    _SUBCOMMANDS[ep.name] = subcommands
+            except Exception:
+                pass  # Skip broken plugins silently
+    except Exception:
+        pass
+
+
+# Discover plugins on import
+_discover_plugins()
+
+
 import glob as _glob
 import os as _os
 
@@ -325,6 +363,19 @@ def _print_help():
     click.secho("    config set token <jwt>   Set runtime auth token", fg=theme.MUTED)
     click.secho("    config clear             Clear all config", fg=theme.MUTED)
     click.echo()
+    # Show installed plugin commands
+    builtin_categories = {
+        "auth", "model", "token", "query", "chat", "dev", "config", "docker", "license",
+    }
+    plugin_categories = [c for c in _SUBCOMMANDS if c not in builtin_categories]
+    if plugin_categories:
+        click.secho("  plugins", fg=theme.ACCENT)
+        for cat in sorted(plugin_categories):
+            subs = _SUBCOMMANDS.get(cat, [])
+            sub_str = ", ".join(subs) if subs else "<command>"
+            click.secho(f"    {cat} {sub_str}", fg=theme.MUTED)
+        click.echo()
+
     click.secho("  general", fg=theme.ACCENT)
     click.secho("    clear, home             Clear screen and show banner", fg=theme.MUTED)
     click.secho("    !<command>              Run a shell command (e.g. !python3 script.py)", fg=theme.MUTED)

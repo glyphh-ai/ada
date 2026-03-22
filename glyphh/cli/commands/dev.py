@@ -7,7 +7,8 @@ glyphh dev --port 9000   Custom port
 glyphh dev -d            Run as background daemon
 glyphh dev stop          Stop the running daemon
 
-Requires PostgreSQL + pgvector (use `glyphh docker up` first).
+Uses SQLite by default (no setup required). For production, use
+PostgreSQL + pgvector (`glyphh docker up`).
 Deploy models with `glyphh model deploy` — no auto-deploy.
 MCP endpoint is auth-free in local mode.
 """
@@ -111,11 +112,13 @@ def _run_server(path: str, port: int, no_reload: bool, daemon: bool) -> None:
     # ── Set environment variables before uvicorn starts ────────────────────
     os.environ.setdefault("DEPLOYMENT_MODE", "local")
 
-    # Require PostgreSQL — no SQLite fallback (pgvector needed for queries)
+    # Default to SQLite if no DATABASE_URL set (local dev mode)
     if "DATABASE_URL" not in os.environ:
-        click.secho("  DATABASE_URL not set.", fg=theme.ERROR)
-        click.secho("  Run: glyphh docker up", fg=theme.ACCENT)
-        sys.exit(1)
+        db_dir = Path.home() / ".glyphh"
+        db_dir.mkdir(parents=True, exist_ok=True)
+        db_path = db_dir / "local.db"
+        os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path}"
+        click.secho(f"  Using SQLite: {db_path}", fg=theme.TEXT_DIM)
 
     # Clear lru_cache so the server picks up the fresh env vars
     try:
@@ -126,9 +129,14 @@ def _run_server(path: str, port: int, no_reload: bool, daemon: bool) -> None:
 
     # ── Determine effective storage label for display ──────────────────────
     db_url = os.environ.get("DATABASE_URL", "")
-    import re
-    masked = re.sub(r"://([^:]+):([^@]+)@", r"://\1:****@", db_url)
-    storage_label = f"pgvector ({masked})"
+    if "sqlite" in db_url:
+        # Extract path from sqlite URL for display
+        sqlite_path = db_url.split("///", 1)[-1] if "///" in db_url else db_url
+        storage_label = f"SQLite ({sqlite_path})"
+    else:
+        import re
+        masked = re.sub(r"://([^:]+):([^@]+)@", r"://\1:****@", db_url)
+        storage_label = f"pgvector ({masked})"
 
     # Effective org_id in local mode (matches auth.py mock user)
     org_id = "local-dev-org"
@@ -299,15 +307,15 @@ def dev_group(ctx, port, no_reload, daemon):
     """Start a local dev server for a Glyphh model.
 
     Requires: pip install glyphh[runtime]
-    Requires: PostgreSQL + pgvector (run `glyphh docker up` first)
+    Uses SQLite by default — no database setup needed.
+    For production, use PostgreSQL + pgvector (`glyphh docker up`).
 
     Deploy models with `glyphh model deploy` — no auto-deploy on startup.
     Sets DEPLOYMENT_MODE=local automatically — no account, no token needed.
 
     \b
     Examples:
-      glyphh docker up        # start PostgreSQL
-      glyphh dev .            # start server (foreground)
+      glyphh dev .            # start server (SQLite, foreground)
       glyphh model deploy .   # deploy model to running server
       glyphh dev . -d         # start as background daemon
       glyphh dev stop         # stop the background daemon

@@ -81,7 +81,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     resource_manager = ResourceManager(async_session_maker)
     logger.info("Resource manager initialized")
 
-    yield
+    # Initialize MCP session managers
+    from domains.auth.service import AuthService
+    from domains.query.service import QueryService
+    from domains.mcp.app import create_mcp_session_managers
+
+    query_service = QueryService(model_manager, async_session_maker)
+    auth_service = AuthService()
+    json_manager, sse_manager = create_mcp_session_managers(query_service, auth_service)
+    app.state.mcp_session_managers = (json_manager, sse_manager)
+    logger.info("MCP Streamable HTTP server initialized")
+
+    # Start MCP session manager lifecycles
+    async with json_manager.run():
+        async with sse_manager.run():
+            yield
 
     # Graceful shutdown
     logger.info("Shutting down Glyphh Runtime...")
@@ -96,7 +110,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="Glyphh Runtime",
     description="Execution environment for directory-based models",
-    version="1.1.1",
+    version="1.3.4",
     docs_url="/docs" if settings.deployment_mode == "local" else None,
     redoc_url="/redoc" if settings.deployment_mode == "local" else None,
     lifespan=lifespan,
@@ -201,3 +215,11 @@ app.include_router(listeners_router)
 # org_level_router (/{org_id}/models) before org_scoped_router (/{org_id}/{model_id}/...)
 app.include_router(org_level_router)
 app.include_router(org_scoped_router)
+
+# MCP routing middleware — intercepts /{org_id}/{model_id}/mcp requests
+from domains.mcp.app import MCPRoutingMiddleware
+
+app.add_middleware(
+    MCPRoutingMiddleware,
+    mcp_app_getter=lambda: getattr(app.state, "mcp_session_managers", None),
+)
