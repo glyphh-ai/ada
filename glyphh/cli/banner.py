@@ -3,9 +3,17 @@ Banner for the Glyphh CLI shell.
 """
 
 import click
+from importlib.metadata import version as pkg_version
 from . import theme
 from .streaming import stream_text
 from .auth import is_logged_in, get_user
+
+
+def _get_runtime_version() -> str:
+    try:
+        return pkg_version("glyphh")
+    except Exception:
+        return "?"
 
 
 def print_banner():
@@ -19,6 +27,8 @@ def print_banner():
     stream_text("  |___/   |___/|_|", fg="bright_cyan")
     click.echo()
     stream_text("  when your llm can't afford to be wrong", fg="bright_cyan")
+    ver = _get_runtime_version()
+    stream_text(f"  version: Ada {ver}", fg=theme.TEXT_DIM)
     click.echo()
     _print_status()
 
