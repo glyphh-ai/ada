@@ -690,19 +690,24 @@ def _record_to_concept(
 class AsyncListenerService:
     """
     Async data loading service with progress tracking.
-    
+
     Processes records in batches and reports progress via JobManager.
     Returns immediately with job_id (Requirement 7.2).
-    
+
     Accepts flat or hierarchical records:
     - Flat: {"role_name": "value"} - auto-mapped to config structure
     - Hierarchical: {"layer": {"segment": {"role": "value"}}}
-    
+
     Requirements: 7.2, 7.3, 7.4
     """
-    
+
     DEFAULT_BATCH_SIZE = 50  # Requirement 7.3
-    
+
+    # Serialize write jobs to avoid SQLite write-lock contention.
+    # Multiple concurrent asyncio tasks each doing INSERTs will exceed
+    # the busy_timeout and fail with "database is locked".
+    _write_semaphore = asyncio.Semaphore(1)
+
     def __init__(
         self,
         session_maker,
@@ -710,7 +715,7 @@ class AsyncListenerService:
         job_manager: Optional[JobManager] = None,
     ):
         """Initialize AsyncListenerService.
-        
+
         Args:
             session_maker: Async session maker for database access
             encoder_getter: Callable to get encoder for org_id/model_id
@@ -765,15 +770,33 @@ class AsyncListenerService:
         batch_size: int,
     ) -> None:
         """Process records in batches with progress updates.
-        
+
         Steps (Requirement 7.3):
         1. Validate records against encoder config structure (STRICT)
         2. Encode records in batches
         3. Index encoded vectors
         4. Report final counts
-        
+
         Progress updates after each batch (Requirement 7.4).
+
+        Acquires _write_semaphore so only one job writes to the DB at a
+        time — prevents SQLite "database is locked" errors when multiple
+        batch jobs are submitted concurrently.
         """
+        async with self._write_semaphore:
+            await self._process_records_inner(
+                job_id, org_id, model_id, records, batch_size
+            )
+
+    async def _process_records_inner(
+        self,
+        job_id: UUID,
+        org_id: str,
+        model_id: str,
+        records: List[Dict[str, Any]],
+        batch_size: int,
+    ) -> None:
+        """Inner processing logic, called under _write_semaphore."""
         try:
             # Phase 1: Validation
             await self._job_manager.update_progress(
