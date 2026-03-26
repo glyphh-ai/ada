@@ -41,6 +41,43 @@ current_org_id: ContextVar[str] = ContextVar("current_org_id", default="")
 current_model_id: ContextVar[str] = ContextVar("current_model_id", default="")
 
 
+def _streamline_response(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Flatten a fact_tree response into a compact format when _detail=minimal.
+
+    Models signal minimal mode by setting result["_detail"] = "minimal".
+    When set, the verbose fact_tree hierarchy is replaced with a flat
+    matches list — cutting the JSON payload from ~60 lines to ~10.
+
+    Full-detail responses pass through unchanged.
+    """
+    if not isinstance(result, dict):
+        return result
+    detail = result.pop("_detail", None)
+    if detail != "minimal":
+        return result
+
+    fact_tree = result.get("fact_tree")
+    if not isinstance(fact_tree, dict):
+        return result
+
+    children = fact_tree.get("children", [])
+    matches = []
+    for child in children:
+        ds = child.get("data_sample", {})
+        if ds:
+            matches.append(ds)
+        else:
+            # Fallback: use description + value
+            matches.append({
+                "file": child.get("description", ""),
+                "confidence": child.get("value", 0),
+            })
+
+    result["matches"] = matches
+    result.pop("fact_tree", None)
+    return result
+
+
 def create_mcp_server(
     query_service: QueryService,
     auth_service: AuthService,
@@ -283,6 +320,11 @@ class ToolHandler:
 
             elapsed = (datetime.utcnow() - start_time).total_seconds() * 1000
             logger.info(f"MCP tool {tool_name} completed in {elapsed:.2f}ms")
+
+            # Streamline fact_tree responses when detail=minimal.
+            # The model sets _detail="minimal" to signal the runtime should
+            # flatten the fact_tree into a compact matches list.
+            result = _streamline_response(result)
 
             # Return as MCP-spec CallToolResult with JSON text content
             return CallToolResult(
