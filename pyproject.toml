@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "glyphh"
-version = "2.0.1"
+version = "2.0.2"
 description = "Hyperdimensional Computing SDK and Runtime"
 readme = "README.md"
 license = {text = "Proprietary"}
@@ -82,6 +82,7 @@ Documentation = "https://docs.glyphh.ai"
 include = ["glyphh*", "domains*", "api*", "infrastructure*", "shared*", "scripts*", "web*"]
 
 [tool.setuptools.package-data]
+"glyphh" = ["public/*.html", "public/*.css", "public/*.js", "public/*.png"]
 "glyphh.docker" = ["docker-compose.yml", "init.sql"]
 "glyphh.intent" = ["data/*.json", "data/*.jsonl", "data/packs/*.json"]
 "glyphh.state" = ["data/*.json", "data/packs/*.json"]

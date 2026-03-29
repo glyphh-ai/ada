@@ -243,12 +243,11 @@ from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-_PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
+_PUBLIC_DIR = Path(__file__).resolve().parent / "public"
 
+if _PUBLIC_DIR.is_dir():
+    @app.get("/", include_in_schema=False)
+    async def serve_ui():
+        return FileResponse(str(_PUBLIC_DIR / "index.html"))
 
-@app.get("/", include_in_schema=False)
-async def serve_ui():
-    return FileResponse(str(_PUBLIC_DIR / "index.html"))
-
-
-app.mount("/public", StaticFiles(directory=str(_PUBLIC_DIR)), name="public")
+    app.mount("/public", StaticFiles(directory=str(_PUBLIC_DIR)), name="public")

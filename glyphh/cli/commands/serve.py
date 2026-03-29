@@ -1,9 +1,12 @@
 """
-CLI serve command — start the Glyphh runtime server.
+CLI serve command — start the Glyphh runtime as a long-running server.
+
+This is the headless entry point for keeping the runtime alive in the
+background (for MCP servers, listeners, and API access).
 
 glyphh serve              Start with defaults (port 8002)
 glyphh serve --port 9000  Custom port
-glyphh serve --reload     Auto-reload on code changes
+glyphh serve --reload     Auto-reload on code changes (development)
 """
 
 import click
@@ -19,7 +22,17 @@ from .. import theme
 @click.option("--reload", is_flag=True, help="Auto-reload on changes")
 @click.option("--workers", "-w", default=1, type=int, help="Number of workers")
 def serve_command(host, port, reload, workers):
-    """Start the Glyphh runtime server.
+    """Start the Glyphh runtime as a long-running server.
+
+    Use this to keep the runtime alive for MCP servers, listeners,
+    and API access after code init. The interactive shell embeds a
+    server that dies on exit — this command keeps it running.
+
+    Examples:
+        glyphh serve                     # foreground, port 8002
+        glyphh serve -p 9000             # custom port
+        glyphh serve &                   # background (shell)
+        nohup glyphh serve > /dev/null & # background (survives logout)
 
     Requires: pip install glyphh[runtime]
     """
@@ -33,7 +46,10 @@ def serve_command(host, port, reload, workers):
         click.secho("  Run: pip install glyphh[runtime]", fg=theme.ACCENT)
         sys.exit(1)
 
-    # Check database connectivity
+    # Set defaults for local use
+    os.environ.setdefault("ENABLE_DOCS", "true")
+    os.environ.setdefault("CORS_ALLOW_ALL", "true")
+
     db_url = os.environ.get("DATABASE_URL", "")
     if not db_url:
         click.secho("  No DATABASE_URL set — using SQLite (glyphh_dev.db)", fg=theme.MUTED)
@@ -45,14 +61,9 @@ def serve_command(host, port, reload, workers):
         click.secho("  Auto-reload: enabled", fg=theme.TEXT_DIM)
     click.echo()
 
-    # Find the main.py module — it's at the runtime repo root
-    runtime_root = _find_runtime_root()
-    if runtime_root:
-        sys.path.insert(0, str(runtime_root))
-
     import uvicorn
     uvicorn.run(
-        "main:app",
+        "glyphh.server:app",
         host=host,
         port=port,
         reload=reload,
@@ -65,22 +76,3 @@ def _mask_db_url(url: str) -> str:
     """Mask password in database URL for display."""
     import re
     return re.sub(r"://([^:]+):([^@]+)@", r"://\1:****@", url)
-
-
-def _find_runtime_root():
-    """Find the runtime root directory (where main.py lives)."""
-    from pathlib import Path
-
-    # Walk up from this file to find main.py
-    current = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (current / "main.py").exists():
-            return current
-        current = current.parent
-
-    # Fallback: check cwd
-    cwd = Path.cwd()
-    if (cwd / "main.py").exists():
-        return cwd
-
-    return None
