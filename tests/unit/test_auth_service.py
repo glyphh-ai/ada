@@ -183,7 +183,7 @@ class TestUser:
         user = User(
             user_id="admin_user",
             token_type="jwt",
-            org_permissions={"org1": {Permission.READ, Permission.WRITE, Permission.ADMIN}},
+            org_permissions={"*": {Permission.READ, Permission.WRITE, Permission.ADMIN}},
         )
 
         with patch("domains.auth.service.get_settings") as mock:
