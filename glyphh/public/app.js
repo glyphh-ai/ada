@@ -18,7 +18,44 @@ const App = (() => {
 
   // ── Helpers ────────────────────────────────────────────────────────────
 
+  let _refreshing = null;  // single in-flight refresh promise
+
+  async function _refreshToken() {
+    const refreshToken = localStorage.getItem('glyphh_refresh_token');
+    if (!refreshToken) return false;
+    try {
+      const res = await fetch('/ui/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (data.access_token) {
+        token = data.access_token;
+        localStorage.setItem('glyphh_token', token);
+        if (data.refresh_token) {
+          localStorage.setItem('glyphh_refresh_token', data.refresh_token);
+        }
+        return true;
+      }
+    } catch (e) { /* refresh failed */ }
+    return false;
+  }
+
   function api(method, path, body) {
+    return _apiCall(method, path, body).catch(async err => {
+      // On 401, try refreshing the token once
+      if (err.message && err.message.includes('401') && token) {
+        if (!_refreshing) _refreshing = _refreshToken().finally(() => { _refreshing = null; });
+        const ok = await _refreshing;
+        if (ok) return _apiCall(method, path, body);
+      }
+      throw err;
+    });
+  }
+
+  function _apiCall(method, path, body) {
     const opts = { method, headers: {} };
     if (token) opts.headers['Authorization'] = `Bearer ${token}`;
     if (body instanceof FormData) {

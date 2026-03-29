@@ -238,6 +238,29 @@ def _start_embedded_server() -> int | None:
 
     port = _find_free_port()
 
+    # Redirect all server logging to a file so the shell stays clean
+    import logging
+    log_dir = Path.home() / ".glyphh"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "runtime.log"
+
+    file_handler = logging.FileHandler(str(log_file), mode="w")
+    file_handler.setFormatter(logging.Formatter(
+        '{"timestamp": "%(asctime)s", "level": "%(levelname)s", '
+        '"logger": "%(name)s", "message": "%(message)s"}'
+    ))
+
+    # Route all loggers to file, remove console handlers
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(file_handler)
+    root.setLevel(logging.INFO)
+
+    # Suppress noisy libraries from even the log file
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
     import uvicorn
 
     config = uvicorn.Config(
@@ -311,6 +334,7 @@ def shell(ctx):
     click.secho(f"  Dashboard: {url}", fg=theme.TEXT_DIM)
     if os.environ.get("ENABLE_DOCS") == "true":
         click.secho(f"  API docs:  {url}/docs", fg=theme.TEXT_DIM)
+    click.secho(f"  Logs:      ~/.glyphh/runtime.log", fg=theme.TEXT_DIM)
     click.echo()
 
     try:

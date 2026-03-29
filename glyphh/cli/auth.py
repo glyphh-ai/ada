@@ -42,8 +42,72 @@ def _save_config(config: dict):
 
 
 def get_token() -> str | None:
-    """Return stored access token, or None if not logged in."""
-    return _load_config().get("access_token")
+    """Return stored access token, refreshing automatically if expired.
+
+    Decodes the JWT exp claim (without verification) to check expiry.
+    If expired and a refresh_token exists, calls Platform to get a new
+    access token and persists it.
+    """
+    config = _load_config()
+    token = config.get("access_token")
+    if not token:
+        return None
+
+    # Check if expired
+    if _is_token_expired(token):
+        refreshed = _try_refresh(config)
+        if refreshed:
+            return refreshed
+        # Refresh failed — return expired token (server will reject it,
+        # user will need to re-login)
+    return token
+
+
+def _is_token_expired(token: str) -> bool:
+    """Check JWT expiry without signature verification."""
+    try:
+        import json, base64
+        # Decode payload (second segment)
+        payload_b64 = token.split(".")[1]
+        # Add padding
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        exp = payload.get("exp", 0)
+        return time.time() > exp
+    except Exception:
+        return False  # Can't check — assume valid
+
+
+def _try_refresh(config: dict) -> str | None:
+    """Attempt to refresh the access token using the stored refresh token."""
+    refresh_token = config.get("refresh_token")
+    if not refresh_token:
+        return None
+
+    api_url = get_api_url()
+    try:
+        with httpx.Client(timeout=15) as client:
+            res = client.post(
+                f"{api_url}/auth/refresh",
+                json={"refresh_token": refresh_token},
+            )
+        if res.status_code != 200:
+            return None
+
+        data = res.json()
+        new_access = data.get("access_token")
+        new_refresh = data.get("refresh_token")
+        if not new_access:
+            return None
+
+        # Persist the new tokens
+        config["access_token"] = new_access
+        if new_refresh:
+            config["refresh_token"] = new_refresh
+        _save_config(config)
+        return new_access
+    except Exception:
+        return None
 
 
 def get_api_url() -> str:

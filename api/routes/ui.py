@@ -75,3 +75,19 @@ async def device_poll(request: DevicePollRequest) -> dict[str, Any]:
         )
         res.raise_for_status()
         return res.json()
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+@router.post("/auth/refresh")
+async def refresh_token(request: RefreshRequest) -> dict[str, Any]:
+    """Proxy to Platform: refresh an expired access token."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        res = await client.post(
+            f"{PLATFORM_URL}/auth/refresh",
+            json={"refresh_token": request.refresh_token},
+        )
+        res.raise_for_status()
+        return res.json()
