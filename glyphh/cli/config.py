@@ -142,11 +142,9 @@ def resolve_runtime_token(cli_override: Optional[str] = None) -> Optional[str]:
     if runtime_token:
         return runtime_token
 
-    access_token = config.get("access_token", "").strip()
-    if access_token:
-        return access_token
-
-    return None
+    # Fallback to Platform JWT (with auto-refresh if expired)
+    from .auth import get_token
+    return get_token()
 
 
 def load_env_config(env_file: Optional[str] = None) -> RuntimeConfig:
