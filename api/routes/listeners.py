@@ -27,15 +27,8 @@ async def validate_listener_access(
     model_id: str,
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> AuthenticatedUser:
-    """Validate that the user has access to load data into this org/model.
-
-    Uses get_current_user (supports local mode bypass) instead of require_token
-    so the web dashboard dropzone can load data without a token in local mode.
-    """
+    """Validate that the user has access to load data into this org/model."""
     from fastapi import HTTPException
-
-    if current_user.org_id == "local-dev-org":
-        return current_user
 
     if current_user.org_id != org_id:
         raise HTTPException(

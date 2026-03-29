@@ -7,8 +7,7 @@ glyphh chat --gql            Start in GQL mode
 glyphh chat --url http://...  Target a specific runtime URL
 glyphh chat --token <tok>    Pass an API token (required for non-local deployments)
 
-In local mode (DEPLOYMENT_MODE=local or localhost:8002 reachable without auth),
-no login or token is needed. In deployed mode, provide --token or set GLYPHH_TOKEN.
+Authentication is always required. Log in with: glyphh auth login
 """
 
 import os
@@ -49,7 +48,6 @@ from ..config import resolve_runtime_url, resolve_runtime_token
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 
-_LOCAL_ORG   = "local-dev-org"
 _READY_POLL_INTERVAL = 2  # seconds between readiness checks
 _READY_TIMEOUT = 120      # max seconds to wait for model deployment
 
@@ -64,8 +62,7 @@ def _resolve_context(model_id_override=None, url_override=None, token_override=N
       1. Explicit CLI flags (url_override, token_override, model_id_override)
       2. Environment variables (RUNTIME_URL, GLYPHH_TOKEN)
       3. ~/.glyphh/config.json (runtime_url, runtime_token)
-      4. Local session (glyphh auth login)
-      5. Local dev defaults (localhost:8002, local-dev-org, no token)
+      4. Session auth (glyphh auth login)
     """
     runtime_url = resolve_runtime_url(cli_override=url_override)
     token = resolve_runtime_token(cli_override=token_override) or ""
@@ -79,7 +76,11 @@ def _resolve_context(model_id_override=None, url_override=None, token_override=N
     from ..auth import resolve_org_id
 
     model_id = model_id_override
-    org_id = resolve_org_id(runtime_url) or _LOCAL_ORG
+    org_id = resolve_org_id(runtime_url)
+    if not org_id:
+        import click
+        click.secho("  Not logged in. Run: glyphh auth login", fg="red")
+        return None
 
     # Discover model_id from manifest if not provided
     if not model_id:
@@ -104,7 +105,7 @@ def _resolve_context(model_id_override=None, url_override=None, token_override=N
         "org_id": org_id,
         "model_id": model_id,
         "headers": headers,
-        "local": org_id == _LOCAL_ORG and not token,
+        "local": not token,
     }
 
 

@@ -52,12 +52,10 @@ def config_show():
 
     try:
         rc = RuntimeConfig(runtime_url=url, jwt_token=token)
-        if rc.is_local:
-            click.secho("  Mode:      local (no auth required)", fg=theme.SUCCESS)
-        elif rc.has_auth:
-            click.secho("  Mode:      remote (authenticated)", fg=theme.SUCCESS)
+        if rc.has_auth:
+            click.secho("  Auth:      authenticated", fg=theme.SUCCESS)
         else:
-            click.secho("  Mode:      remote (no token — auth may fail)", fg=theme.WARNING)
+            click.secho("  Auth:      no token — log in first", fg=theme.WARNING)
     except ConfigurationError:
         pass
 

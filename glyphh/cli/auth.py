@@ -284,19 +284,15 @@ def register_runtime() -> bool:
         return False
 
 
-def resolve_org_id(runtime_url: str) -> str | None:
-    """Resolve org_id from runtime URL context.
-
-    Local URLs → "local-dev-org"
-    Remote URLs → session user.org_id (or None if not logged in)
-    """
-    from urllib.parse import urlparse
-
-    parsed = urlparse(runtime_url)
-    if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
-        return "local-dev-org"
-
+def get_org_id() -> str | None:
+    """Get the authenticated user's org_id from the stored session."""
     config = _load_config()
     return config.get("user", {}).get("org_id")
+
+
+# Backward compat alias
+def resolve_org_id(runtime_url: str | None = None) -> str | None:
+    """Resolve org_id from stored session. Ignores runtime_url (legacy param)."""
+    return get_org_id()
 
 

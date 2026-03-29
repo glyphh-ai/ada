@@ -174,14 +174,6 @@ class ModelManager:
         key = (org_id, model_id)
         is_redeploy = key in self._models
         
-        # Check local mode model limit (only for new deploys, not re-deploys)
-        if not is_redeploy and settings.deployment_mode == "local":
-            if len(self._models) >= settings.local_mode_max_models:
-                raise ModelLoadException(
-                    f"Local mode limit: maximum {settings.local_mode_max_models} model(s). "
-                    f"Upgrade to a production license for unlimited models."
-                )
-        
         # Extract and validate encoder config
         try:
             encoder_config = EncoderConfigFactory.create_from_model(sdk_model)
@@ -377,14 +369,6 @@ class ModelManager:
 
         key = (org_id, model_id)
         is_redeploy = key in self._models
-
-        # Check local mode model limit (only for new deploys)
-        if not is_redeploy and settings.deployment_mode == "local":
-            if len(self._models) >= settings.local_mode_max_models:
-                raise ModelLoadException(
-                    f"Local mode limit: maximum {settings.local_mode_max_models} model(s). "
-                    f"Upgrade to a production license for unlimited models."
-                )
 
         # Validate and create encoder
         try:

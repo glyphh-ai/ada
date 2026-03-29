@@ -1,8 +1,14 @@
 """
 Interactive REPL shell for Glyphh CLI.
 
-Supports the same <category> <function> commands as direct CLI subcommands.
+After login, starts the runtime server in a daemon thread (dies when
+the shell exits — no PID files, no background daemon, no state files).
 """
+
+import os
+import socket
+import sys
+import threading
 
 import click
 from pathlib import Path
@@ -14,10 +20,10 @@ from .commands.model import handle_model
 from .commands.token import handle_token
 from .commands.query import handle_query
 from .commands.chat import handle_chat
-from .commands.dev import handle_dev
 from .commands.config import handle_config
 from .commands.docker import handle_docker
 from .commands.license import handle_license
+from .commands.ui import handle_ui
 from . import theme
 
 # Try to import readline for history/completion
@@ -36,10 +42,10 @@ COMMAND_HANDLERS = {
     "token": handle_token,
     "query": handle_query,
     "chat": handle_chat,
-    "dev": handle_dev,
     "config": handle_config,
     "docker": handle_docker,
     "license": handle_license,
+    "ui": handle_ui,
 }
 
 
@@ -90,8 +96,6 @@ _FILE_ARG_COMMANDS = {
     ("model", "deploy"),
     ("model", "package"),
     ("model", "init"),
-    ("dev", "start"),
-    ("dev", "restart"),
 }
 
 # Subcommands per category
@@ -102,10 +106,10 @@ _SUBCOMMANDS = {
     "token": ["create", "list", "revoke"],
     "query": [],
     "chat": [],
-    "dev": ["start", "stop", "status", "log", "restart"],
     "config": ["show", "set", "clear"],
     "docker": ["init"],
     "license": ["show", "activate", "deactivate", "refresh"],
+    "ui": [],
 }
 
 _CATEGORIES = list(_SUBCOMMANDS.keys()) + ["help", "clear", "home", "exit", "quit"]
@@ -128,7 +132,6 @@ def _completer(text, state):
         options = [s + " " for s in subs if s.startswith(text)]
     else:
         # Third word+ — file path completion
-        # Expand ~ and complete paths
         prefix = text
         if prefix.startswith("~"):
             prefix = _os.path.expanduser(prefix)
@@ -137,7 +140,6 @@ def _completer(text, state):
         matches = _glob.glob(prefix + "*")
         options = []
         for m in matches:
-            # Re-apply ~ if user typed it
             display = m
             if text.startswith("~"):
                 home = _os.path.expanduser("~")
@@ -191,42 +193,84 @@ def get_prompt() -> str:
     return click.style("glyphh", fg=theme.PRIMARY) + click.style("> ", fg=theme.TEXT)
 
 
-def _show_dev_server_info():
-    """If a dev server is running, print its connection info."""
-    import json as _json
-    import os
+# ── Embedded runtime server ─────────────────────────────────────────────────
 
-    info_file = Path.home() / ".glyphh" / "dev.json"
-    pid_file = Path.home() / ".glyphh" / "dev.pid"
-    if not info_file.exists() or not pid_file.exists():
-        return
 
-    # Verify the process is actually running
+def _find_free_port(start: int = 8002, max_tries: int = 20) -> int:
+    """Find a free port starting from `start`."""
+    for offset in range(max_tries):
+        port = start + offset
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    return start
+
+
+def _start_embedded_server() -> int | None:
+    """Start uvicorn in a daemon thread. Returns the port, or None on failure."""
     try:
-        pid = int(pid_file.read_text().strip())
-        os.kill(pid, 0)
-    except (ValueError, ProcessLookupError, PermissionError):
-        return
+        import uvicorn  # noqa: F401
+        import fastapi  # noqa: F401
+    except ImportError:
+        click.secho("  Runtime dependencies not installed.", fg=theme.ERROR)
+        click.secho("  Run: pip install glyphh[runtime]", fg=theme.ACCENT)
+        return None
 
+    # Set up environment for the embedded server
+    if "DATABASE_URL" not in os.environ:
+        db_dir = Path.home() / ".glyphh"
+        db_dir.mkdir(parents=True, exist_ok=True)
+        db_path = db_dir / "local.db"
+        os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path}"
+
+    os.environ.setdefault("ENABLE_DOCS", "true")
+    os.environ.setdefault("CORS_ALLOW_ALL", "true")
+
+    # Clear settings cache so server picks up fresh env
     try:
-        info = _json.loads(info_file.read_text())
-    except Exception:
-        return
+        from infrastructure.config import get_settings
+        get_settings.cache_clear()
+    except ImportError:
+        pass
 
-    name = info.get("model_name") or info.get("model_id") or "unknown"
-    ver = info.get("model_version")
-    label = f"{name} v{ver}" if ver else name
+    port = _find_free_port()
 
-    click.echo()
-    click.secho(f"  Dev Server  ·  {label}", fg=theme.TEXT, bold=True)
-    click.echo()
-    click.secho(f"  Storage:   {info.get('storage', '?')}", fg=theme.TEXT_DIM)
-    if info.get("mcp_url"):
-        click.secho(f"  MCP:       {info['mcp_url']}", fg=theme.ACCENT)
-    port = info.get("port", 8002)
-    click.secho(f"  Docs:      http://localhost:{port}/docs", fg=theme.TEXT_DIM)
-    click.secho("  Auth:      none (local mode)", fg=theme.TEXT_DIM)
-    click.echo()
+    import uvicorn
+
+    config = uvicorn.Config(
+        "glyphh.server:app",
+        host="127.0.0.1",
+        port=port,
+        log_level="warning",
+    )
+    server = uvicorn.Server(config)
+
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+
+    # Poll /health until ready
+    import time
+    import httpx
+
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        try:
+            with httpx.Client(timeout=2) as client:
+                res = client.get(f"http://127.0.0.1:{port}/health")
+                if res.status_code == 200:
+                    return port
+        except Exception:
+            pass
+        time.sleep(0.3)
+
+    click.secho("  Server failed to start within 30s.", fg=theme.ERROR)
+    return None
+
+
+# ── Shell entry point ────────────────────────────────────────────────────────
 
 
 @click.command()
@@ -235,7 +279,6 @@ def shell(ctx):
     """Start an interactive Glyphh shell."""
     setup_readline()
     print_banner()
-    _show_dev_server_info()
 
     # If not logged in, prompt once
     if not is_logged_in():
@@ -255,6 +298,20 @@ def shell(ctx):
         click.echo()
     else:
         register_runtime()
+
+    # Start embedded runtime server
+    click.secho("  Starting runtime...", fg=theme.MUTED)
+    port = _start_embedded_server()
+    if port is None:
+        return
+
+    url = f"http://localhost:{port}"
+    click.echo()
+    click.secho(f"  Runtime:   {url}", fg=theme.ACCENT)
+    click.secho(f"  Dashboard: {url}", fg=theme.TEXT_DIM)
+    if os.environ.get("ENABLE_DOCS") == "true":
+        click.secho(f"  API docs:  {url}/docs", fg=theme.TEXT_DIM)
+    click.echo()
 
     try:
         while True:
@@ -341,13 +398,6 @@ def _print_help():
     click.secho("    chat                     Open interactive chat REPL", fg=theme.MUTED)
     click.secho("    chat <question>          Single query and return", fg=theme.MUTED)
     click.echo()
-    click.secho("  dev", fg=theme.ACCENT)
-    click.secho("    dev start [path]         Start dev server (background)", fg=theme.MUTED)
-    click.secho("    dev stop                 Stop the dev server", fg=theme.MUTED)
-    click.secho("    dev status               Show dev server status", fg=theme.MUTED)
-    click.secho("    dev log [n]              Show last n lines of log (default 30)", fg=theme.MUTED)
-    click.secho("    dev restart [path]       Restart the dev server", fg=theme.MUTED)
-    click.echo()
     click.secho("  docker", fg=theme.ACCENT)
     click.secho("    docker init [--force]    Write docker-compose.yml + init.sql", fg=theme.MUTED)
     click.echo()
@@ -365,7 +415,7 @@ def _print_help():
     click.echo()
     # Show installed plugin commands
     builtin_categories = {
-        "auth", "model", "token", "query", "chat", "dev", "config", "docker", "license",
+        "auth", "model", "token", "query", "chat", "config", "docker", "license",
     }
     plugin_categories = [c for c in _SUBCOMMANDS if c not in builtin_categories]
     if plugin_categories:
@@ -376,6 +426,9 @@ def _print_help():
             click.secho(f"    {cat} {sub_str}", fg=theme.MUTED)
         click.echo()
 
+    click.secho("  ui", fg=theme.ACCENT)
+    click.secho("    ui                      Open the web dashboard in your browser", fg=theme.MUTED)
+    click.echo()
     click.secho("  general", fg=theme.ACCENT)
     click.secho("    clear, home             Clear screen and show banner", fg=theme.MUTED)
     click.secho("    !<command>              Run a shell command (e.g. !python3 script.py)", fg=theme.MUTED)

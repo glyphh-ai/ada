@@ -18,7 +18,6 @@ class TestAuthService:
     def mock_settings(self):
         """Create mock settings."""
         settings = MagicMock()
-        settings.deployment_mode = "self-hosted"
         settings.jwt_secret_key = "test_secret_key"
         settings.jwt_algorithm = "HS256"
         return settings
@@ -50,18 +49,12 @@ class TestAuthService:
             return AuthService(session=mock_session)
 
     @pytest.fixture
-    def local_settings(self):
+    def no_secret_settings(self):
+        """Settings without JWT secret (Platform API validation path)."""
         settings = MagicMock()
-        settings.deployment_mode = "local"
         settings.jwt_secret_key = None
         settings.jwt_algorithm = "HS256"
         return settings
-    
-    @pytest.fixture
-    def local_auth_service(self, local_settings):
-        """Create AuthService in local mode."""
-        with patch("domains.auth.service.get_settings", return_value=local_settings):
-            return AuthService(session=None)
     
     @pytest.fixture
     def valid_token(self):
@@ -123,15 +116,14 @@ class TestAuthService:
             await auth_service.validate_token("not.a.valid.token")
     
     @pytest.mark.asyncio
-    async def test_local_mode_bypass(self, local_auth_service):
-        """Test that local mode bypasses authentication."""
-        user = await local_auth_service.validate_token("any_token")
-        
-        assert user is not None
-        assert user.token_type == "local"
-        assert user.can_read("any_org")
-        assert user.can_write("any_org")
-        assert user.is_admin("any_org")
+    async def test_no_secret_requires_platform_validation(self, no_secret_settings):
+        """Test that without JWT secret, tokens must be validated via Platform API."""
+        with patch("domains.auth.service.get_settings", return_value=no_secret_settings):
+            service = AuthService(session=None)
+        # Without jwt_secret_key, JWT decode will fail — token must go through
+        # Platform API validation (tested in integration tests)
+        with pytest.raises(AuthenticationException):
+            await service.validate_token("some_unsigned_token")
     
     @pytest.mark.asyncio
     async def test_check_access_allowed(self, auth_service):
@@ -186,12 +178,17 @@ class TestUser:
         assert user.can_write("any_org")
         assert user.is_admin("any_org")
     
-    def test_compute_security_weight_local_user(self, ):
-        user = User(user_id="local", token_type="local", org_permissions={})
-        
+    def test_compute_security_weight_admin_user(self):
+        """Admin users get full security weight."""
+        user = User(
+            user_id="admin_user",
+            token_type="jwt",
+            org_permissions={"org1": {Permission.READ, Permission.WRITE, Permission.ADMIN}},
+        )
+
         with patch("domains.auth.service.get_settings") as mock:
-            mock.return_value = MagicMock(deployment_mode="local")
+            mock.return_value = MagicMock(jwt_secret_key="secret", jwt_algorithm="HS256")
             service = AuthService(session=None)
-        
+
         weight = service.compute_security_weight(user, {"security_level": 3})
         assert weight == 1.0

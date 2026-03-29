@@ -103,7 +103,6 @@ jobs:
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           docker run --rm \
             -e DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:5432/glyphh_runtime_test \
-            -e DEPLOYMENT_MODE=local \
             --add-host=host.docker.internal:host-gateway \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
             python -c "from main import app; print('Import successful')"

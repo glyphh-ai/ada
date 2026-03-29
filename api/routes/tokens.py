@@ -37,8 +37,6 @@ async def validate_org_owner(
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> AuthenticatedUser:
     """Only the org owner (via CLI login) can manage tokens."""
-    if current_user.org_id == "local-dev-org":
-        return current_user
     if current_user.org_id != org_id:
         raise HTTPException(status_code=403, detail="Organization mismatch")
     return current_user

@@ -2,14 +2,17 @@
 Authentication middleware for Glyphh Runtime.
 
 Dual auth: accepts both database-backed API tokens (glyphh_xxxx) and
-Platform JWTs (HS256, from browser login). Local mode bypasses all auth.
+Platform JWTs (HS256, from browser/CLI login).
 
 - CLI/API tools use database tokens created via glyphh token create
-- Browser dashboard uses Platform JWTs obtained via POST /auth/login on Platform
+- Browser dashboard and CLI use Platform JWTs obtained via device auth flow
+- When JWT_SECRET_KEY is set: validates locally (self-hosted/cloud)
+- When JWT_SECRET_KEY is unset: validates via Platform /auth/me (local installs)
 """
 
 import hashlib
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -20,6 +23,13 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from infrastructure.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Cache Platform JWT validations to avoid hitting Platform on every request.
+# Maps token_hash -> (AuthenticatedUser, expiry_timestamp)
+_platform_jwt_cache: dict[str, tuple["AuthenticatedUser", float]] = {}
+_CACHE_TTL = 300  # 5 minutes
+
+PLATFORM_URL = "https://api.glyphh.ai/api/v1"
 
 
 @dataclass
@@ -42,29 +52,28 @@ def _is_jwt(token: str) -> bool:
 
 
 def _validate_platform_jwt(token: str) -> AuthenticatedUser:
-    """Validate a Platform JWT (HS256) and extract user context.
+    """Validate a Platform JWT.
 
-    Requires jwt_secret_key in settings (same value as Platform's JWT_SECRET_KEY).
+    If jwt_secret_key is configured, validates locally (HS256).
+    Otherwise, validates via Platform API call (cached for 5 minutes).
     """
     settings = get_settings()
 
-    if not settings.jwt_secret_key:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="JWT authentication not configured. Set JWT_SECRET_KEY.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    # If we have the shared secret, validate locally (fast path)
+    if settings.jwt_secret_key:
+        return _validate_jwt_locally(token, settings.jwt_secret_key)
 
+    # No shared secret — validate via Platform API (cached)
+    return _validate_jwt_via_platform(token)
+
+
+def _validate_jwt_locally(token: str, secret_key: str) -> AuthenticatedUser:
+    """Validate JWT using the shared secret (HS256)."""
     try:
         import jwt
 
-        payload = jwt.decode(
-            token,
-            settings.jwt_secret_key,
-            algorithms=["HS256"],
-        )
+        payload = jwt.decode(token, secret_key, algorithms=["HS256"])
 
-        # Validate token type
         if payload.get("type") != "access":
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -90,6 +99,65 @@ def _validate_platform_jwt(token: str) -> AuthenticatedUser:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+def _validate_jwt_via_platform(token: str) -> AuthenticatedUser:
+    """Validate JWT by calling Platform /auth/me. Results cached per token."""
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+    # Check cache
+    cached = _platform_jwt_cache.get(token_hash)
+    if cached:
+        user, expires_at = cached
+        if time.time() < expires_at:
+            return user
+
+    # Call Platform
+    try:
+        import httpx
+
+        with httpx.Client(timeout=10) as client:
+            res = client.get(
+                f"{PLATFORM_URL}/auth/me",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        if res.status_code == 401:
+            _platform_jwt_cache.pop(token_hash, None)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        res.raise_for_status()
+        data = res.json()
+
+        user = AuthenticatedUser(
+            user_id=str(data.get("id", data.get("user_id", "unknown"))),
+            org_id=str(data.get("org_id", "default")),
+            role=data.get("role", "user"),
+            plan=data.get("plan", "free"),
+        )
+
+        # Cache the result
+        _platform_jwt_cache[token_hash] = (user, time.time() + _CACHE_TTL)
+        return user
+
+    except HTTPException:
+        raise
+    except httpx.ConnectError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Cannot reach authentication service. Is the platform reachable?",
+        )
+    except Exception as e:
+        logger.error(f"Platform JWT validation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token validation failed",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -157,25 +225,7 @@ async def get_current_user(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> AuthenticatedUser:
-    """
-    Validate token and extract user context.
-
-    In local mode, returns a mock admin user.
-    In cloud/self-hosted mode, accepts Platform JWT or database token.
-    """
-    settings = get_settings()
-
-    # Local mode: skip auth, use license tier for plan
-    if settings.deployment_mode == "local":
-        from glyphh.licensing import get_current_license
-        path_org_id = request.path_params.get("org_id", "local-dev-org")
-        return AuthenticatedUser(
-            user_id="local-dev-user",
-            org_id=path_org_id,
-            role="admin",
-            plan=get_current_license().tier,
-        )
-
+    """Validate token and extract user context."""
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -190,25 +240,7 @@ async def require_token(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> AuthenticatedUser:
-    """
-    Require a valid API token for data and query endpoints.
-
-    In local mode, bypasses token validation.
-    In cloud/self-hosted mode, accepts Platform JWT or database token.
-    """
-    settings = get_settings()
-
-    # Local mode: skip auth, use license tier for plan
-    if settings.deployment_mode == "local":
-        from glyphh.licensing import get_current_license
-        path_org_id = request.path_params.get("org_id", "local-dev-org")
-        return AuthenticatedUser(
-            user_id="local-dev-user",
-            org_id=path_org_id,
-            role="admin",
-            plan=get_current_license().tier,
-        )
-
+    """Require a valid API token for data and query endpoints."""
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

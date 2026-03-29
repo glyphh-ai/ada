@@ -81,17 +81,6 @@ class RuntimeConfig:
             )
     
     @property
-    def is_local(self) -> bool:
-        """Check if this is a local development configuration."""
-        parsed = urlparse(self.runtime_url)
-        return parsed.hostname in ('localhost', '127.0.0.1', '::1')
-    
-    @property
-    def requires_auth(self) -> bool:
-        """Check if authentication is required (non-local deployments)."""
-        return not self.is_local
-    
-    @property
     def has_auth(self) -> bool:
         """Check if authentication token is provided."""
         return self.jwt_token is not None and len(self.jwt_token) > 0
@@ -103,42 +92,9 @@ class RuntimeConfig:
         return {}
 
 
-def _read_dev_port() -> Optional[int]:
-    """Read the port from ~/.glyphh/dev.port if a dev server is running."""
-    port_file = Path.home() / ".glyphh" / "dev.port"
-    pid_file = Path.home() / ".glyphh" / "dev.pid"
-    try:
-        if not port_file.exists():
-            return None
-        port = int(port_file.read_text().strip())
-        # Validate: if there's a PID file, check the process is alive
-        if pid_file.exists():
-            import signal
-            pid = int(pid_file.read_text().strip())
-            os.kill(pid, 0)  # check if process exists
-        return port
-    except (ValueError, ProcessLookupError, OSError):
-        return None
-
-
-def _docker_runtime_available() -> bool:
-    """Check if a Docker runtime is likely running on port 8002.
-
-    Returns True if docker-compose.yml exists in CWD and port 8002 responds.
-    """
-    if not Path.cwd().joinpath("docker-compose.yml").exists():
-        return False
-    try:
-        import socket
-        with socket.create_connection(("localhost", 8002), timeout=0.3):
-            return True
-    except (OSError, ConnectionRefusedError):
-        return False
-
-
 def resolve_runtime_url(cli_override: Optional[str] = None) -> str:
     """Resolve the runtime URL using the priority chain:
-    CLI flag → RUNTIME_URL env → ~/.glyphh/config.json → Docker on 8002 → dev server port → localhost default.
+    CLI flag → RUNTIME_URL env → ~/.glyphh/config.json → localhost default.
     """
     if cli_override:
         return cli_override.rstrip("/")
@@ -152,15 +108,6 @@ def resolve_runtime_url(cli_override: Optional[str] = None) -> str:
     stored_url = config.get("runtime_url", "").strip()
     if stored_url:
         return stored_url.rstrip("/")
-
-    # Docker runtime in CWD takes priority over dev server
-    if _docker_runtime_available():
-        return DEFAULT_RUNTIME_URL
-
-    # Check if a dev server is running on a non-default port
-    dev_port = _read_dev_port()
-    if dev_port:
-        return f"http://localhost:{dev_port}"
 
     return DEFAULT_RUNTIME_URL
 
@@ -260,15 +207,14 @@ def load_env_config(env_file: Optional[str] = None) -> RuntimeConfig:
         timeout=timeout
     )
     
-    # Warn if auth might be required but not provided
-    if config.requires_auth and not config.has_auth:
+    # Warn if no auth token provided
+    if not config.has_auth:
         import click
         click.echo(
             click.style("Warning: ", fg="yellow") +
-            "No JWT_TOKEN provided for remote runtime.\n"
-            "   Authentication may be required. Get a token from the Platform UI.\n"
+            "No authentication token. Log in first with: glyphh\n"
         )
-    
+
     return config
 
 

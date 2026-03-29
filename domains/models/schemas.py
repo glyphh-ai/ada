@@ -175,7 +175,7 @@ class RuntimeStatusResponse(BaseModel):
     version: str
     models_loaded: int
     uptime: str
-    deployment_mode: str
+    storage_backend: str
 
 
 class ModelInfoResponse(BaseModel):

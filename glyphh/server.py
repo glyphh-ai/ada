@@ -1,13 +1,9 @@
 """
-Glyphh Runtime Server — pip-installable entry point.
+Glyphh Runtime Server — single FastAPI application definition.
 
-This module makes the FastAPI app importable as ``glyphh.server:app`` so that
-``glyphh dev .`` works from any directory after a pip install, not just from
-within the glyphh-runtime source tree.
-
-All server packages (domains, api, infrastructure, shared, scripts) are bundled
-as top-level packages alongside the glyphh SDK — they are imported here exactly
-as they are in the repo's root main.py.
+Importable as ``glyphh.server:app`` for both pip-installed CLI usage and
+Docker/production deployments.  The repo-root ``main.py`` is a thin shim
+that re-exports this app.
 """
 
 import logging
@@ -22,6 +18,7 @@ from fastapi.responses import JSONResponse
 from infrastructure.config import get_settings, validate_settings
 from infrastructure.database import init_db, close_db, async_session_maker
 from shared.exceptions import GlyphhRuntimeException
+from glyphh.licensing import load_license, set_current_license
 from shared.middleware import (
     CorrelationIDMiddleware,
     LoggingMiddleware,
@@ -65,10 +62,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Validate configuration
     try:
         validate_settings()
-        logger.info(f"Configuration validated for {settings.deployment_mode} mode")
+        logger.info("Configuration validated")
     except ValueError as e:
         logger.error(f"Configuration error: {e}")
         raise
+
+    # Load license (determines tier and limits)
+    license_info = load_license()
+    app.state.license = license_info
+    set_current_license(license_info)
+    logger.info(f"License: tier={license_info.tier}, org={license_info.org_id}")
 
     await init_db()
     logger.info("Database initialized")
@@ -90,9 +93,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     auth_service = AuthService()
     json_manager, sse_manager = create_mcp_session_managers(query_service, auth_service)
     app.state.mcp_session_managers = (json_manager, sse_manager)
-    logger.info("MCP Streamable HTTP server initialized")
+    logger.info("MCP Streamable HTTP server initialized (JSON + SSE)")
 
-    # Start MCP session manager lifecycles
+    # Resume any incomplete staged exemplar encoding from a previous run
+    try:
+        await model_manager.resume_staged_encoding()
+    except Exception as e:
+        logger.warning(f"Staged encoding resume failed: {e}")
+
+    # Start both MCP session manager lifecycles
     async with json_manager.run():
         async with sse_manager.run():
             yield
@@ -111,13 +120,13 @@ app = FastAPI(
     title="Glyphh Runtime",
     description="Execution environment for directory-based models",
     version="1.3.8",
-    docs_url="/docs" if settings.deployment_mode == "local" else None,
-    redoc_url="/redoc" if settings.deployment_mode == "local" else None,
+    docs_url="/docs" if settings.enable_docs else None,
+    redoc_url="/redoc" if settings.enable_docs else None,
     lifespan=lifespan,
 )
 
-# CORS middleware — wildcard in local mode, explicit origins in production
-if settings.deployment_mode == "local":
+# CORS middleware
+if settings.cors_allow_all:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -187,7 +196,7 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
 
 def _is_allowed_origin(origin: str) -> bool:
     """Check if origin is in allowed CORS origins list."""
-    if settings.deployment_mode == "local":
+    if settings.cors_allow_all:
         return True
     import fnmatch
     origins = settings.cors_origins_production or settings.cors_origins
@@ -202,24 +211,44 @@ def _is_allowed_origin(origin: str) -> bool:
 # Import and include routers
 from api.routes import (
     health_router,
-    org_level_router,
     org_scoped_router,
+    org_level_router,
     listeners_router,
     tokens_router,
+    ui_router,
 )
 
 app.include_router(health_router)
 app.include_router(tokens_router)
+app.include_router(ui_router)
 # listeners_router must come before org_scoped_router (more specific prefix)
 app.include_router(listeners_router)
 # org_level_router (/{org_id}/models) before org_scoped_router (/{org_id}/{model_id}/...)
 app.include_router(org_level_router)
 app.include_router(org_scoped_router)
 
-# MCP routing middleware — intercepts /{org_id}/{model_id}/mcp requests
+
+# MCP routing middleware — wraps the ASGI app to intercept /{org_id}/{model_id}/mcp
+# requests and forward them to the MCP SDK's Streamable HTTP handler.
 from domains.mcp.app import MCPRoutingMiddleware
 
-app.add_middleware(
-    MCPRoutingMiddleware,
-    mcp_app_getter=lambda: getattr(app.state, "mcp_session_managers", None),
-)
+app.add_middleware(MCPRoutingMiddleware, mcp_app_getter=lambda: getattr(app.state, "mcp_session_managers", None))
+
+
+# ── Web UI ──────────────────────────────────────────────────────────────────
+# Serve the browser dashboard from /public. Must come after all API routers
+# so that /{org_id}/... paths are not shadowed by the static catch-all.
+
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+_PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
+
+
+@app.get("/", include_in_schema=False)
+async def serve_ui():
+    return FileResponse(str(_PUBLIC_DIR / "index.html"))
+
+
+app.mount("/public", StaticFiles(directory=str(_PUBLIC_DIR)), name="public")

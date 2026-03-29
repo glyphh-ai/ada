@@ -34,15 +34,7 @@ async def validate_org_access(
     model_id: str,
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> AuthenticatedUser:
-    """
-    Validate org access with local mode bypass.
-
-    Used for model lifecycle endpoints (deploy, undeploy, status, re-encode)
-    where the user is operating their own CLI.
-    """
-    if current_user.org_id == "local-dev-org":
-        return current_user
-
+    """Validate that the authenticated user belongs to the requested org."""
     if current_user.org_id != org_id:
         raise HTTPException(
             status_code=403,
@@ -67,7 +59,7 @@ async def list_models(
     from domains.models.storage import GlyphStorage
     from sqlalchemy import select
 
-    if current_user.org_id != "local-dev-org" and current_user.org_id != org_id:
+    if current_user.org_id != org_id:
         raise HTTPException(status_code=403, detail="Organization mismatch")
 
     # Query all model configs from DB for this org

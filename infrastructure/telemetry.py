@@ -199,7 +199,7 @@ class TelemetryCollector:
         
         return {
             "runtime_version": "1.0.0",
-            "deployment_mode": settings.deployment_mode,
+            "storage_backend": settings.resolved_storage_backend,
             "metrics": metrics,
         }
     

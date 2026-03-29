@@ -95,16 +95,20 @@ class Settings(BaseSettings):
     host: str = Field(default="0.0.0.0", description="Server host")
     port: int = Field(default=8002, description="Server port")
 
-    # Deployment mode
-    deployment_mode: Literal["local", "self-hosted", "cloud"] = Field(
-        default="local",
-        description="Deployment mode: local (no auth), self-hosted, or cloud"
-    )
-
-    # Database — optional; auto-defaults to SQLite in local mode
+    # Database — auto-defaults to SQLite if not set
     database_url: Optional[str] = Field(
         default=None,
-        description="Database connection URL. Auto-defaults to SQLite in local mode if not set."
+        description="Database connection URL. Defaults to SQLite if not set."
+    )
+
+    # UI/Dev flags
+    enable_docs: bool = Field(
+        default=False,
+        description="Enable /docs and /redoc OpenAPI endpoints"
+    )
+    cors_allow_all: bool = Field(
+        default=False,
+        description="Allow all CORS origins (set by CLI, not for production)"
     )
 
     # Storage backend
@@ -121,15 +125,10 @@ class Settings(BaseSettings):
 
     @property
     def resolved_database_url(self) -> str:
-        """Return the effective database URL, auto-defaulting to SQLite in local mode."""
+        """Return the effective database URL, defaulting to SQLite if not set."""
         if self.database_url:
             return self.database_url
-        if self.deployment_mode == "local":
-            return "sqlite+aiosqlite:///./glyphh_dev.db"
-        raise ValueError(
-            "DATABASE_URL is required for non-local deployment modes. "
-            "Set it with: export DATABASE_URL=postgresql+asyncpg://..."
-        )
+        return "sqlite+aiosqlite:///./glyphh_dev.db"
 
     @property
     def resolved_storage_backend(self) -> str:
@@ -171,12 +170,6 @@ class Settings(BaseSettings):
     default_model_storage_gb: int = Field(
         default=10,
         description="Default storage quota per model in GB"
-    )
-    
-    # Local mode limits (development)
-    local_mode_max_models: int = Field(
-        default=10,
-        description="Maximum models in local mode (development limit)"
     )
     
     # Vector dimension limit
@@ -229,15 +222,14 @@ class Settings(BaseSettings):
         description="Telemetry endpoint URL"
     )
     
-    # CORS — in local mode, allow all origins for dev flexibility
-    # In cloud/self-hosted mode, use explicit production origins
+    # CORS origins for production
     cors_origins: List[str] = Field(
         default=[
             "http://localhost:3000",
             "http://localhost:4321",
             "http://localhost:5173",
         ],
-        description="Allowed CORS origins (ignored in local mode where * is used)"
+        description="Allowed CORS origins (used when cors_allow_all is False)"
     )
     cors_origins_production: List[str] = Field(
         default=[
@@ -277,8 +269,5 @@ def validate_settings() -> None:
     """Validate settings on startup - raises if invalid."""
     settings = get_settings()
 
-    if settings.deployment_mode != "local":
-        if not settings.database_url:
-            raise ValueError(
-                "DATABASE_URL is required for non-local deployment modes"
-            )
+    # No validation needed — SQLite auto-defaults when DATABASE_URL is unset.
+    # Add future startup checks here as needed.

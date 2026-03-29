@@ -78,10 +78,6 @@ class AuthService:
 
     async def validate_token(self, token: str) -> User:
         """Validate a token and return the authenticated user."""
-        if self._settings.deployment_mode == "local":
-            logger.debug("Local mode: bypassing authentication")
-            return self._create_local_user()
-
         if not token:
             raise AuthenticationException("No token provided")
 
@@ -132,14 +128,6 @@ class AuthService:
             org_permissions=org_permissions,
             org_id=db_token.org_id,
             token_type="token",
-        )
-
-    def _create_local_user(self) -> User:
-        """Create a user with full permissions for local mode."""
-        return User(
-            user_id="local",
-            org_permissions={"*": {Permission.READ, Permission.WRITE, Permission.ADMIN}},
-            token_type="local",
         )
 
     def _hash_token(self, token: str) -> str:
@@ -209,9 +197,6 @@ class AuthService:
         security_level = glyph_metadata.get("security_level", 0)
         required_clearance = glyph_metadata.get("required_clearance", [])
 
-        if user.token_type == "local":
-            return 1.0
-
         if "*" in user.org_permissions and Permission.ADMIN in user.org_permissions["*"]:
             return 1.0
 
@@ -230,4 +215,4 @@ class AuthService:
             return 0.4 if Permission.ADMIN in user.org_permissions.get("*", set()) else 0.1
 
     def require_auth(self) -> bool:
-        return self._settings.deployment_mode != "local"
+        return True
