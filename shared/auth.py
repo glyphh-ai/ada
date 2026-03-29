@@ -6,8 +6,8 @@ Platform JWTs (HS256, from browser/CLI login).
 
 - CLI/API tools use database tokens created via glyphh token create
 - Browser dashboard and CLI use Platform JWTs obtained via device auth flow
-- When JWT_SECRET_KEY is set: validates locally (self-hosted/cloud)
-- When JWT_SECRET_KEY is unset: validates via Platform /auth/me (local installs)
+- When JWT_SECRET_KEY is set: validates locally with signature verification
+- When JWT_SECRET_KEY is unset: validates via Platform GET /auth/me (cached 5min)
 """
 
 import hashlib
@@ -104,7 +104,7 @@ def _validate_jwt_locally(token: str, secret_key: str) -> AuthenticatedUser:
 
 
 def _validate_jwt_via_platform(token: str) -> AuthenticatedUser:
-    """Validate JWT by calling Platform /auth/me. Results cached per token."""
+    """Validate JWT by calling Platform GET /auth/me. Results cached per token."""
     token_hash = hashlib.sha256(token.encode()).hexdigest()
 
     # Check cache
@@ -113,6 +113,8 @@ def _validate_jwt_via_platform(token: str) -> AuthenticatedUser:
         user, expires_at = cached
         if time.time() < expires_at:
             return user
+        # Expired cache entry — remove it
+        _platform_jwt_cache.pop(token_hash, None)
 
     # Call Platform
     try:
