@@ -892,6 +892,9 @@ class ModelManager:
                 )
                 await session.commit()
         
+        # Cancel any in-progress encoding
+        self._encoding_in_progress.discard(key)
+
         # Remove from memory if present
         if key in self._models:
             loaded_model = self._models[key]
@@ -1803,6 +1806,10 @@ class ModelManager:
         if key not in self._models:
             return False
         return self._models[key].lock.locked()
+
+    def is_encoding(self, org_id: str, model_id: str) -> bool:
+        """Check if model has background exemplar encoding in progress."""
+        return (org_id, model_id) in self._encoding_in_progress
 
     async def get_active_config(
         self,

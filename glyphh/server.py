@@ -236,18 +236,35 @@ app.add_middleware(MCPRoutingMiddleware, mcp_app_getter=lambda: getattr(app.stat
 
 
 # ── Web UI ──────────────────────────────────────────────────────────────────
-# Serve the browser dashboard from /public. Must come after all API routers
-# so that /{org_id}/... paths are not shadowed by the static catch-all.
+# Serve the Vite-built React dashboard from public/dist/.
+# Must come after all API routers so /{org_id}/... paths aren't shadowed.
 
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+_DIST_DIR = Path(__file__).resolve().parent / "public" / "dist"
 _PUBLIC_DIR = Path(__file__).resolve().parent / "public"
 
-if _PUBLIC_DIR.is_dir():
+if _DIST_DIR.is_dir():
+    # SPA: serve index.html for all non-API, non-asset paths
     @app.get("/", include_in_schema=False)
     async def serve_ui():
+        return FileResponse(str(_DIST_DIR / "index.html"))
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def serve_spa(path: str):
+        # Serve static asset if it exists, otherwise SPA fallback
+        file = _DIST_DIR / path
+        if file.is_file():
+            return FileResponse(str(file))
+        return FileResponse(str(_DIST_DIR / "index.html"))
+
+    app.mount("/assets", StaticFiles(directory=str(_DIST_DIR / "assets")), name="assets")
+elif _PUBLIC_DIR.is_dir():
+    # Fallback: legacy vanilla UI (dev only)
+    @app.get("/", include_in_schema=False)
+    async def serve_ui_legacy():
         return FileResponse(str(_PUBLIC_DIR / "index.html"))
 
     app.mount("/public", StaticFiles(directory=str(_PUBLIC_DIR)), name="public")

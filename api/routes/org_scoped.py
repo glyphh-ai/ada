@@ -73,12 +73,18 @@ async def list_models(
         storage = GlyphStorage(session)
         for cfg in configs:
             count = await storage.count_glyphs(org_id, cfg.model_id)
+            # Determine status
+            status = "active"
+            if model_manager and model_manager.is_encoding(org_id, cfg.model_id):
+                status = "encoding"
+            elif model_manager and model_manager.is_model_locked(org_id, cfg.model_id):
+                status = "locked"
             models.append({
                 "model_id": cfg.model_id,
                 "name": cfg.meta_name or cfg.model_id,
                 "version": cfg.model_version or "—",
                 "glyphs": count,
-                "status": "active",
+                "status": status,
             })
 
     return {"models": models}
@@ -172,6 +178,15 @@ async def readiness_check(
     is_locked = model_manager.is_model_locked(org_id, model_id)
     if is_locked:
         return {"ready": False, "status": "locked", "model_id": model_id}
+
+    is_encoding = model_manager.is_encoding(org_id, model_id)
+    if is_encoding:
+        return {
+            "ready": False,
+            "status": "encoding",
+            "model_id": model_id,
+            "meta_name": loaded_model.meta_name,
+        }
 
     return {
         "ready": True,
@@ -423,7 +438,7 @@ async def list_data(
                 "node_type": (g.glyph_metadata or {}).get("node_type", ""),
                 "record_type": (g.glyph_metadata or {}).get("record_type", "data"),
                 "has_embedding": g.embedding is not None,
-                "vector_dim": len(g.embedding) if g.embedding else 0,
+                "vector_dim": len(g.embedding) if g.embedding is not None else 0,
                 "created_at": g.created_at.isoformat() + "Z" if g.created_at else None,
             }
             for g in page
@@ -481,6 +496,43 @@ async def clear_data(
         "edges_deleted": edges_deleted,
     }
 
+
+
+class UpdateGlyphRequest(BaseModel):
+    concept_text: Optional[str] = None
+
+
+@router.put("/data/{glyph_id}")
+async def update_glyph(
+    org_id: str,
+    model_id: str,
+    glyph_id: str,
+    request: UpdateGlyphRequest,
+    current_user: AuthenticatedUser = Depends(validate_org_access),
+) -> Dict[str, Any]:
+    """Update a glyph's concept text."""
+    from infrastructure.database import async_session_maker
+    from domains.models.db_models import Glyph
+    from sqlalchemy import select
+
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(Glyph).where(
+                Glyph.id == glyph_id,
+                Glyph.org_id == org_id,
+                Glyph.model_id == model_id,
+            )
+        )
+        glyph = result.scalar_one_or_none()
+        if glyph is None:
+            raise HTTPException(status_code=404, detail=f"Glyph not found: {glyph_id}")
+
+        if request.concept_text is not None:
+            glyph.concept_text = request.concept_text
+
+        await session.commit()
+
+    return {"status": "updated", "id": glyph_id}
 
 
 def _is_pattern_glyph(glyph) -> bool:

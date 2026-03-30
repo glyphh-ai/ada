@@ -32,8 +32,14 @@ const App = (() => {
       if (!res.ok) return false;
       const data = await res.json();
       if (data.access_token) {
-        token = data.access_token;
+        // Prefer local database token over Platform JWT
+        if (data.runtime_token) {
+          token = data.runtime_token;
+        } else {
+          token = data.access_token;
+        }
         localStorage.setItem('glyphh_token', token);
+        localStorage.setItem('glyphh_platform_token', data.access_token);
         if (data.refresh_token) {
           localStorage.setItem('glyphh_refresh_token', data.refresh_token);
         }
@@ -156,8 +162,19 @@ const App = (() => {
             clearInterval(_pollTimer);
             _pollTimer = null;
 
-            token = poll.access_token;
-            localStorage.setItem('glyphh_token', token);
+            // Prefer local database token (glyphh_xxxx) over Platform JWT
+            // — validates locally, no Platform round-trips on every API call
+            if (poll.runtime_token) {
+              token = poll.runtime_token;
+              localStorage.setItem('glyphh_token', token);
+            } else {
+              token = poll.access_token;
+              localStorage.setItem('glyphh_token', token);
+            }
+            // Keep Platform tokens for refresh fallback
+            if (poll.access_token) {
+              localStorage.setItem('glyphh_platform_token', poll.access_token);
+            }
             if (poll.refresh_token) {
               localStorage.setItem('glyphh_refresh_token', poll.refresh_token);
             }
@@ -201,6 +218,7 @@ const App = (() => {
   function logout() {
     if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
     localStorage.removeItem('glyphh_token');
+    localStorage.removeItem('glyphh_platform_token');
     localStorage.removeItem('glyphh_refresh_token');
     localStorage.removeItem('glyphh_org_id');
     token = null;

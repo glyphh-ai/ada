@@ -293,6 +293,69 @@ def _start_embedded_server() -> int | None:
     return None
 
 
+def _provision_runtime_token(port: int) -> str | None:
+    """Mint a local database token so all API calls validate locally.
+
+    Uses the Platform JWT (once) to authenticate with the token endpoint,
+    then saves the resulting glyphh_xxxx token as runtime_token in config.
+    Subsequent calls via resolve_runtime_token() will use the local token
+    and skip Platform JWT validation entirely.
+    """
+    import httpx
+
+    from .auth import get_token, get_org_id, _load_config, _save_config
+
+    # Check if we already have a working runtime token
+    config = _load_config()
+    existing = config.get("runtime_token", "").strip()
+    if existing and existing.startswith("glyphh_"):
+        # Verify it still works
+        org_id = get_org_id()
+        if org_id:
+            try:
+                with httpx.Client(timeout=5) as client:
+                    res = client.get(
+                        f"http://127.0.0.1:{port}/{org_id}/models",
+                        headers={"Authorization": f"Bearer {existing}"},
+                    )
+                    if res.status_code != 401:
+                        return existing
+            except Exception:
+                pass
+
+    # Need to mint a new token using Platform JWT
+    platform_jwt = get_token()
+    org_id = get_org_id()
+    if not platform_jwt or not org_id:
+        return None
+
+    try:
+        with httpx.Client(timeout=10) as client:
+            res = client.post(
+                f"http://127.0.0.1:{port}/{org_id}/tokens",
+                headers={"Authorization": f"Bearer {platform_jwt}"},
+                json={
+                    "name": "cli-session",
+                    "permissions": ["read", "write", "admin"],
+                    "expires_days": 365,
+                },
+            )
+            if res.status_code != 200:
+                return None
+
+            raw_token = res.json().get("token")
+            if not raw_token:
+                return None
+
+            # Save to config so resolve_runtime_token() picks it up
+            config = _load_config()
+            config["runtime_token"] = raw_token
+            _save_config(config)
+            return raw_token
+    except Exception:
+        return None
+
+
 # ── Shell entry point ────────────────────────────────────────────────────────
 
 
@@ -327,6 +390,13 @@ def shell(ctx):
     port = _start_embedded_server()
     if port is None:
         return
+
+    # Mint a local database token for all subsequent API calls
+    rt = _provision_runtime_token(port)
+    if rt:
+        click.secho("  Token:     local database token active", fg=theme.TEXT_DIM)
+    else:
+        click.secho("  Warning: could not provision runtime token — using Platform JWT", fg=theme.WARNING)
 
     url = f"http://localhost:{port}"
     click.echo()

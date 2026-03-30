@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #A96BFE;
+  --color-primary-soft: color-mix(in srgb, #A96BFE 18%, transparent);
+  --color-primary-contrast: #ffffff;
+}
+
+:root {
+  --bg: #020617;
+  --fg: #f1f5f9;
+  --muted: #cbd5e1;
+  --accent: #A96BFE;
+  --accent-soft: color-mix(in srgb, #A96BFE 18%, transparent);
+  --border: #1f2937;
+  --page-header: #020617;
+  --page-header-border: #111827;
+  --sidebar: #020617;
+  --sidebar-border: #111827;
+  --page-bg: #0f172a;
+  --card-bg: #020617;
+  --card-border: #334155;
+  --toast-success-border: color-mix(in srgb, #22c55e 85%, var(--card-border));
+  --toast-error-border: color-mix(in srgb, #ef4444 85%, var(--card-border));
+}
+
+[data-theme="light"] {
+  --bg: #ffffff;
+  --fg: #18181b;
+  --muted: #6b7280;
+  --accent: #A96BFE;
+  --accent-soft: color-mix(in srgb, #A96BFE 18%, transparent);
+  --border: #e5e7eb;
+  --page-header: #ffffff;
+  --page-header-border: #e5e7eb;
+  --sidebar: #ffffff;
+  --sidebar-border: #e5e7eb;
+  --page-bg: #eef1f5;
+  --card-bg: #ffffff;
+  --card-border: #d1d5db;
+  --toast-success-border: color-mix(in srgb, #16a34a 85%, var(--card-border));
+  --toast-error-border: color-mix(in srgb, #dc2626 85%, var(--card-border));
+}
+
+body {
+  background: var(--page-bg);
+  color: var(--fg);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  color: var(--fg);
+  background: var(--page-bg);
+}
+
+* {
+  color: inherit;
+}
+
+.btn-primary {
+  color: #fff !important;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 3px;
+}
