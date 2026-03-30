@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "glyphh"
-version = "2.1.1"
+version = "2.2.0"
 description = "Hyperdimensional Computing SDK and Runtime"
 readme = "README.md"
 license = {text = "Proprietary"}
@@ -31,6 +31,7 @@ dependencies = [
     "click>=8.0.0",
     "httpx>=0.24.0",
     "pyjwt[crypto]>=2.8.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]

@@ -56,11 +56,25 @@ class MCPRoutingMiddleware:
         self.app = app
         self._mcp_app_getter = mcp_app_getter
 
+    def _get_origin(self, scope: Scope) -> Optional[str]:
+        """Extract Origin header from ASGI scope."""
+        for key, value in scope.get("headers", []):
+            if key == b"origin":
+                return value.decode("latin-1")
+        return None
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] in ("http", "websocket"):
             path = scope.get("path", "")
             match = _MCP_PATH_RE.match(path)
             if match:
+                origin = self._get_origin(scope)
+
+                # Handle CORS preflight
+                if scope.get("method") == "OPTIONS" and origin:
+                    await self.app(scope, receive, send)
+                    return
+
                 managers = self._mcp_app_getter()
                 if managers is not None:
                     json_manager, sse_manager = managers
@@ -76,8 +90,19 @@ class MCPRoutingMiddleware:
                     org_token = current_org_id.set(org_id)
                     model_token = current_model_id.set(model_id)
 
+                    # Inject CORS headers into MCP responses (the MCP SDK
+                    # handler runs outside FastAPI's CORSMiddleware).
+                    async def cors_send(message) -> None:
+                        if message["type"] == "http.response.start" and origin:
+                            headers = list(message.get("headers", []))
+                            headers.append((b"access-control-allow-origin", origin.encode()))
+                            headers.append((b"access-control-allow-headers", b"*"))
+                            headers.append((b"access-control-allow-methods", b"GET, POST, OPTIONS"))
+                            message = {**message, "headers": headers}
+                        await send(message)
+
                     try:
-                        await manager.handle_request(scope, receive, send)
+                        await manager.handle_request(scope, receive, cors_send)
                     finally:
                         current_org_id.reset(org_token)
                         current_model_id.reset(model_token)

@@ -204,8 +204,42 @@ def count_exemplars(model_dir: Path) -> int:
     return count
 
 
+def _install_model_requirements(model_dir: Path) -> None:
+    """Install model-specific pip dependencies from requirements.txt.
+
+    Runs once per model load. Skips if no requirements.txt exists.
+    Uses --quiet to avoid log noise on already-installed packages.
+    """
+    req_path = model_dir / "requirements.txt"
+    if not req_path.exists():
+        return
+
+    import subprocess
+    import sys
+
+    model_name = model_dir.name
+    logger.info(f"Installing dependencies for {model_name} from requirements.txt")
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--quiet", "-r", str(req_path)],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                f"pip install for {model_name} failed (rc={result.returncode}): "
+                f"{result.stderr.strip()}"
+            )
+        else:
+            logger.info(f"Dependencies installed for {model_name}")
+    except subprocess.TimeoutExpired:
+        logger.warning(f"pip install for {model_name} timed out (120s)")
+    except Exception as e:
+        logger.warning(f"pip install for {model_name} failed: {e}")
+
+
 def load_model(model_dir: Path, source: str = "core") -> LoadedModel:
     """Load a model from its directory."""
+    _install_model_requirements(model_dir)
     manifest = load_manifest(model_dir)
     encoder_config, has_custom, encode_query_fn, entry_to_record_fn, assess_query_fn, mcp_tools, handle_mcp_tool_fn = load_encoder_config(model_dir)
     glyphh_files = list(model_dir.glob("*.glyphh"))

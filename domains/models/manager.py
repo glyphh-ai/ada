@@ -980,9 +980,12 @@ class ModelManager:
                     self._load_model_fns_from_source(db_config.source_files, model_id=model_id)
                 )
             if encode_query_fn is None and db_config.model_path:
-                encode_query_fn, assess_query_fn, entry_to_record_fn, mcp_tools, handle_mcp_tool_fn = (
-                    self._load_model_fns(db_config.model_path)
-                )
+                _eq, _aq, _etr, _mcp, _hmcp = self._load_model_fns(db_config.model_path)
+                encode_query_fn = _eq
+                assess_query_fn = _aq or assess_query_fn
+                entry_to_record_fn = _etr or entry_to_record_fn
+                mcp_tools = _mcp or mcp_tools
+                handle_mcp_tool_fn = _hmcp or handle_mcp_tool_fn
             
             class RestoredModel:
                 """Minimal model proxy for DB-restored models."""
