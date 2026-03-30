@@ -254,6 +254,10 @@ if _DIST_DIR.is_dir():
 
     @app.get("/{path:path}", include_in_schema=False)
     async def serve_spa(path: str):
+        # Never SPA-fallback API paths — let them 404 naturally
+        if path.startswith("api/"):
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
         # Serve static asset if it exists, otherwise SPA fallback
         file = _DIST_DIR / path
         if file.is_file():
