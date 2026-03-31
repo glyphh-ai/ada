@@ -15,6 +15,7 @@ WORKDIR /ui
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci
 COPY ui/ ./
+ENV VITE_OUT_DIR=/ui/dist
 RUN npm run build
 
 # ── Stage 2: Python runtime ──────────────────────────────────────────────────
