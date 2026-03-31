@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "glyphh"
-version = "2.3.0"
+version = "2.3.1"
 description = "Hyperdimensional Computing SDK and Runtime"
 readme = "README.md"
 license = {text = "Proprietary"}
@@ -50,6 +50,10 @@ runtime = [
     "email-validator>=2.0.0",
     "psutil>=5.9.0",
     "mcp>=1.26.0",
+]
+audio = [
+    "librosa>=0.10.0",
+    "soundfile>=0.12.0",
 ]
 telemetry = [
     "prometheus-client>=0.17.0",
