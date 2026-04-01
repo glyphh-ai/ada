@@ -370,10 +370,10 @@ class ToolHandler:
             t["name"] for t in getattr(loaded_model, "mcp_tools", []) or []
         }
         if tool_name not in model_tool_names:
-            raise ValidationException(f"Unknown tool: {tool_name}")
+            raise ValidationException("tool_name", f"Unknown tool: {tool_name}")
         if not getattr(loaded_model, "handle_mcp_tool_fn", None):
             raise ValidationException(
-                f"Model defines tool '{tool_name}' but has no handle_mcp_tool handler"
+                "handle_mcp_tool", f"Model defines tool '{tool_name}' but has no handle_mcp_tool handler"
             )
 
         context = {
