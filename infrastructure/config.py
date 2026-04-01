@@ -238,6 +238,7 @@ class Settings(BaseSettings):
             "https://www.glyphh.ai",
             "https://glyphh.ai",
             "https://ada.glyphh.ai",
+            "https://jailbreak.glyphh.ai",
         ],
         description="Allowed CORS origins for production deployments"
     )
