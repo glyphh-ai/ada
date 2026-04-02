@@ -43,12 +43,14 @@ _WHEEL_INDICES = {
     "cu123": "https://abetlen.github.io/llama-cpp-python/whl/cu123",
 }
 
-# Default models
-_MLX_MODEL_REPO = "mlx-community/Qwen3-0.6B-4bit"
-_MLX_MODEL_DIRNAME = "Qwen3-0.6B-4bit"
+# Default models — Ada's voice
+# MLX: Qwen3.5-2B (newer arch, better quality, Apple Silicon)
+# GGUF: Qwen3-1.7B (universal, Linux/Docker)
+_MLX_MODEL_REPO = "mlx-community/Qwen3.5-2B-4bit"
+_MLX_MODEL_DIRNAME = "Qwen3.5-2B-4bit"
 
-_GGUF_MODEL_REPO = "Qwen/Qwen3-0.6B-GGUF"
-_GGUF_MODEL_FILENAME = "Qwen3-0.6B-Q4_K_M.gguf"
+_GGUF_MODEL_REPO = "Qwen/Qwen3-1.7B-GGUF"
+_GGUF_MODEL_FILENAME = "Qwen3-1.7B-Q4_K_M.gguf"
 _GGUF_MODEL_URL = (
     f"https://huggingface.co/{_GGUF_MODEL_REPO}/resolve/main/{_GGUF_MODEL_FILENAME}"
 )
@@ -488,6 +490,33 @@ def _smoke_test() -> bool:
         return False
 
 
+def _llm_smoke_test() -> bool:
+    """Smoke test: verify LLM generates tokens."""
+    click.secho("  Running LLM smoke test...", fg=theme.TEXT)
+
+    try:
+        from glyphh.llm import LLMEngine
+        import time
+
+        engine = LLMEngine()
+        start = time.monotonic()
+        result = engine.generate("Say hello in one sentence.", max_tokens=32, temperature=0.3)
+        elapsed = time.monotonic() - start
+        engine.unload()
+
+        tokens = len(result.split())
+        click.secho(
+            f"  LLM smoke test passed. Generated {tokens} tokens "
+            f"in {elapsed:.1f}s (backend={engine.backend_name}).",
+            fg=theme.SUCCESS,
+        )
+        click.secho(f"    → {result.strip()[:80]}", fg=theme.TEXT_DIM)
+        return True
+    except Exception as e:
+        click.secho(f"  LLM smoke test failed: {e}", fg=theme.ERROR)
+        return False
+
+
 # ── CLI command ──────────────────────────────────────────────────────────────
 
 @click.command("setup")
@@ -508,7 +537,7 @@ def setup_command(cpu, backend, skip_model, skip_test, status):
     """Bootstrap the Glyphh runtime environment.
 
     Detects your platform, installs the best LLM inference backend,
-    downloads the default model (Qwen3-0.6B), and verifies everything works.
+    downloads the default model, and verifies everything works.
 
     \b
     Backends:
@@ -745,21 +774,41 @@ def setup_command(cpu, backend, skip_model, skip_test, status):
     # ── Step 3: Smoke test ──────────────────────────────────────────────
     if skip_test:
         click.secho(
-            "  [3/3] Smoke test skipped (--skip-test).",
+            "  [3/4] Smoke test skipped (--skip-test).",
             fg=theme.TEXT_DIM,
         )
     elif chosen_backend == _BACKEND_API:
         click.secho(
-            "  [3/3] Smoke test skipped for API backend "
+            "  [3/4] Smoke test skipped for API backend "
             "(requires running endpoint).",
             fg=theme.TEXT_DIM,
         )
     else:
         click.secho(
-            "  [3/3] Verifying installation", fg=theme.ACCENT, bold=True,
+            "  [3/4] Verifying SDK", fg=theme.ACCENT, bold=True,
         )
         click.echo()
         _smoke_test()
+
+    click.echo()
+
+    # ── Step 4: LLM smoke test ─────────────────────────────────────────
+    if skip_test:
+        click.secho(
+            "  [4/4] LLM smoke test skipped (--skip-test).",
+            fg=theme.TEXT_DIM,
+        )
+    elif chosen_backend == _BACKEND_API and not (_check_api_configured()):
+        click.secho(
+            "  [4/4] LLM smoke test skipped (API not configured).",
+            fg=theme.TEXT_DIM,
+        )
+    else:
+        click.secho(
+            "  [4/4] Verifying LLM generation", fg=theme.ACCENT, bold=True,
+        )
+        click.echo()
+        _llm_smoke_test()
 
     click.echo()
 

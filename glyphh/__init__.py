@@ -104,6 +104,9 @@ from .cognitive import CognitiveLoop, DomainConfig, IdeaSpace, StepResult
 # Linguistics — layered HDC language engine (character → morphology → POS → syntax → attention)
 from .linguistics import LinguisticIntentParser
 
+# LLM — local language model inference (Ada's voice)
+from .llm import LLMEngine
+
 from .visualization import (
     visualize_similarity_graph,
     create_similarity_matrix,
@@ -219,6 +222,8 @@ __all__ = [
     "StepResult",
     # Linguistics Engine (layered HDC NLP)
     "LinguisticIntentParser",
+    # LLM Engine (Ada's voice)
+    "LLMEngine",
     # GQL Exceptions
     "GQLError",
     "LexerError",

@@ -51,6 +51,16 @@ runtime = [
     "psutil>=5.9.0",
     "mcp>=1.26.0",
 ]
+# LLM backends — Ada's voice (Qwen3-1.5B local inference)
+mlx = [
+    "mlx>=0.18.0",
+    "mlx-lm>=0.20.0",
+    "huggingface-hub>=0.20.0",
+]
+llm = [
+    "llama-cpp-python>=0.3.0",
+    "huggingface-hub>=0.20.0",
+]
 audio = [
     "librosa>=0.10.0",
     "soundfile>=0.12.0",

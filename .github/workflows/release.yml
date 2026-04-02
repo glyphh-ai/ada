@@ -126,6 +126,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          secrets: |
+            hf_token=${{ secrets.HF_TOKEN }}
 
       - name: Generate SBOM
         uses: anchore/sbom-action@v0

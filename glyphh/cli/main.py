@@ -7,6 +7,7 @@ The interactive shell is the primary interface — run `glyphh` to start.
 
 import click
 from .commands.serve import serve_command
+from .commands.ada import ada_command
 
 
 try:
@@ -25,8 +26,9 @@ def cli(ctx):
         ctx.invoke(shell)
 
 
-# Only keep serve (used by Docker container / production deployments)
+# Subcommands
 cli.add_command(serve_command)
+cli.add_command(ada_command)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ from .commands.model import handle_model
 from .commands.token import handle_token
 from .commands.query import handle_query
 from .commands.chat import handle_chat
+from .commands.ada import handle_ada
 from .commands.config import handle_config
 from .commands.docker import handle_docker
 from .commands.license import handle_license
@@ -42,6 +43,7 @@ COMMAND_HANDLERS = {
     "token": handle_token,
     "query": handle_query,
     "chat": handle_chat,
+    "ada": handle_ada,
     "config": handle_config,
     "docker": handle_docker,
     "license": handle_license,
@@ -106,6 +108,7 @@ _SUBCOMMANDS = {
     "token": ["create", "list", "revoke"],
     "query": [],
     "chat": [],
+    "ada": [],
     "config": ["show", "set", "clear"],
     "docker": ["init"],
     "license": ["show", "activate", "deactivate", "refresh"],
@@ -491,6 +494,10 @@ def _print_help():
     click.secho("  chat", fg=theme.ACCENT)
     click.secho("    chat                     Open interactive chat REPL", fg=theme.MUTED)
     click.secho("    chat <question>          Single query and return", fg=theme.MUTED)
+    click.echo()
+    click.secho("  ada", fg=theme.ACCENT)
+    click.secho("    ada                      Talk to Ada (local LLM)", fg=theme.MUTED)
+    click.secho("    ada <question>           Single query and return", fg=theme.MUTED)
     click.echo()
     click.secho("  docker", fg=theme.ACCENT)
     click.secho("    docker init [--force]    Write docker-compose.yml + init.sql", fg=theme.MUTED)
