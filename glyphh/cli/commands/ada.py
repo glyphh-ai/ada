@@ -712,8 +712,8 @@ def _start_dream_spinner() -> None:
             sys.stdout.flush()
             tick += 1
             stop.wait(_INTERVAL)
-        # Clear the spinner line
-        sys.stdout.write("\r\033[K")
+        # Leave the last frame visible, drop to next line for prompt
+        sys.stdout.write("\n")
         sys.stdout.flush()
 
     t = _th.Thread(target=_animate, daemon=True, name="ada-dream-spin")
