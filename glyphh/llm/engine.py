@@ -426,38 +426,41 @@ class LLMEngine:
             yield from self._backend.stream(formatted, config)
         else:
             # Filter out <think>...</think> blocks from stream.
-            # Tokens may split tags across chunks, so we buffer and
-            # track state with a simple accumulator.
-            buf = ""
+            # The model may emit <think>...</think> at the start;
+            # we suppress everything inside and yield the rest.
             in_think = False
+            buf = ""
             for token in self._backend.stream(formatted, config):
                 buf += token
                 while buf:
                     if in_think:
                         end = buf.find("</think>")
                         if end == -1:
-                            # Still inside think block — consume and wait
                             buf = ""
                             break
-                        # Skip everything up to and including </think>
                         buf = buf[end + len("</think>"):]
                         in_think = False
                     else:
                         start = buf.find("<think>")
                         if start == -1:
-                            # No think tag — yield everything safe to emit.
-                            # Keep last 6 chars in case "<think" is split.
-                            if len(buf) > 6:
-                                yield buf[:-6]
-                                buf = buf[-6:]
+                            # Check if buffer ends with a partial "<think" prefix
+                            hold = 0
+                            for k in range(min(len(buf), 6), 0, -1):
+                                if "<think>".startswith(buf[-k:]):
+                                    hold = k
+                                    break
+                            if hold:
+                                yield buf[:-hold]
+                                buf = buf[-hold:]
+                            else:
+                                yield buf
+                                buf = ""
                             break
                         else:
-                            # Yield text before <think>, enter think mode
                             if start > 0:
                                 yield buf[:start]
                             buf = buf[start + len("<think>"):]
                             in_think = True
-            # Flush remaining buffer
             if buf and not in_think:
                 yield buf
 
