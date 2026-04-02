@@ -193,7 +193,7 @@ def _run_repl(engine, conversation: Conversation):
         if line.lower() in ("/quit", "/exit", "/q", "exit", "quit", "q"):
             _save_history()
             break
-        elif line.lower() == "/clear":
+        elif line.lower() in ("/clear", "clear"):
             conversation.clear()
             click.secho("  Context cleared.", fg=theme.TEXT_DIM)
             continue
