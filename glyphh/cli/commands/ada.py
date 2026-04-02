@@ -93,10 +93,11 @@ class Conversation:
         """Build the full ChatML prompt including history."""
         parts = [f"<|im_start|>system\n{self._system}<|im_end|>"]
         for user, assistant in self._turns:
-            parts.append(f"<|im_start|>user\n{user} /no_think<|im_end|>")
+            parts.append(f"<|im_start|>user\n{user}<|im_end|>")
             parts.append(f"<|im_start|>assistant\n{assistant}<|im_end|>")
-        parts.append(f"<|im_start|>user\n{user_msg} /no_think<|im_end|>")
-        parts.append("<|im_start|>assistant\n")
+        parts.append(f"<|im_start|>user\n{user_msg}<|im_end|>")
+        # Pre-fill assistant with closed think block to skip reasoning
+        parts.append("<|im_start|>assistant\n<think>\n</think>\n\n")
         return "\n".join(parts)
 
     def add_turn(self, user_msg: str, assistant_msg: str) -> None:
@@ -172,10 +173,10 @@ def _print_ada_banner(engine, elapsed: float):
     click.echo()
 
 
-def _run_repl(engine, conversation: Conversation):
+def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
     """Interactive conversation loop."""
     click.secho(
-        "  /clear  /history  /quit  — or just talk",
+        "  /clear  /history  /quit  !<cmd>  — or just talk",
         fg=theme.TEXT_DIM,
     )
     click.echo()
@@ -202,9 +203,19 @@ def _run_repl(engine, conversation: Conversation):
         if line.lower() in ("/quit", "/exit", "/q", "exit", "quit", "q"):
             _save_history()
             break
-        elif line.lower() in ("/clear", "clear"):
+        elif line.lower() in ("/clear", "clear", "home"):
             conversation.clear()
-            click.secho("  Context cleared.", fg=theme.TEXT_DIM)
+            click.clear()
+            _print_ada_banner(engine, load_time)
+            click.secho(
+                "  /clear  /history  /quit  !<cmd>  — or just talk",
+                fg=theme.TEXT_DIM,
+            )
+            click.echo()
+            continue
+        elif line.startswith("!"):
+            import subprocess
+            subprocess.run(line[1:].strip(), shell=True)
             continue
         elif line.lower() == "/history":
             if not conversation.turn_count:
@@ -247,7 +258,7 @@ def ada_command(text):
         _query(engine, conversation, query_text)
     else:
         _print_ada_banner(engine, elapsed)
-        _run_repl(engine, conversation)
+        _run_repl(engine, conversation, load_time=elapsed)
 
 
 # ── Handler for interactive shell ───────────────────────────────────────────
@@ -269,4 +280,4 @@ def handle_ada(func: str | None, args: str = ""):
         _query(engine, conversation, full_query)
     else:
         _print_ada_banner(engine, elapsed)
-        _run_repl(engine, conversation)
+        _run_repl(engine, conversation, load_time=elapsed)
