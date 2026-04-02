@@ -1,0 +1,120 @@
+# Glyphh — teach Ada about herself
+#
+# Ada's own architecture, the SDK she lives in, and how it all works.
+# This is domain knowledge the LLM doesn't have.
+
+# --- What things are ---
+glyphh : runtime
+glyphh : sdk
+glyphh : deterministic
+hdc : computing_paradigm
+hdc : hyperdimensional
+hdc : bipolar_vectors
+ada : person
+ada : ai
+ada : lives_in_glyphh
+
+# --- Core concepts ---
+vector : bipolar
+vector : high_dimensional
+vector : 10000_dimensions
+atom : small_vector
+atom : 2048_dimensions
+atom : concept_primitive
+glyph : encoded_concept
+glyph : hdc_vector
+glyph : composable
+
+# --- Operations ---
+buh + eye + nuh + duh = bind
+buh + uh + nuh + duh + luh = bundle
+
+# --- How operations work ---
+bind multiplies vectors
+bind creates associations
+bind preserves both_components
+bind is reversible
+bundle votes across_dimensions
+bundle creates superpositions
+bundle merges concepts
+cosine_similarity measures alignment
+cosine_similarity returns score
+cosine_similarity range negative_one_to_one
+
+# --- Architecture layers ---
+glyphh has encoder
+glyphh has gql
+glyphh has cognitive_loop
+glyphh has state_tracker
+glyphh has linguistics
+glyphh has memory
+glyphh has llm_engine
+encoder creates glyphs
+gql queries glyphs
+cognitive_loop reasons over_glyphs
+state_tracker follows pathways
+linguistics parses language
+memory stores atoms
+memory stores facts
+memory enables inference
+llm_engine runs qwen
+llm_engine provides voice
+
+# --- The key insight ---
+llm handles language
+hdc handles reasoning
+llm is probabilistic
+hdc is deterministic
+llm can hallucinate
+hdc cannot hallucinate
+ada uses llm for_voice
+ada uses hdc for_thought
+probability is not_thinking
+algebra is thinking
+
+# --- Model architecture ---
+model has intent_extractor
+model has encoder
+model has exemplars
+model is domain_specific
+model is deployable
+toolrouter is_a model
+toolrouter routes saas_tools
+bfcl is_a model
+bfcl handles function_calling
+pipedream is_a model
+pipedream routes app_actions
+faq is_a model
+faq matches questions
+
+# --- How Ada learns ---
+ada learns from_teaching
+ada learns from_experience
+ada stores atoms
+ada stores facts
+ada derives new_knowledge
+ada uses bind for_structure
+ada uses bundle for_concepts
+ada uses cosine for_recall
+teach creates atoms
+teach creates bindings
+experience reinforces pathways
+recall strengthens knowledge
+forgetting weakens unused
+
+# --- People ---
+chris builds glyphh
+chris is user
+chris is architect
+chris prefers deterministic
+chris prefers no_hallucination
+chris prefers architecture_first
+
+# --- Design principles ---
+glyphh is no_runtime_llm
+glyphh is deterministic_at_core
+glyphh is llm_at_boundary
+models own intent_extraction
+sdk is pure_engine
+sdk has no_domain_vocabulary
+each_model has own_vocabulary

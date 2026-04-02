@@ -15,12 +15,17 @@ This mirrors the brain's mechanism for cementing neural pathways:
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
 
 from glyphh.core.ops import bind, cosine_similarity, generate_symbol
+
+logger = logging.getLogger(__name__)
 
 
 # ── Weighted bundle (not in ops.py — implemented here for state module) ──
@@ -270,6 +275,78 @@ class PathwayLibrary:
                 total += cand_sim * match_score * 0.5
 
         return min(0.4, total)
+
+    def weaken(self, name: str, factor: float = 0.7) -> None:
+        """Weaken a pathway — anti-Hebbian."""
+        if name in self._pathways:
+            self._pathways[name].strength = max(0.1, self._pathways[name].strength * factor)
+
+    def decay_all(self, factor: float = 0.99) -> None:
+        """Apply temporal decay to all pathways."""
+        for pathway in self._pathways.values():
+            pathway.strength = max(0.1, pathway.strength * factor)
+
+    def prune(self, min_strength: float = 0.15) -> int:
+        """Remove pathways below minimum strength. Returns count removed."""
+        to_remove = [n for n, p in self._pathways.items() if p.strength < min_strength]
+        for name in to_remove:
+            del self._pathways[name]
+        return len(to_remove)
+
+    # ── Persistence ──
+
+    def save(self, path: str | Path) -> None:
+        """Save pathway library to disk."""
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+
+        meta_path = path / "pathways.jsonl"
+        vec_path = path / "pathway_vectors.npy"
+
+        pathways = list(self._pathways.values())
+        with open(meta_path, "w") as f:
+            for p in pathways:
+                f.write(json.dumps({
+                    "name": p.name,
+                    "strength": p.strength,
+                    "fire_count": p.fire_count,
+                }) + "\n")
+
+        if pathways:
+            np.save(vec_path, np.stack([p.vector for p in pathways]))
+
+        logger.info("Saved %d pathways to %s", len(pathways), path)
+
+    def load(self, path: str | Path) -> None:
+        """Load pathway library from disk."""
+        path = Path(path)
+        meta_path = path / "pathways.jsonl"
+        vec_path = path / "pathway_vectors.npy"
+
+        if not meta_path.exists() or not vec_path.exists():
+            return
+
+        records = []
+        with open(meta_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    records.append(json.loads(line))
+
+        vectors = np.load(vec_path)
+        if len(records) != vectors.shape[0]:
+            logger.warning("Pathway count mismatch — skipping load")
+            return
+
+        for i, rec in enumerate(records):
+            self._pathways[rec["name"]] = Pathway(
+                name=rec["name"],
+                vector=vectors[i],
+                strength=rec.get("strength", 1.0),
+                fire_count=rec.get("fire_count", 0),
+            )
+
+        logger.info("Loaded %d pathways from %s", len(records), path)
 
     @property
     def pathways(self) -> dict[str, Pathway]:

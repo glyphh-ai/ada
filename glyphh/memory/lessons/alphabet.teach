@@ -1,0 +1,114 @@
+# The English Alphabet
+# Teaching Ada letters, order, and properties.
+# Each line is a simple fact: subject relation object
+
+# --- Letters exist ---
+a is_a letter
+b is_a letter
+c is_a letter
+d is_a letter
+e is_a letter
+f is_a letter
+g is_a letter
+h is_a letter
+i is_a letter
+j is_a letter
+k is_a letter
+l is_a letter
+m is_a letter
+n is_a letter
+o is_a letter
+p is_a letter
+q is_a letter
+r is_a letter
+s is_a letter
+t is_a letter
+u is_a letter
+v is_a letter
+w is_a letter
+x is_a letter
+y is_a letter
+z is_a letter
+
+# --- Vowels and consonants ---
+a is_a vowel
+e is_a vowel
+i is_a vowel
+o is_a vowel
+u is_a vowel
+b is_a consonant
+c is_a consonant
+d is_a consonant
+f is_a consonant
+g is_a consonant
+h is_a consonant
+j is_a consonant
+k is_a consonant
+l is_a consonant
+m is_a consonant
+n is_a consonant
+p is_a consonant
+q is_a consonant
+r is_a consonant
+s is_a consonant
+t is_a consonant
+v is_a consonant
+w is_a consonant
+x is_a consonant
+y is_a consonant
+z is_a consonant
+
+# --- Order ---
+a comes_before b
+b comes_before c
+c comes_before d
+d comes_before e
+e comes_before f
+f comes_before g
+g comes_before h
+h comes_before i
+i comes_before j
+j comes_before k
+k comes_before l
+l comes_before m
+m comes_before n
+n comes_before o
+o comes_before p
+p comes_before q
+q comes_before r
+r comes_before s
+s comes_before t
+t comes_before u
+u comes_before v
+v comes_before w
+w comes_before x
+x comes_before y
+y comes_before z
+
+# --- Position ---
+a has_position 1st
+b has_position 2nd
+c has_position 3rd
+d has_position 4th
+e has_position 5th
+f has_position 6th
+g has_position 7th
+h has_position 8th
+i has_position 9th
+j has_position 10th
+k has_position 11th
+l has_position 12th
+m has_position 13th
+n has_position 14th
+o has_position 15th
+p has_position 16th
+q has_position 17th
+r has_position 18th
+s has_position 19th
+t has_position 20th
+u has_position 21st
+v has_position 22nd
+w has_position 23rd
+x has_position 24th
+y has_position 25th
+z has_position 26th

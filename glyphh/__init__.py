@@ -107,6 +107,9 @@ from .linguistics import LinguisticIntentParser
 # LLM — local language model inference (Ada's voice)
 from .llm import LLMEngine
 
+# Memory — Ada's lifelong thought storage, structured facts, and inference
+from .memory import Thought, ThoughtEncoder, ThoughtStore, Atom, AtomForge, Fact, FactStore, Teacher
+
 from .visualization import (
     visualize_similarity_graph,
     create_similarity_matrix,
@@ -224,6 +227,15 @@ __all__ = [
     "LinguisticIntentParser",
     # LLM Engine (Ada's voice)
     "LLMEngine",
+    # Memory (Ada's lifelong thought store + structured reasoning)
+    "Thought",
+    "ThoughtEncoder",
+    "ThoughtStore",
+    "Atom",
+    "AtomForge",
+    "Fact",
+    "FactStore",
+    "Teacher",
     # GQL Exceptions
     "GQLError",
     "LexerError",
