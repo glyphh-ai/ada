@@ -243,7 +243,7 @@ def _stream_response(engine, prompt: str) -> str:
     click.echo()
     bar = _dream_bar()
     if bar:
-        click.secho(f"  {bar}", fg=theme.TEXT_DIM)
+        click.secho(f"  {bar}", fg="cyan")
     click.secho("  ada", fg=theme.ACCENT, bold=True)
     click.echo("  ", nl=False)
     response_parts = []
@@ -686,11 +686,11 @@ _dream_frame = 0
 def _dream_bar() -> str:
     """Generate a braille bar showing dream activity."""
     global _dream_frame
-    if _dream_loop is not None and (_dream_loop._running):
-        # Rolling wave through braille chars
+    if _dream_loop is not None and _dream_loop._running:
+        # Wave pattern — each position offset by 3 to create a visible ripple
         bar = ""
-        for i in range(20):
-            idx = (_dream_frame + i) % len(_DREAM_BRAILLE)
+        for i in range(24):
+            idx = (_dream_frame + i * 3) % len(_DREAM_BRAILLE)
             bar += _DREAM_BRAILLE[idx]
         _dream_frame = (_dream_frame + 1) % len(_DREAM_BRAILLE)
         return bar
@@ -715,6 +715,10 @@ def _print_banner(engine, elapsed: float):
         parts.append(f"{engine.backend_name} · {elapsed:.1f}s")
     parts.append(f"{facts_count} facts · {atoms_count} atoms")
     click.secho(f"  {' · '.join(parts)}", fg=theme.TEXT_DIM)
+    # Show dream bar in banner if she's already thinking
+    bar = _dream_bar()
+    if bar:
+        click.secho(f"  {bar}", fg="cyan")
     click.echo()
 
 
@@ -767,7 +771,7 @@ def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
         # Show dream bar if she's been thinking
         bar = _dream_bar()
         if bar:
-            click.secho(f"  {bar}", fg=theme.TEXT_DIM)
+            click.secho(f"  {bar}", fg="cyan")
 
         prompt_str = (
             click.style("  ", fg=theme.TEXT_DIM)
