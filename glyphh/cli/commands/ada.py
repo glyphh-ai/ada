@@ -150,10 +150,21 @@ def _query(engine, conversation: Conversation, text: str, stream: bool = True) -
 
 # ── REPL ────────────────────────────────────────────────────────────────────
 
+def _print_ada_banner(engine, elapsed: float):
+    """Print Ada's banner when entering the REPL."""
+    click.echo()
+    click.secho("            _", fg=theme.PRIMARY)
+    click.secho("   __ _  __| | __ _", fg=theme.PRIMARY)
+    click.secho("  / _` |/ _` |/ _` |", fg=theme.ACCENT)
+    click.secho(" | (_| | (_| | (_| |", fg="cyan")
+    click.secho("  \\__,_|\\__,_|\\__,_|", fg="bright_cyan")
+    click.echo()
+    click.secho(f"  {engine.backend_name} · {elapsed:.1f}s load · /quit to exit", fg=theme.TEXT_DIM)
+    click.echo()
+
+
 def _run_repl(engine, conversation: Conversation):
     """Interactive conversation loop."""
-    click.echo()
-    click.secho("  ada", fg=theme.ACCENT, bold=True)
     click.secho(
         "  /clear  /history  /quit  — or just talk",
         fg=theme.TEXT_DIM,
@@ -226,6 +237,7 @@ def ada_command(text):
         query_text = " ".join(text)
         _query(engine, conversation, query_text)
     else:
+        _print_ada_banner(engine, elapsed)
         _run_repl(engine, conversation)
 
 
@@ -247,4 +259,5 @@ def handle_ada(func: str | None, args: str = ""):
     if full_query:
         _query(engine, conversation, full_query)
     else:
+        _print_ada_banner(engine, elapsed)
         _run_repl(engine, conversation)
