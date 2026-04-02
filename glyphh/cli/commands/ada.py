@@ -241,11 +241,6 @@ def _recall_context(text: str) -> str | None:
 def _stream_response(engine, prompt: str) -> str:
     """Stream Ada's response with word-wrap, hang detection, and loop detection."""
     click.echo()
-    # Show dream spinners briefly before responding
-    if _dream_loop is not None and _dream_loop._running:
-        _start_dream_spinner()
-        time.sleep(0.6)
-        _stop_dream_spinner()
     click.secho("  ada", fg=theme.ACCENT, bold=True)
     click.echo("  ", nl=False)
     response_parts = []
@@ -684,8 +679,22 @@ _dream_anim_stop = None
 
 # ── Banner & help ───────────────────────────────────────────────────────────
 
+def _print_dream_line() -> None:
+    """Print a static spinner line. Returns True if printed."""
+    from ..spinner import _FRAMES
+    if _dream_loop is None or not _dream_loop._running:
+        return
+    n = 12
+    chars = "".join(_FRAMES[(i * 2) % len(_FRAMES)] for i in range(n))
+    click.secho(f"  {chars}", fg="cyan")
+
+
 def _start_dream_spinner() -> None:
-    """Start a row of staggered grid spinners on one line using \\r."""
+    """Animate the spinner line ABOVE the prompt using ANSI cursor movement.
+
+    Layout is fixed: spinner on line N, prompt/cursor on line N+1.
+    Thread saves cursor, moves up 1 line, rewrites spinner, restores cursor.
+    """
     import threading as _th
     from ..spinner import _FRAMES, _INTERVAL
 
@@ -698,7 +707,7 @@ def _start_dream_spinner() -> None:
     _dream_anim_stop = _th.Event()
     stop = _dream_anim_stop
     n_spinners = 12
-    offsets = [i * 2 for i in range(n_spinners)]  # stagger each by 2 frames
+    offsets = [i * 2 for i in range(n_spinners)]
     clr = "\033[36m"  # cyan
     rst = "\033[0m"
 
@@ -708,24 +717,22 @@ def _start_dream_spinner() -> None:
             chars = "".join(
                 _FRAMES[(tick + off) % len(_FRAMES)] for off in offsets
             )
-            sys.stdout.write(f"\r  {clr}{chars}{rst} ")
+            # Save cursor → up 1 line → carriage return → write → restore cursor
+            sys.stdout.write(f"\033[s\033[1A\r  {clr}{chars}{rst} \033[u")
             sys.stdout.flush()
             tick += 1
             stop.wait(_INTERVAL)
-        # Leave the last frame visible, drop to next line for prompt
-        sys.stdout.write("\n")
-        sys.stdout.flush()
 
     t = _th.Thread(target=_animate, daemon=True, name="ada-dream-spin")
     t.start()
 
 
 def _stop_dream_spinner() -> None:
-    """Stop the dream spinner row."""
+    """Stop the dream spinner animation."""
     global _dream_anim_stop
     if _dream_anim_stop is not None:
         _dream_anim_stop.set()
-        import time; time.sleep(0.1)  # let it clear
+        time.sleep(0.1)  # let thread finish
         _dream_anim_stop = None
 
 
@@ -793,12 +800,9 @@ def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
         if insights:
             _show_insights(insights)
 
-        # Show dream spinners briefly — visible thinking pulse between turns
-        dreaming = _dream_loop is not None and _dream_loop._running
-        if dreaming:
-            _start_dream_spinner()
-            time.sleep(1.2)  # let user see her thinking
-            _stop_dream_spinner()
+        # Print spinner line, then prompt below — animate spinner above prompt
+        _print_dream_line()
+        _start_dream_spinner()
 
         prompt_str = (
             click.style("  ", fg=theme.TEXT_DIM)
