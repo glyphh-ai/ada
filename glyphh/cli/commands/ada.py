@@ -679,6 +679,7 @@ ADA_TAGLINE = "i don't guess."
 # Braille frames — a subtle pulse when Ada is dreaming
 _DREAM_BRAILLE = "⠁⠂⠄⡀⢀⠠⠐⠈"
 _dream_frame = 0
+_dream_anim_stop = None
 
 
 # ── Banner & help ───────────────────────────────────────────────────────────
@@ -687,7 +688,6 @@ def _dream_bar() -> str:
     """Generate a braille bar showing dream activity."""
     global _dream_frame
     if _dream_loop is not None and _dream_loop._running:
-        # Wave pattern — each position offset by 3 to create a visible ripple
         bar = ""
         for i in range(24):
             idx = (_dream_frame + i * 3) % len(_DREAM_BRAILLE)
@@ -695,6 +695,41 @@ def _dream_bar() -> str:
         _dream_frame = (_dream_frame + 1) % len(_DREAM_BRAILLE)
         return bar
     return ""
+
+
+def _start_dream_animation() -> None:
+    """Start a background thread that animates the braille line in-place."""
+    import threading as _th
+    global _dream_anim_stop
+
+    if _dream_loop is None or not _dream_loop._running:
+        return
+
+    _dream_anim_stop = _th.Event()
+    stop = _dream_anim_stop
+
+    def _animate():
+        while not stop.is_set():
+            bar = _dream_bar()
+            if bar:
+                # \033[s  = save cursor position
+                # \033[1A = move up 1 line (to the braille line)
+                # \r      = go to start of that line
+                # \033[u  = restore cursor position
+                sys.stdout.write(f"\033[s\033[1A\r  \033[36m{bar}\033[0m\033[u")
+                sys.stdout.flush()
+            stop.wait(0.15)
+
+    t = _th.Thread(target=_animate, daemon=True, name="ada-dream-anim")
+    t.start()
+
+
+def _stop_dream_animation() -> None:
+    """Stop the braille animation thread."""
+    global _dream_anim_stop
+    if _dream_anim_stop is not None:
+        _dream_anim_stop.set()
+        _dream_anim_stop = None
 
 
 def _print_banner(engine, elapsed: float):
@@ -760,18 +795,18 @@ def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
         click.echo()
 
     while True:
-        # Pause dreaming while waiting for input (avoid lock contention)
-        dream.pause()
-
         # Show any insights Ada discovered while we were busy
         insights = dream.drain_insights()
         if insights:
             _show_insights(insights)
 
-        # Show dream bar if she's been thinking
-        bar = _dream_bar()
-        if bar:
-            click.secho(f"  {bar}", fg="cyan")
+        # Show dream bar (animated while waiting for input)
+        dreaming = dream._running
+        if dreaming:
+            bar = _dream_bar()
+            if bar:
+                click.secho(f"  {bar}", fg="cyan")
+            _start_dream_animation()
 
         prompt_str = (
             click.style("  ", fg=theme.TEXT_DIM)
@@ -782,6 +817,7 @@ def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
         try:
             line = input(prompt_str).strip()
         except (EOFError, KeyboardInterrupt):
+            _stop_dream_animation()
             click.echo()
             dream.stop()
             _save_history()
@@ -789,11 +825,15 @@ def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
             _save_memory()
             break
 
-        # Resume dreaming while we process
-        dream.resume()
+        _stop_dream_animation()
+        dream.pause()
 
         if not line:
+            dream.resume()
             continue
+
+        # Resume dreaming while we process the command
+        dream.resume()
 
         if line.startswith("!"):
             import subprocess
