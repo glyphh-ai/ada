@@ -190,7 +190,7 @@ def _run_repl(engine, conversation: Conversation):
         if not line:
             continue
 
-        if line.lower() in ("/quit", "/exit", "/q"):
+        if line.lower() in ("/quit", "/exit", "/q", "exit", "quit", "q"):
             _save_history()
             break
         elif line.lower() == "/clear":
