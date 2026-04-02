@@ -241,9 +241,11 @@ def _recall_context(text: str) -> str | None:
 def _stream_response(engine, prompt: str) -> str:
     """Stream Ada's response with word-wrap, hang detection, and loop detection."""
     click.echo()
-    bar = _dream_bar()
-    if bar:
-        click.secho(f"  {bar}", fg="cyan")
+    # Show dream spinners briefly before responding
+    if _dream_loop is not None and _dream_loop._running:
+        _start_dream_spinner()
+        time.sleep(0.6)
+        _stop_dream_spinner()
     click.secho("  ada", fg=theme.ACCENT, bold=True)
     click.echo("  ", nl=False)
     response_parts = []
@@ -676,59 +678,54 @@ def _dispatch(engine, conversation: Conversation, line: str) -> bool:
 ADA_VERSION = "2.1.1"
 ADA_TAGLINE = "i don't guess."
 
-# Braille frames — a subtle pulse when Ada is dreaming
-_DREAM_BRAILLE = "⠁⠂⠄⡀⢀⠠⠐⠈"
-_dream_frame = 0
+# Dream spinner — row of grid spinners started at different offsets
 _dream_anim_stop = None
 
 
 # ── Banner & help ───────────────────────────────────────────────────────────
 
-def _dream_bar() -> str:
-    """Generate a braille bar showing dream activity."""
-    global _dream_frame
-    if _dream_loop is not None and _dream_loop._running:
-        bar = ""
-        for i in range(24):
-            idx = (_dream_frame + i * 3) % len(_DREAM_BRAILLE)
-            bar += _DREAM_BRAILLE[idx]
-        _dream_frame = (_dream_frame + 1) % len(_DREAM_BRAILLE)
-        return bar
-    return ""
-
-
-def _start_dream_animation() -> None:
-    """Start a background thread that animates the braille line in-place."""
+def _start_dream_spinner() -> None:
+    """Start a row of staggered grid spinners on one line using \\r."""
     import threading as _th
-    global _dream_anim_stop
+    from ..spinner import _FRAMES, _INTERVAL
 
+    global _dream_anim_stop
     if _dream_loop is None or not _dream_loop._running:
         return
+    if _dream_anim_stop is not None:
+        return  # already running
 
     _dream_anim_stop = _th.Event()
     stop = _dream_anim_stop
+    n_spinners = 12
+    offsets = [i * 2 for i in range(n_spinners)]  # stagger each by 2 frames
+    clr = "\033[36m"  # cyan
+    rst = "\033[0m"
 
     def _animate():
+        tick = 0
         while not stop.is_set():
-            bar = _dream_bar()
-            if bar:
-                # \033[s  = save cursor position
-                # \033[1A = move up 1 line (to the braille line)
-                # \r      = go to start of that line
-                # \033[u  = restore cursor position
-                sys.stdout.write(f"\033[s\033[1A\r  \033[36m{bar}\033[0m\033[u")
-                sys.stdout.flush()
-            stop.wait(0.15)
+            chars = "".join(
+                _FRAMES[(tick + off) % len(_FRAMES)] for off in offsets
+            )
+            sys.stdout.write(f"\r  {clr}{chars}{rst} ")
+            sys.stdout.flush()
+            tick += 1
+            stop.wait(_INTERVAL)
+        # Clear the spinner line
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
 
-    t = _th.Thread(target=_animate, daemon=True, name="ada-dream-anim")
+    t = _th.Thread(target=_animate, daemon=True, name="ada-dream-spin")
     t.start()
 
 
-def _stop_dream_animation() -> None:
-    """Stop the braille animation thread."""
+def _stop_dream_spinner() -> None:
+    """Stop the dream spinner row."""
     global _dream_anim_stop
     if _dream_anim_stop is not None:
         _dream_anim_stop.set()
+        import time; time.sleep(0.1)  # let it clear
         _dream_anim_stop = None
 
 
@@ -750,10 +747,6 @@ def _print_banner(engine, elapsed: float):
         parts.append(f"{engine.backend_name} · {elapsed:.1f}s")
     parts.append(f"{facts_count} facts · {atoms_count} atoms")
     click.secho(f"  {' · '.join(parts)}", fg=theme.TEXT_DIM)
-    # Show dream bar in banner if she's already thinking
-    bar = _dream_bar()
-    if bar:
-        click.secho(f"  {bar}", fg="cyan")
     click.echo()
 
 
@@ -800,13 +793,12 @@ def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
         if insights:
             _show_insights(insights)
 
-        # Show dream bar (animated while waiting for input)
-        dreaming = dream._running
+        # Show dream spinners briefly — visible thinking pulse between turns
+        dreaming = _dream_loop is not None and _dream_loop._running
         if dreaming:
-            bar = _dream_bar()
-            if bar:
-                click.secho(f"  {bar}", fg="cyan")
-            _start_dream_animation()
+            _start_dream_spinner()
+            time.sleep(1.2)  # let user see her thinking
+            _stop_dream_spinner()
 
         prompt_str = (
             click.style("  ", fg=theme.TEXT_DIM)
@@ -817,7 +809,7 @@ def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
         try:
             line = input(prompt_str).strip()
         except (EOFError, KeyboardInterrupt):
-            _stop_dream_animation()
+            _stop_dream_spinner()
             click.echo()
             dream.stop()
             _save_history()
@@ -825,7 +817,6 @@ def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
             _save_memory()
             break
 
-        _stop_dream_animation()
         dream.pause()
 
         if not line:
