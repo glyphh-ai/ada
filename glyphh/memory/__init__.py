@@ -15,6 +15,7 @@ Plus:
 from .atom import Atom, AtomForge
 from .binding import Fact, FactStore
 from .cognitive import CognitiveLoop, ReasoningChain
+from .dream import DreamLoop, Insight, InsightKind
 from .thought import Thought, ThoughtEncoder
 from .store import ThoughtStore
 from .teacher import Teacher
@@ -23,8 +24,11 @@ __all__ = [
     "Atom",
     "AtomForge",
     "CognitiveLoop",
+    "DreamLoop",
     "Fact",
     "FactStore",
+    "Insight",
+    "InsightKind",
     "ReasoningChain",
     "Teacher",
     "Thought",

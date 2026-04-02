@@ -23,6 +23,7 @@ import click
 from .. import theme
 from ..spinner import GridSpinner
 from glyphh.memory import ThoughtEncoder, ThoughtStore, AtomForge, FactStore, Teacher, CognitiveLoop
+from glyphh.memory.dream import DreamLoop, InsightKind
 
 # ── Readline history ────────────────────────────────────────────────────────
 
@@ -90,6 +91,7 @@ _forge = None
 _fact_store = None
 _teacher = None
 _cognitive_loop = None
+_dream_loop = None
 
 
 def _get_memory() -> ThoughtStore:
@@ -129,6 +131,23 @@ def _get_loop() -> CognitiveLoop:
         _cognitive_loop = CognitiveLoop(_get_forge(), _get_facts())
         _cognitive_loop.load(_MEMORY_DIR)
     return _cognitive_loop
+
+
+def _get_dream() -> DreamLoop:
+    global _dream_loop
+    if _dream_loop is None:
+        _dream_loop = DreamLoop(
+            _get_loop(), _get_forge(), _get_facts(),
+            cycle_budget=8,
+            cycle_interval=3.0,
+        )
+    return _dream_loop
+
+
+def _nudge_dream() -> None:
+    """Auto-start background reasoning if facts exist and dream isn't running."""
+    if _dream_loop is not None and not _dream_loop.is_running and _get_facts().count > 0:
+        _dream_loop.start()
 
 
 def _save_memory() -> None:
@@ -271,6 +290,7 @@ def _do_teach(text: str) -> None:
         for f in facts:
             click.secho(f"  ◆ {f.subject} → {f.relation} → {f.object}", fg=theme.ACCENT)
         _save_memory()
+        _nudge_dream()
     else:
         click.secho("  Couldn't parse. Try: subject verb object", fg=theme.TEXT_DIM)
     click.secho(f"  ({_get_facts().count} facts, {_get_forge().count} atoms)", fg=theme.TEXT_DIM)
@@ -288,6 +308,7 @@ def _do_decompose(engine, text: str) -> None:
         for f in learned:
             click.secho(f"  ◆ {f.subject} → {f.relation} → {f.object}", fg=theme.ACCENT)
         _save_memory()
+        _nudge_dream()
         click.secho(f"  ({_get_facts().count} facts, {_get_forge().count} atoms)", fg=theme.TEXT_DIM)
     else:
         click.secho("  Couldn't extract facts from that.", fg=theme.TEXT_DIM)
@@ -482,6 +503,11 @@ def _do_learn(name: str) -> None:
 def _do_reset() -> None:
     """Clear all of Ada's memory."""
     import shutil
+    # Stop dreaming first
+    global _dream_loop
+    if _dream_loop is not None:
+        _dream_loop.stop()
+        _dream_loop = None
     path = os.path.expanduser("~/.glyphh/memory")
     if os.path.exists(path):
         shutil.rmtree(path)
@@ -491,6 +517,81 @@ def _do_reset() -> None:
     _teacher = None
     _cognitive_loop = None
     click.secho("  Memory cleared.", fg=theme.ACCENT)
+
+
+def _do_dream(text: str) -> None:
+    """Control background reasoning."""
+    dream = _get_dream()
+    cmd = text.strip().lower() if text else ""
+
+    if cmd in ("start", "on", ""):
+        if dream.is_running:
+            click.secho("  Already thinking.", fg=theme.TEXT_DIM)
+        else:
+            dream.start()
+            click.secho("  ◆ background reasoning started", fg=theme.ACCENT)
+
+    elif cmd in ("stop", "off"):
+        dream.stop()
+        click.secho("  ◆ background reasoning stopped", fg=theme.ACCENT)
+
+    elif cmd == "pause":
+        dream.pause()
+        click.secho("  ◆ paused", fg=theme.TEXT_DIM)
+
+    elif cmd == "resume":
+        dream.resume()
+        click.secho("  ◆ resumed", fg=theme.ACCENT)
+
+    elif cmd in ("status", "stats"):
+        stats = dream.stats
+        click.echo()
+        click.secho(f"  running:  {'yes' if dream.is_running else 'no'}", fg=theme.TEXT)
+        click.secho(f"  cycles:   {stats['cycles']}", fg=theme.TEXT)
+        click.secho(f"  chains:   {stats['total_chains']}", fg=theme.TEXT)
+        click.secho(f"  insights: {stats['total_insights']} ({stats['queued_insights']} pending)", fg=theme.TEXT)
+
+    elif cmd in ("insights", "thoughts"):
+        insights = dream.drain_insights()
+        if not insights:
+            click.secho("  No new insights.", fg=theme.TEXT_DIM)
+        else:
+            _show_insights(insights)
+
+    elif cmd == "gaps":
+        gaps = dream.find_gaps()
+        if not gaps:
+            click.secho("  No knowledge gaps found.", fg=theme.TEXT_DIM)
+        else:
+            click.echo()
+            for gap in gaps:
+                click.secho(f"  ? {gap.summary}", fg="yellow")
+
+    else:
+        click.secho("  dream [start|stop|pause|resume|status|insights|gaps]", fg=theme.TEXT_DIM)
+
+
+_INSIGHT_ICONS = {
+    InsightKind.CONNECTION: ("⚡", theme.ACCENT),
+    InsightKind.CONTRADICTION: ("⚠", "yellow"),
+    InsightKind.CONVERGENCE: ("◆", "cyan"),
+    InsightKind.QUESTION: ("?", "yellow"),
+}
+
+
+def _show_insights(insights, max_show: int = 5) -> None:
+    """Display insights from background reasoning."""
+    if not insights:
+        return
+    click.echo()
+    click.secho("  Ada noticed:", fg=theme.TEXT_DIM, bold=True)
+    for insight in insights[:max_show]:
+        icon, color = _INSIGHT_ICONS.get(insight.kind, ("·", theme.TEXT))
+        click.secho(f"  {icon} {insight.summary}", fg=color)
+    remaining = len(insights) - max_show
+    if remaining > 0:
+        click.secho(f"  ... and {remaining} more (type 'dream insights')", fg=theme.TEXT_DIM)
+    click.echo()
 
 
 # ── Command dispatch ────────────────────────────────────────────────────────
@@ -506,6 +607,7 @@ COMMANDS = {
     "atoms":     lambda engine, args: _do_atoms(),
     "learn":     lambda engine, args: _do_learn(args),
     "reset":     lambda engine, args: _do_reset(),
+    "dream":     lambda engine, args: _do_dream(args),
 }
 
 
@@ -572,6 +674,8 @@ def _print_help():
     click.secho("    infer <subject> <rel>   Reason via cognitive loop + pathways", fg=theme.TEXT)
     click.secho("    yes                     Confirm last inference (strengthen pathway)", fg=theme.TEXT)
     click.secho("    no                      Reject last inference (weaken pathway)", fg=theme.TEXT)
+    click.secho("    dream [start|stop|status|insights|gaps]", fg=theme.TEXT)
+    click.secho("                            Background reasoning — Ada thinks on her own", fg=theme.TEXT)
     click.secho("    learn <lesson>          Load a .teach lesson file", fg=theme.TEXT)
     click.secho("    facts                   Show all stored facts", fg=theme.TEXT)
     click.secho("    atoms                   Show all known atoms", fg=theme.TEXT)
@@ -586,12 +690,27 @@ def _print_help():
 # ── REPL ────────────────────────────────────────────────────────────────────
 
 def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
-    click.secho("  teach · decompose · query · infer · yes/no · learn · facts · help · quit", fg=theme.TEXT_DIM)
+    click.secho("  teach · decompose · query · infer · dream · yes/no · learn · help · quit", fg=theme.TEXT_DIM)
     click.echo()
 
     _setup_history()
 
+    # Start background reasoning if there are facts to think about
+    dream = _get_dream()
+    if _get_facts().count > 0:
+        dream.start()
+        click.secho("  ◆ background reasoning active", fg=theme.TEXT_DIM)
+        click.echo()
+
     while True:
+        # Pause dreaming while waiting for input (avoid lock contention)
+        dream.pause()
+
+        # Show any insights Ada discovered while we were busy
+        insights = dream.drain_insights()
+        if insights:
+            _show_insights(insights)
+
         prompt_str = (
             click.style("  ", fg=theme.TEXT_DIM)
             + click.style("you", fg=theme.PRIMARY, bold=True)
@@ -602,10 +721,14 @@ def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
             line = input(prompt_str).strip()
         except (EOFError, KeyboardInterrupt):
             click.echo()
+            dream.stop()
             _save_history()
             _get_memory().save()
             _save_memory()
             break
+
+        # Resume dreaming while we process
+        dream.resume()
 
         if not line:
             continue
@@ -622,6 +745,7 @@ def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
             _do_ask(engine, conversation, line)
         elif result is False:
             # quit
+            dream.stop()
             _save_history()
             _get_memory().save()
             _save_memory()
