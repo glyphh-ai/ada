@@ -149,6 +149,10 @@ class DreamLoop:
         self._seen_connections: set[tuple[str, str]] = set()
         self._convergence_map: dict[str, set[str]] = {}  # answer → set of starting atoms
 
+        # Persistent insight log (not drained — used for recall)
+        self._insight_log: list[Insight] = []
+        self._max_log = 200
+
     # ── Lifecycle ──────────────────────────────────────────────────────
 
     def start(self) -> None:
@@ -209,8 +213,32 @@ class DreamLoop:
         """How many insights are waiting."""
         return self._insights.qsize()
 
+    def recall_insights(self, words: set[str], max_results: int = 5) -> list[Insight]:
+        """Find insights relevant to a set of query words (for LLM context).
+
+        Matches against atom names in insights. Does not drain the queue.
+        """
+        if not words or not self._insight_log:
+            return []
+
+        scored = []
+        for insight in self._insight_log:
+            # Score by how many query words match insight atoms
+            matches = sum(1 for w in words if any(w in a for a in insight.atoms))
+            if matches > 0:
+                scored.append((insight, matches))
+
+        scored.sort(key=lambda x: (-x[1], -x[0].confidence))
+        return [i for i, _ in scored[:max_results]]
+
     def _surface(self, insight: Insight) -> None:
-        """Queue an insight for the user."""
+        """Queue an insight for the user and log it for recall."""
+        # Log for recall (persistent)
+        self._insight_log.append(insight)
+        if len(self._insight_log) > self._max_log:
+            self._insight_log = self._insight_log[-self._max_log:]
+
+        # Queue for display (drained on show)
         try:
             self._insights.put_nowait(insight)
             self._total_insights += 1

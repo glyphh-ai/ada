@@ -198,7 +198,7 @@ class Conversation:
 # ── Fact recall ─────────────────────────────────────────────────────────────
 
 def _recall_context(text: str) -> str | None:
-    """Build a 'You know:' block — driven by CognitiveLoop reasoning."""
+    """Build a 'You know:' block — driven by CognitiveLoop reasoning + dream insights."""
     recall_lines = []
 
     # Flat text memories
@@ -213,6 +213,24 @@ def _recall_context(text: str) -> str | None:
         chain_lines = loop.recall(text)
         recall_lines.extend(chain_lines)
 
+    # Dream insights — things Ada figured out while thinking in the background
+    if _dream_loop is not None:
+        stop = {"what", "does", "did", "do", "is", "are", "the", "a", "an", "who",
+                "how", "why", "when", "where", "can", "will", "would", "should",
+                "tell", "me", "about", "for"}
+        words = {w.lower().strip("?.,!") for w in text.split()
+                 if w.lower().strip("?.,!") not in stop and len(w) > 1}
+        if words:
+            dream_insights = _dream_loop.recall_insights(words, max_results=3)
+            for insight in dream_insights:
+                prefix = {
+                    InsightKind.CONNECTION: "I figured out",
+                    InsightKind.CONTRADICTION: "I noticed a conflict",
+                    InsightKind.CONVERGENCE: "Multiple paths confirm",
+                    InsightKind.QUESTION: "I'm unsure about",
+                }.get(insight.kind, "I noticed")
+                recall_lines.append(f"- {prefix}: {insight.summary}")
+
     if recall_lines:
         return "You know:\n" + "\n".join(recall_lines)
     return None
@@ -223,6 +241,9 @@ def _recall_context(text: str) -> str | None:
 def _stream_response(engine, prompt: str) -> str:
     """Stream Ada's response with word-wrap, hang detection, and loop detection."""
     click.echo()
+    bar = _dream_bar()
+    if bar:
+        click.secho(f"  {bar}", fg=theme.TEXT_DIM)
     click.secho("  ada", fg=theme.ACCENT, bold=True)
     click.echo("  ", nl=False)
     response_parts = []
@@ -650,7 +671,31 @@ def _dispatch(engine, conversation: Conversation, line: str) -> bool:
     return None
 
 
+# ── Version ────────────────────────────────────────────────────────────────
+
+ADA_VERSION = "2.1.1"
+ADA_TAGLINE = "i don't guess."
+
+# Braille frames — a subtle pulse when Ada is dreaming
+_DREAM_BRAILLE = "⠁⠂⠄⡀⢀⠠⠐⠈"
+_dream_frame = 0
+
+
 # ── Banner & help ───────────────────────────────────────────────────────────
+
+def _dream_bar() -> str:
+    """Generate a braille bar showing dream activity."""
+    global _dream_frame
+    if _dream_loop is not None and (_dream_loop._running):
+        # Rolling wave through braille chars
+        bar = ""
+        for i in range(20):
+            idx = (_dream_frame + i) % len(_DREAM_BRAILLE)
+            bar += _DREAM_BRAILLE[idx]
+        _dream_frame = (_dream_frame + 1) % len(_DREAM_BRAILLE)
+        return bar
+    return ""
+
 
 def _print_banner(engine, elapsed: float):
     click.echo()
@@ -659,9 +704,17 @@ def _print_banner(engine, elapsed: float):
     click.secho("  / _` |/ _` |/ _` |", fg=theme.ACCENT)
     click.secho(" | (_| | (_| | (_| |", fg="cyan")
     click.secho("  \\__,_|\\__,_|\\__,_|", fg="bright_cyan")
+    click.secho(f"              v{ADA_VERSION}", fg=theme.TEXT_DIM)
     click.echo()
+    click.secho(f"  {ADA_TAGLINE}", fg="bright_cyan", bold=True)
+    click.echo()
+    facts_count = _get_facts().count
+    atoms_count = _get_forge().count
+    parts = []
     if elapsed > 0:
-        click.secho(f"  {engine.backend_name} · {elapsed:.1f}s · {_get_facts().count} facts · {_get_forge().count} atoms", fg=theme.TEXT_DIM)
+        parts.append(f"{engine.backend_name} · {elapsed:.1f}s")
+    parts.append(f"{facts_count} facts · {atoms_count} atoms")
+    click.secho(f"  {' · '.join(parts)}", fg=theme.TEXT_DIM)
     click.echo()
 
 
@@ -711,6 +764,11 @@ def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
         if insights:
             _show_insights(insights)
 
+        # Show dream bar if she's been thinking
+        bar = _dream_bar()
+        if bar:
+            click.secho(f"  {bar}", fg=theme.TEXT_DIM)
+
         prompt_str = (
             click.style("  ", fg=theme.TEXT_DIM)
             + click.style("you", fg=theme.PRIMARY, bold=True)
@@ -755,10 +813,11 @@ def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
 # ── CLI command ─────────────────────────────────────────────────────────────
 
 @click.command("ada")
+@click.option("--version", is_flag=True, help="Show Ada version.")
 @click.argument("action", required=False)
 @click.argument("text", required=False, nargs=-1)
-def ada_command(action, text):
-    """Ada — cognitive agent with HDC memory + local LLM.
+def ada_command(version, action, text):
+    """Ada — when your llm can't afford to be wrong.
 
     \b
     Examples:
@@ -768,10 +827,14 @@ def ada_command(action, text):
       glyphh ada decompose "Alice manages payments."   LLM decomposition
       glyphh ada query "what does chris build?"        Query memory
       glyphh ada infer chris uses                      Transitive inference
+      glyphh ada dream status                          Background reasoning
       glyphh ada learn glyphh                          Load a lesson
       glyphh ada facts                                 Show all facts
       glyphh ada reset                                 Clear memory
     """
+    if version:
+        click.echo(f"Ada v{ADA_VERSION}")
+        return
     engine = _get_engine()
     conversation = Conversation(ADA_SYSTEM_PROMPT)
 
