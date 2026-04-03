@@ -206,6 +206,10 @@ _QUESTION_EXEMPLARS = [
     "what does emma like",
     "what does jake like",
     "where do we live",
+    "who is sarah",
+    "who is jake",
+    "who is emma",
+    "who works there",
 ]
 
 _STATEMENT_EXEMPLARS = [
