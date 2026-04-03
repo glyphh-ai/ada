@@ -526,21 +526,24 @@ def _do_learn(name: str) -> None:
 
 
 def _do_reset() -> None:
-    """Clear all of Ada's memory."""
+    """Clear all of Ada's memory — facts, atoms, pathways, thoughts."""
     import shutil
     # Stop dreaming first
     global _dream_loop
     if _dream_loop is not None:
         _dream_loop.stop()
         _dream_loop = None
+    # Wipe all persistent storage (thoughts, atoms, facts, pathways all live here)
     path = os.path.expanduser("~/.glyphh/memory")
     if os.path.exists(path):
         shutil.rmtree(path)
-    global _forge, _fact_store, _teacher, _cognitive_loop
+    # Reset all singletons
+    global _forge, _fact_store, _teacher, _cognitive_loop, _thought_store
     _forge = None
     _fact_store = None
     _teacher = None
     _cognitive_loop = None
+    _thought_store = None
     click.secho("  Memory cleared.", fg=theme.ACCENT)
 
 
