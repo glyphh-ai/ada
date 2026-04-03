@@ -378,6 +378,13 @@ class ThoughtGlyphEncoder:
         )
 
         glyph = self._encoder.encode(concept)
+
+        # Store a pure content vector — just the content words, no role names.
+        # This is the strongest recall signal (like glyphh-code's content layer).
+        content_text = " ".join(content_words) if content_words else " ".join(words)
+        content_vec = self._encoder._encode_bag_of_words(content_text)
+        glyph.metadata["_content_vector"] = content_vec.data
+
         return glyph
 
     def _tokenize(self, text: str) -> list[str]:

@@ -223,6 +223,15 @@ _QUESTION_EXEMPLARS = [
     "can you tell me",
     "can she come",
     "will it rain tomorrow",
+    # workplace / analytical questions
+    "who reports to sarah",
+    "who got promoted",
+    "is anyone going to leave",
+    "who is at risk",
+    "what happened with mike",
+    "why is he frustrated",
+    "who was hired recently",
+    "who manages the team",
 ]
 
 _STATEMENT_EXEMPLARS = [
@@ -258,9 +267,37 @@ _STATEMENT_EXEMPLARS = [
     "she is a film student",
     "he works at the office",
     "she lives in new york",
+    # workplace / professional / organizational
+    "she joined the company last year",
+    "he reports to sarah",
+    "she is the ceo of nexus",
+    "he was promoted to manager",
+    "she got the promotion",
+    "he has been there for five years",
+    "she manages the engineering team",
+    "he updated his resume",
+    "she met with a recruiter",
+    "he is frustrated at work",
+    "the team is growing fast",
+    "he expected the promotion",
+    "she started six months ago",
+    "he leads the project",
+    "they hired ten people this quarter",
+    # more third-person descriptive statements
+    "he has more experience than her",
+    "she trained him when he started",
+    "he updated his profile last week",
+    "he has been quiet lately",
+    "she used to be the most engaged person",
+    "he has been working there for years",
+    "she was the best on the team",
+    "he told his coworker about it",
+    "she joined the team last month",
+    "he has been quiet in meetings lately",
 ]
 
 _EMOTION_EXEMPLARS = [
+    # First-person feelings (I feel / I am + emotion)
     "i am happy",
     "i feel sad",
     "i am angry",
@@ -271,8 +308,10 @@ _EMOTION_EXEMPLARS = [
     "that makes me worried",
     "i feel calm",
     "i am proud of you",
-    "that is frustrating",
     "i am grateful",
+    "i am so frustrated right now",
+    "i feel overwhelmed",
+    "i am nervous about this",
 ]
 
 _CONTRADICTION_EXEMPLARS = [

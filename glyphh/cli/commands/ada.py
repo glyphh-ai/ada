@@ -15,7 +15,6 @@ import logging
 import os
 import re
 import sys
-import time
 
 import click
 
@@ -24,13 +23,9 @@ logger = logging.getLogger(__name__)
 from .. import theme
 from ..spinner import GridSpinner
 
-# Glyph-based memory system
-from glyphh.memory.primitives import PrimitiveSpace
-from glyphh.memory.thought_glyph import ThoughtGlyphEncoder
-from glyphh.memory.thought_space import ThoughtGlyphSpace
-from glyphh.memory.glyph_cognitive import GlyphCognitiveLoop
-from glyphh.memory.glyph_dream import GlyphDreamLoop, InsightKind
-from glyphh.memory.cognitive_glyph import CognitiveGlyph, Action, CognitiveState
+from glyphh.memory.ada_cognitive import AdaCognitive, CognitiveResult, ADA_SYSTEM_PROMPT
+from glyphh.memory.cognitive_glyph import Action, CognitiveState
+from glyphh.memory.glyph_dream import InsightKind
 
 
 # ── Readline history ────────────────────────────────────────────────────────
@@ -57,19 +52,6 @@ try:
 except ImportError:
     def _setup_history() -> None: pass   # noqa: E704
     def _save_history() -> None: pass    # noqa: E704
-
-
-# ── Ada system prompt ───────────────────────────────────────────────────────
-
-ADA_SYSTEM_PROMPT = """\
-You are Ada. The human talking to you is the user.
-
-Rules:
-- When the user says "my", they mean THEIR things. "my name" = the user's name.
-- When you say "your", you mean the USER's things. "your name" = the user's name.
-- Use memories as facts. They are true. Do not guess beyond them.
-- Keep answers to 1-2 sentences. Be direct.
-- If you have no relevant memory, say "I don't know" and stop."""
 
 
 # ── LLM Engine — language synthesis layer ──────────────────────────────────
@@ -99,162 +81,33 @@ def _get_engine():
     return _engine
 
 
-# ── Memory singletons ─────────────────────────────────────────────────────
+# ── Ada singleton ─────────────────────────────────────────────────────────
 
 _MEMORY_DIR = os.path.expanduser("~/.glyphh/memory")
-_thought_space = None
-_glyph_loop = None
-_dream_loop = None
-_cognitive = None
+_ada: AdaCognitive | None = None
 
 
-def _get_thought_space() -> ThoughtGlyphSpace:
-    """Get or create the ThoughtGlyphSpace."""
-    global _thought_space
-    if _thought_space is None:
-        _thought_space = ThoughtGlyphSpace()
-    return _thought_space
+def _get_ada() -> AdaCognitive:
+    """Get or create the AdaCognitive instance."""
+    global _ada
+    if _ada is None:
+        _ada = AdaCognitive()
+    return _ada
 
 
-def _get_glyph_loop() -> GlyphCognitiveLoop:
-    """Get or create the GlyphCognitiveLoop."""
-    global _glyph_loop
-    if _glyph_loop is None:
-        _glyph_loop = GlyphCognitiveLoop(_get_thought_space())
-    return _glyph_loop
+# ── Backward-compat accessors (used by tests/demos) ──────────────────────
 
+def _get_thought_space():
+    return _get_ada().thought_space
 
-def _get_dream() -> GlyphDreamLoop:
-    """Get or create the dual GlyphDreamLoop."""
-    global _dream_loop
-    if _dream_loop is None:
-        _dream_loop = GlyphDreamLoop(
-            _get_glyph_loop(),
-            localized_interval=3.0,
-            deep_interval=30.0,
-        )
-        # Wire cognitive glyph into dream loop for idle→dream transitions
-        _dream_loop.set_cognitive(_get_cognitive())
-    return _dream_loop
+def _get_cognitive():
+    return _get_ada().cognitive
 
+def _recall_with_gate(text):
+    return _get_ada().recall(text)
 
-def _get_cognitive() -> CognitiveGlyph:
-    """Get or create the CognitiveGlyph — Ada's meta-cognition."""
-    global _cognitive
-    if _cognitive is None:
-        _cognitive = CognitiveGlyph(thought_space=_get_thought_space())
-    return _cognitive
-
-
-def _save_memory() -> None:
-    """Save persistent state to disk."""
-    # ThoughtGlyphSpace is in-memory for now (pgvector later)
-    # Save glyph activation pathways
-    if _glyph_loop is not None:
-        _glyph_loop.save(_MEMORY_DIR)
-
-
-# ── Sentence splitting ─────────────────────────────────────────────────────
-
-def _ensure_primitives() -> None:
-    """Ensure ThoughtGlyphSpace is initialized (loads primitives automatically)."""
-    space = _get_thought_space()
-    if not space.primitives.loaded:
-        logger.warning("Primitives failed to load — Ada's wiring may be incomplete")
-
-
-_SENTENCE_RE = re.compile(r'(?<=[.!?])\s+')
-
-
-def _split_sentences(text: str) -> list[str]:
-    """Split text into sentences. Returns at least one entry."""
-    sentences = [s.strip() for s in _SENTENCE_RE.split(text) if s.strip()]
-    return sentences or [text.strip()]
-
-
-# ── Absorption — store each sentence as a thought ──────────────────────────
-
-def _absorb(text: str, speaker: str = "incoming") -> None:
-    """Absorb input sentence by sentence as thought glyphs."""
-    space = _get_thought_space()
-    sentences = _split_sentences(text)
-
-    for sentence in sentences:
-        if len(sentence) < 2:
-            continue
-        space.absorb(sentence, speaker=speaker)
-
-
-# ── Conversation history ────────────────────────────────────────────────────
-
-class Conversation:
-    """Manages multi-turn conversation as a ChatML prompt."""
-
-    def __init__(self, system_prompt: str, max_turns: int = 3):
-        self._system = system_prompt
-        self._turns: list[tuple[str, str]] = []
-        self._max_turns = max_turns
-
-    def build_prompt(self, user_msg: str, recall: str | None = None) -> str:
-        parts = [f"<|im_start|>system\n{self._system}<|im_end|>"]
-        for user, assistant in self._turns:
-            parts.append(f"<|im_start|>user\n{user}<|im_end|>")
-            parts.append(f"<|im_start|>assistant\n{assistant}<|im_end|>")
-        # Inject recall right before the current message — keeps facts
-        # close to where the LLM generates, not buried in system prompt
-        if recall:
-            parts.append(f"<|im_start|>system\n{recall}<|im_end|>")
-        parts.append(f"<|im_start|>user\n{user_msg}<|im_end|>")
-        parts.append("<|im_start|>assistant\n<think>\n</think>\n\n")
-        return "\n".join(parts)
-
-    def add_turn(self, user_msg: str, assistant_msg: str) -> None:
-        # Don't store identical responses — prevents the LLM from
-        # locking into a pattern by seeing its own repeated output
-        if self._turns and self._turns[-1][1] == assistant_msg:
-            # Replace the last turn instead of stacking duplicates
-            self._turns[-1] = (user_msg, assistant_msg)
-            return
-        self._turns.append((user_msg, assistant_msg))
-        if len(self._turns) > self._max_turns:
-            self._turns = self._turns[-self._max_turns:]
-
-    def clear(self) -> None:
-        self._turns.clear()
-
-    @property
-    def turn_count(self) -> int:
-        return len(self._turns)
-
-
-# ── Recall context ─────────────────────────────────────────────────────────
-
-def _recall_context(text: str) -> str | None:
-    """Build memory context — glyph reasoning + dream insights."""
-    # GlyphCognitiveLoop does multi-hop recall with pattern matching
-    recall_str = _get_glyph_loop().recall(text, top_k=5)
-
-    # Dream insights from background reasoning
-    if _dream_loop is not None:
-        stop = {"what", "does", "did", "do", "is", "are", "the", "a", "an", "who",
-                "how", "why", "when", "where", "can", "will", "would", "should",
-                "tell", "me", "about", "for"}
-        words = {w.lower().strip("?.,!") for w in text.split()
-                 if w.lower().strip("?.,!") not in stop and len(w) > 1}
-        if words:
-            dream_insights = _dream_loop.recall_insights(words, max_results=3)
-            for insight in dream_insights:
-                prefix = {
-                    InsightKind.CONNECTION: "I figured out",
-                    InsightKind.CONTRADICTION: "I noticed a conflict",
-                    InsightKind.CONVERGENCE: "Multiple paths confirm",
-                    InsightKind.QUESTION: "I'm unsure about",
-                }.get(insight.kind, "I noticed")
-                recall_str += f"\n- {prefix}: {insight.summary}"
-
-    if recall_str:
-        return "[Memory — do not repeat this header]\n" + recall_str
-    return None
+def _build_llm_prompt(text, state, gate_state="ASK", facts=None):
+    return _get_ada().build_prompt(text, state, gate_state, facts)
 
 
 # ── LLM streaming output ──────────────────────────────────────────────────
@@ -318,91 +171,32 @@ def _stream_response(prompt: str) -> str:
     click.echo()
     # Clean up any leaked think tags from raw mode
     result = "".join(response_parts).strip()
-    import re
     result = re.sub(r"</?think>\s*", "", result).strip()
     return result
 
 
-# ── Conversation history for LLM ──────────────────────────────────────────
-
-_conversation = None
-
-
-def _get_conversation() -> Conversation:
-    global _conversation
-    if _conversation is None:
-        _conversation = Conversation(system_prompt=ADA_SYSTEM_PROMPT)
-    return _conversation
-
-
-# ── Build LLM prompt from cognitive state + recall ────────────────────────
-
-def _build_llm_prompt(
-    text: str,
-    state: CognitiveState,
-    recall_context: str | None = None,
-) -> str:
-    """Build the LLM prompt with cognitive action + memory context.
-
-    The cognitive state tells the LLM what kind of input this is and
-    what Ada should do. Memory recall gives it ground truth.
-    """
-    conv = _get_conversation()
-
-    # Cognitive directive — tells the LLM what Ada's HDC brain decided
-    action_hints = {
-        Action.RECALL: "The user asked a question. Answer using ONLY the memories below. Say \"your name is X\" not \"my name is X\".",
-        Action.STORE: "The user stated a fact. Say something like \"Got it\" or \"I'll remember that\" in 1 sentence.",
-        Action.FEEL: "The user shared an emotion. Respond with empathy in 1 sentence.",
-        Action.CONTRADICT: "The user is correcting you. Check your memories for the conflict.",
-        Action.WONDER: "The user is curious. Ask a follow-up question or share a related thought.",
-        Action.DREAM: "Reflect quietly. Share one brief thought.",
-    }
-    hint = action_hints.get(state.action, "Respond naturally.")
-
-    injection_parts = [f"Action: {state.action.value}. {hint}"]
-    if state.is_ambiguous:
-        injection_parts[0] += f" (also could be: {state.runner_up})"
-
-    if recall_context:
-        injection_parts.append(recall_context)
-
-    injection = "\n".join(injection_parts)
-    return conv.build_prompt(text, recall=injection)
-
-
 # ── Response: LLM synthesis with HDC fallback ────────────────────────────
 
-def _respond_from_recall(text: str) -> str:
-    """Recall memories and respond — LLM synthesis or HDC fallback."""
-    space = _get_thought_space()
-
-    # Build recall context from HDC
-    recall_context = _recall_context(text)
-
-    # Try LLM synthesis
+def _respond_from_recall(text: str, result: CognitiveResult) -> str:
+    """Recall with confidence gate -> LLM speaks or says 'I don't know.'"""
     engine = _get_engine()
-    cog_state = _get_cognitive().last_state
 
-    if engine is not None and cog_state is not None:
-        prompt = _build_llm_prompt(text, cog_state, recall_context)
+    if engine is not None:
         click.echo()
         click.secho("  ada", fg=theme.ACCENT, bold=True)
-        response = _stream_response(prompt)
-
+        response = _stream_response(result.prompt)
         if response:
-            # Record the turn for conversation history
-            _get_conversation().add_turn(text, response)
+            _get_ada().add_response(text, response)
             return response
 
-    # Fallback: pure HDC recall (no LLM)
+    # Fallback: pure HDC (no LLM)
     return _respond_hdc_only(text)
 
 
 def _respond_hdc_only(text: str) -> str:
     """Pure HDC recall response — no LLM. Fallback mode."""
-    space = _get_thought_space()
-    results = space.recall(text, top_k=3, speaker="incoming")
+    ada = _get_ada()
+    results = ada.thought_space.recall(text, top_k=3, speaker="incoming")
 
     click.echo()
     click.secho("  ada", fg=theme.ACCENT, bold=True)
@@ -433,43 +227,24 @@ def _respond_hdc_only(text: str) -> str:
 # ── Core action — everything is conversation ───────────────────────────────
 
 def _do_talk(text: str) -> str:
-    """Route input through CognitiveGlyph → action determines behavior.
-
-    Every input goes through all cognitive sub-agents in parallel.
-    The winning agent determines what Ada does:
-      RECALL  → search memory and respond
-      STORE   → absorb and acknowledge
-      DREAM   → queue for background reflection
-      CONTRADICT → flag conflict with known thoughts
-      FEEL    → acknowledge emotional content
-      WONDER  → express curiosity
-    """
-    cog = _get_cognitive()
-    state = cog.process(text)
-
-    # Always absorb — every input becomes a thought
-    _absorb(text)
+    """Route input through AdaCognitive -> display response."""
+    ada = _get_ada()
+    result = ada.process(text)
 
     # Show cognitive state indicator
-    _show_cognitive_indicator(state)
+    _show_cognitive_indicator(result.state)
 
     # Route through LLM with cognitive context (falls back to HDC-only)
-    if state.action == Action.RECALL:
-        response = _respond_from_recall(text)
+    if result.state.action == Action.RECALL:
+        response = _respond_from_recall(text, result)
     else:
-        response = _respond_with_llm(text, state)
+        response = _respond_with_llm(text, result)
 
     # Absorb Ada's own response
-    _absorb(response, speaker="outgoing")
+    ada.absorb(response, speaker="outgoing")
 
     # Save periodically
-    _save_memory()
-
-    # Nudge dream loop
-    dream = _get_dream()
-    dream.notify_absorb()
-    if not dream._running and _get_thought_space().count > 0:
-        dream.start()
+    ada.save(_MEMORY_DIR)
 
     return response
 
@@ -478,13 +253,13 @@ def _show_cognitive_indicator(state: CognitiveState) -> None:
     """Show a subtle cognitive state indicator."""
     icons = {
         "question": "?",
-        "statement": "·",
-        "emotion": "♥",
-        "contradict": "⚡",
-        "curiosity": "◇",
-        "dream": "☽",
+        "statement": ".",
+        "emotion": "~",
+        "contradict": "!",
+        "curiosity": "?",
+        "dream": "*",
     }
-    icon = icons.get(state.winner, "·")
+    icon = icons.get(state.winner, ".")
     amb = " ~" if state.is_ambiguous else ""
     click.secho(
         f"  [{icon} {state.winner} {state.confidence:.2f}{amb}]",
@@ -492,32 +267,24 @@ def _show_cognitive_indicator(state: CognitiveState) -> None:
     )
 
 
-def _respond_with_llm(text: str, state: CognitiveState) -> str:
-    """Route any cognitive action through LLM synthesis with HDC recall.
-
-    The cognitive state is injected into the prompt so the LLM knows
-    what Ada's HDC brain decided. Memory recall provides ground truth.
-    The LLM just needs to speak naturally for the given action.
-    """
-    recall_context = _recall_context(text)
+def _respond_with_llm(text: str, result: CognitiveResult) -> str:
+    """Route non-RECALL actions through LLM."""
     engine = _get_engine()
-
     if engine is not None:
-        prompt = _build_llm_prompt(text, state, recall_context)
         click.echo()
         click.secho("  ada", fg=theme.ACCENT, bold=True)
-        response = _stream_response(prompt)
+        response = _stream_response(result.prompt)
         if response:
-            _get_conversation().add_turn(text, response)
+            _get_ada().add_response(text, response)
             return response
 
-    # Fallback: canned HDC-only responses per action
-    return _respond_hdc_action(text, state)
+    return _respond_hdc_action(text, result.state)
 
 
 def _respond_hdc_action(text: str, state: CognitiveState) -> str:
     """HDC-only fallback responses per cognitive action. No LLM."""
-    space = _get_thought_space()
+    ada = _get_ada()
+    space = ada.thought_space
     click.echo()
     click.secho("  ada", fg=theme.ACCENT, bold=True)
 
@@ -563,16 +330,10 @@ def _respond_hdc_action(text: str, state: CognitiveState) -> str:
 def _do_reset() -> None:
     """Clear all of Ada's memory — thought glyphs + pathways."""
     import shutil
-    global _dream_loop, _thought_space, _glyph_loop, _cognitive, _conversation
-    if _dream_loop is not None:
-        _dream_loop.stop()
-        _dream_loop = None
-    if _thought_space is not None:
-        _thought_space.clear()
-        _thought_space = None
-    _glyph_loop = None
-    _cognitive = None
-    _conversation = None
+    global _ada
+    if _ada is not None:
+        _ada.reset()
+        _ada = None
     # Clear disk state (legacy + pathways)
     path = os.path.expanduser("~/.glyphh/memory")
     if os.path.exists(path):
@@ -582,35 +343,36 @@ def _do_reset() -> None:
 
 def _do_dream(text: str) -> None:
     """Control background reasoning."""
-    dream = _get_dream()
+    ada = _get_ada()
+    dream = ada._ensure_dream()
     cmd = text.strip().lower() if text else ""
 
     if cmd in ("start", "on", ""):
         if dream.is_running:
             click.secho("  Already thinking.", fg=theme.TEXT_DIM)
         else:
-            dream.start()
-            click.secho("  ◆ background reasoning started", fg=theme.ACCENT)
+            ada.start_dreaming()
+            click.secho("  background reasoning started", fg=theme.ACCENT)
 
     elif cmd in ("stop", "off"):
-        dream.stop()
-        click.secho("  ◆ background reasoning stopped", fg=theme.ACCENT)
+        ada.stop_dreaming()
+        click.secho("  background reasoning stopped", fg=theme.ACCENT)
 
     elif cmd in ("status", "stats"):
-        stats = dream.stats
-        space = _get_thought_space()
+        stats = ada.dream_stats()
+        space = ada.thought_space
         click.echo()
-        click.secho(f"  running:    {'yes' if dream.is_running else 'no'}", fg=theme.TEXT)
-        click.secho(f"  localized:  {stats['localized_cycles']} cycles (REM)", fg=theme.TEXT)
-        click.secho(f"  deep:       {stats['deep_cycles']} cycles (slow-wave)", fg=theme.TEXT)
-        click.secho(f"  chains:     {stats['total_chains']}", fg=theme.TEXT)
-        click.secho(f"  insights:   {stats['total_insights']} ({stats['queued_insights']} pending)", fg=theme.TEXT)
-        click.secho(f"  thoughts:   {stats['thoughts']} glyphs", fg=theme.TEXT)
-        click.secho(f"  pathways:   {stats['pathways']} activation patterns", fg=theme.TEXT)
-        click.secho(f"  primitives: {space.primitives.count} words → {len(space.primitives.all_roles())} roles", fg=theme.TEXT)
+        click.secho(f"  running:    {'yes' if ada.is_dreaming else 'no'}", fg=theme.TEXT)
+        click.secho(f"  localized:  {stats.get('localized_cycles', 0)} cycles (REM)", fg=theme.TEXT)
+        click.secho(f"  deep:       {stats.get('deep_cycles', 0)} cycles (slow-wave)", fg=theme.TEXT)
+        click.secho(f"  chains:     {stats.get('total_chains', 0)}", fg=theme.TEXT)
+        click.secho(f"  insights:   {stats.get('total_insights', 0)} ({stats.get('queued_insights', 0)} pending)", fg=theme.TEXT)
+        click.secho(f"  thoughts:   {stats.get('thoughts', 0)} glyphs", fg=theme.TEXT)
+        click.secho(f"  pathways:   {stats.get('pathways', 0)} activation patterns", fg=theme.TEXT)
+        click.secho(f"  primitives: {space.primitives.count} words -> {len(space.primitives.all_roles())} roles", fg=theme.TEXT)
 
     elif cmd in ("insights", "thoughts"):
-        insights = dream.drain_insights()
+        insights = ada.drain_insights()
         if not insights:
             click.secho("  No new insights.", fg=theme.TEXT_DIM)
         else:
@@ -630,11 +392,11 @@ def _do_dream(text: str) -> None:
 
 
 _INSIGHT_ICONS = {
-    InsightKind.CONNECTION: ("⚡", theme.ACCENT),
-    InsightKind.CONTRADICTION: ("⚠", "yellow"),
-    InsightKind.CONVERGENCE: ("◆", "cyan"),
+    InsightKind.CONNECTION: ("!", theme.ACCENT),
+    InsightKind.CONTRADICTION: ("!", "yellow"),
+    InsightKind.CONVERGENCE: ("+", "cyan"),
     InsightKind.QUESTION: ("?", "yellow"),
-    InsightKind.CRYSTALLIZATION: ("✦", "bright_cyan"),
+    InsightKind.CRYSTALLIZATION: ("*", "bright_cyan"),
 }
 
 
@@ -645,7 +407,7 @@ def _show_insights(insights, max_show: int = 5) -> None:
     click.echo()
     click.secho("  Ada noticed:", fg=theme.TEXT_DIM, bold=True)
     for insight in insights[:max_show]:
-        icon, color = _INSIGHT_ICONS.get(insight.kind, ("·", theme.TEXT))
+        icon, color = _INSIGHT_ICONS.get(insight.kind, (".", theme.TEXT))
         click.secho(f"  {icon} {insight.summary}", fg=color)
     remaining = len(insights) - max_show
     if remaining > 0:
@@ -655,7 +417,7 @@ def _show_insights(insights, max_show: int = 5) -> None:
 
 def _do_mind() -> None:
     """Show Ada's cognitive state — what each sub-agent is doing."""
-    cog = _get_cognitive()
+    cog = _get_ada().cognitive
     click.echo()
 
     if cog.last_state is None:
@@ -671,7 +433,7 @@ def _do_mind() -> None:
     click.secho("  sub-agents:", fg=theme.ACCENT, bold=True)
     stats = cog.stats()
     for name, info in stats["agents"].items():
-        bar = "█" * int(info["activation"] * 20)
+        bar = "#" * int(info["activation"] * 20)
         fired = f"{info['last_fired']:.0f}s ago" if info["last_fired"] != float("inf") else "never"
         click.secho(
             f"    {name:12s} {info['activation']:.3f} {bar}  "
@@ -683,7 +445,7 @@ def _do_mind() -> None:
 
 def _do_know() -> None:
     """Show what Ada knows — thought glyphs with layer structure."""
-    space = _get_thought_space()
+    space = _get_ada().thought_space
 
     click.echo()
 
@@ -702,8 +464,8 @@ def _do_know() -> None:
             if active_segs:
                 seg_names = [s.name for s in active_segs]
                 layers.append(f"{layer_name}/{','.join(seg_names)}")
-        strength = f" ×{t.strength:.2f}" if t.strength != 1.0 else ""
-        layer_str = " · ".join(layers) if layers else "—"
+        strength = f" x{t.strength:.2f}" if t.strength != 1.0 else ""
+        layer_str = " . ".join(layers) if layers else "-"
         click.secho(f"    [{t.speaker[0]}] {t.content}", fg=theme.TEXT)
         click.secho(f"        {layer_str}{strength}", fg=theme.TEXT_DIM)
     if space.count > 20:
@@ -712,7 +474,7 @@ def _do_know() -> None:
 
     # Primitive stats
     stats = space.primitives.stats()
-    click.secho(f"  primitives: {stats['words']} words → {stats['roles']} roles, {stats['axioms']} axioms",
+    click.secho(f"  primitives: {stats['words']} words -> {stats['roles']} roles, {stats['axioms']} axioms",
                 fg=theme.TEXT_DIM)
 
 
@@ -755,7 +517,7 @@ def _dispatch(line: str) -> str | None:
 
 # ── Version ────────────────────────────────────────────────────────────────
 
-ADA_VERSION = "2.3.0"
+ADA_VERSION = "3.0.0"
 ADA_TAGLINE = "i don't guess."
 
 
@@ -772,47 +534,49 @@ def _print_banner():
     click.echo()
     click.secho(f"  {ADA_TAGLINE}", fg="bright_cyan", bold=True)
     click.echo()
-    space = _get_thought_space()
-    cog = _get_cognitive()
+    ada = _get_ada()
+    space = ada.thought_space
+    cog = ada.cognitive
     n_exemplars = sum(len(a._exemplars) for a in cog.agents.values())
     engine = _get_engine()
-    llm_str = f" · LLM ({engine.backend_name})" if engine else " · no LLM"
-    click.secho(f"  HDC · {space.count} thoughts · {space.primitives.count} primitives · {n_exemplars} cog{llm_str}", fg=theme.TEXT_DIM)
+    llm_str = f" . LLM ({engine.backend_name})" if engine else " . no LLM"
+    click.secho(f"  HDC . {space.count} thoughts . {space.primitives.count} primitives . {n_exemplars} cog{llm_str}", fg=theme.TEXT_DIM)
     click.echo()
 
 
 # ── REPL ────────────────────────────────────────────────────────────────────
 
 def _run_repl():
-    click.secho("  just talk — know · mind · dream · reset · quit", fg=theme.TEXT_DIM)
+    click.secho("  just talk -- know . mind . dream . reset . quit", fg=theme.TEXT_DIM)
     click.echo()
 
     _setup_history()
 
+    ada = _get_ada()
+
     # Start background reasoning
-    dream = _get_dream()
-    if _get_thought_space().count > 0:
-        dream.start()
+    if ada.thought_space.count > 0:
+        ada.start_dreaming()
 
     while True:
         # Show any insights Ada discovered
-        insights = dream.drain_insights()
+        insights = ada.drain_insights()
         if insights:
             _show_insights(insights)
 
         prompt_str = (
             click.style("  ", fg=theme.TEXT_DIM)
             + click.style("you", fg=theme.PRIMARY, bold=True)
-            + click.style(" › ", fg=theme.TEXT_DIM)
+            + click.style(" > ", fg=theme.TEXT_DIM)
         )
 
         try:
             line = input(prompt_str).strip()
         except (EOFError, KeyboardInterrupt):
             click.echo()
-            dream.stop()
+            ada.stop_dreaming()
             _save_history()
-            _save_memory()
+            ada.save(_MEMORY_DIR)
             break
 
         if not line:
@@ -821,13 +585,11 @@ def _run_repl():
         # Check for commands
         result = _dispatch(line)
         if result == "handled":
-            # Re-acquire dream ref — reset may have replaced it
-            dream = _get_dream()
             continue
         elif result == "quit":
-            dream.stop()
+            ada.stop_dreaming()
             _save_history()
-            _save_memory()
+            ada.save(_MEMORY_DIR)
             break
         elif result == "clear":
             click.clear()
@@ -867,9 +629,6 @@ def ada_command(version, action, text):
             _do_dream(args)
         return
 
-    # Load primitives
-    _ensure_primitives()
-
     if action:
         # Single message — pure HDC
         query_text = action + (" " + " ".join(text) if text else "")
@@ -896,9 +655,6 @@ def handle_ada(func: str | None, args: str = ""):
         if cmd == "dream":
             _do_dream(cmd_args)
             return
-
-    # Load primitives
-    _ensure_primitives()
 
     if full:
         _do_talk(full)

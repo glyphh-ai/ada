@@ -23,6 +23,9 @@ from .thought_glyph import ThoughtGlyphEncoder
 from .thought_space import ThoughtGlyphSpace, StoredThought, RecallResult
 from .glyph_cognitive import GlyphCognitiveLoop, GlyphReasoningChain
 from .glyph_dream import GlyphDreamLoop, Insight, InsightKind
+from .cognitive_glyph import CognitiveGlyph, Action, CognitiveState
+from .ada_conversation import Conversation
+from .ada_cognitive import AdaCognitive, CognitiveResult
 
 # Legacy (backward compat)
 from .atom import Atom, AtomForge
@@ -45,6 +48,12 @@ __all__ = [
     "GlyphDreamLoop",
     "Insight",
     "InsightKind",
+    "CognitiveGlyph",
+    "Action",
+    "CognitiveState",
+    "Conversation",
+    "AdaCognitive",
+    "CognitiveResult",
     # Legacy
     "Atom",
     "AtomForge",

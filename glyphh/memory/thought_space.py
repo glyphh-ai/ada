@@ -101,6 +101,7 @@ class ThoughtGlyphSpace:
         # Storage (in-memory for now)
         self._thoughts: dict[str, StoredThought] = {}
         self._absorbed_texts: set[str] = set()  # dedup
+        self._primitives_version: int = primitives.version  # track for re-encoding
 
     @property
     def primitives(self) -> PrimitiveSpace:
@@ -162,19 +163,24 @@ class ThoughtGlyphSpace:
         self,
         query: str,
         top_k: int = 5,
-        min_similarity: float = 0.05,
+        min_similarity: float = 0.01,
         speaker: str = "incoming",
     ) -> list[RecallResult]:
         """Search ALL long-term memory for thoughts matching a query.
 
-        Two-stage search:
-          1. Global cortex cosine for initial ranking
-          2. Layer-level drill-down for specificity
+        Three-signal search (following glyphh-code's layered re-ranking):
+          1. Content cosine — pure content word match (primary signal, 0.50)
+          2. Layer cosine — weighted per-layer comparison (structure, 0.35)
+          3. Structural overlap — Jaccard of activated segments (bonus, 0.15)
+
+        Content similarity is the dominant signal, like glyphh-code's
+        content layer (0.50 weight). This avoids the global cortex noise
+        problem where bundled vectors dilute specific word matches.
 
         Args:
             query: Natural language query.
             top_k: Max results to return.
-            min_similarity: Minimum global similarity threshold.
+            min_similarity: Minimum combined similarity threshold.
             speaker: Speaker context for the query encoding.
 
         Returns:
@@ -183,24 +189,16 @@ class ThoughtGlyphSpace:
         if not self._thoughts:
             return []
 
+        # Re-encode if primitives changed (crystallization added new compounds).
+        # Keeps content vectors in sync so query↔stored similarity is symmetric.
+        self._refresh_if_needed()
+
         query_glyph = self._encoder.encode_thought(query, speaker=speaker)
-        query_cortex = query_glyph.global_cortex.data
 
-        # Stage 1: global cortex scan
-        candidates: list[tuple[StoredThought, float]] = []
-        for stored in self._thoughts.values():
-            sim = float(cosine_similarity(query_cortex, stored.glyph.global_cortex.data))
-            if sim >= min_similarity:
-                candidates.append((stored, sim))
+        # ── Signal 1: Content vector (primary — like glyphh-code content layer)
+        query_content_vec = query_glyph.metadata.get("_content_vector")
+        query_activated = set(query_glyph.metadata.get("_activated_attrs", []))
 
-        if not candidates:
-            return []
-
-        # Stage 2: full hierarchy similarity
-        #
-        # Role-level cosine per activated segment, weighted by layer
-        # importance. Non-activated segments skipped. Missing segments
-        # contribute 0, penalizing structural mismatch.
         _LAYER_WEIGHTS = {
             "perspective": 0.25,
             "semantic": 0.30,
@@ -209,10 +207,18 @@ class ThoughtGlyphSpace:
             "direction": 0.10,
         }
 
-        query_activated = set(query_glyph.metadata.get("_activated_attrs", []))
-
         results: list[RecallResult] = []
-        for stored, global_sim in candidates:
+        for stored in self._thoughts.values():
+            # ── Content similarity ──────────────────────────────
+            content_sim = 0.0
+            stored_content_vec = stored.glyph.metadata.get("_content_vector")
+            if query_content_vec is not None and stored_content_vec is not None:
+                content_sim = float(cosine_similarity(
+                    query_content_vec, stored_content_vec,
+                ))
+                content_sim = max(0.0, content_sim)
+
+            # ── Layer similarity (weighted per-layer role cosine) ──
             stored_activated = set(
                 stored.glyph.metadata.get("_activated_attrs", [])
             )
@@ -250,7 +256,7 @@ class ThoughtGlyphSpace:
                             query_role_vec.data,
                             stored_role_vec.data,
                         ))
-                        layer_sim_sum += rsim
+                        layer_sim_sum += max(0.0, rsim)
 
                 if layer_seg_count > 0:
                     layer_sim = layer_sim_sum / layer_seg_count
@@ -260,16 +266,34 @@ class ThoughtGlyphSpace:
 
             role_sim = total_weighted_sim / total_weight if total_weight > 0 else 0.0
 
+            # ── Structural overlap (Jaccard of activated segments) ──
             seg_overlap = len(query_activated & stored_activated)
             seg_total = len(query_activated | stored_activated) or 1
             structural = seg_overlap / seg_total
 
-            combined = role_sim * 0.9 + structural * 0.1
-            results.append(RecallResult(
-                thought=stored,
-                global_similarity=combined,
-                layer_similarities=layer_sims,
-            ))
+            # ── Combine: adaptive weights (like glyphh-code re-ranking) ──
+            # When query has distinctive content words, content dominates.
+            # When query is all primitives ("who am i?"), lean on structure.
+            n_content = len(query_glyph.metadata.get("_content_words", []))
+            if n_content >= 2:
+                w_content, w_role, w_struct = 0.55, 0.30, 0.15
+            elif n_content == 1:
+                w_content, w_role, w_struct = 0.40, 0.40, 0.20
+            else:
+                w_content, w_role, w_struct = 0.10, 0.65, 0.25
+
+            combined = (
+                content_sim * w_content
+                + role_sim * w_role
+                + structural * w_struct
+            )
+
+            if combined >= min_similarity:
+                results.append(RecallResult(
+                    thought=stored,
+                    global_similarity=combined,
+                    layer_similarities=layer_sims,
+                ))
 
         results.sort(key=lambda r: r.global_similarity, reverse=True)
         return results[:top_k]
@@ -311,6 +335,35 @@ class ThoughtGlyphSpace:
 
         results.sort(key=lambda r: r.global_similarity, reverse=True)
         return results[:top_k]
+
+    # ── Primitive version tracking ─────────────────────────────────────────
+
+    def _refresh_if_needed(self) -> None:
+        """Re-encode all stored thoughts if primitives have changed.
+
+        Crystallization adds new compound primitives, which changes how
+        words are classified (content vs. structural). Without re-encoding,
+        stored thoughts have stale content vectors that don't match queries
+        encoded with the new primitives.
+
+        Cheap for in-memory storage (<50ms for ~100 thoughts at 2000D).
+        """
+        current_version = self._primitives.version
+        if current_version == self._primitives_version:
+            return
+
+        logger.info(
+            "Primitives changed (v%d → v%d), re-encoding %d thoughts",
+            self._primitives_version, current_version, len(self._thoughts),
+        )
+
+        for stored in self._thoughts.values():
+            new_glyph = self._encoder.encode_thought(
+                stored.content, speaker=stored.speaker, metadata=stored.metadata,
+            )
+            stored.glyph = new_glyph
+
+        self._primitives_version = current_version
 
     # ── Working set for DreamLoop ─────────────────────────────────────────
 

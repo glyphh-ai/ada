@@ -187,32 +187,32 @@ def run_hdc_test(space: ThoughtGlyphSpace, label: str) -> tuple[int, int]:
 
 
 def run_llm_test(space, cog, engine, label: str) -> tuple[int, int]:
-    """Run test queries with LLM synthesis + HDC recall."""
+    """Run test queries with LLM synthesis + confidence gate."""
     # Lazy import to avoid circular
-    from glyphh.cli.commands.ada import _build_llm_prompt, _recall_context
+    from glyphh.cli.commands.ada import _build_llm_prompt, _recall_with_gate
 
     passed = 0
     failed = []
 
     for query, expected, desc in TEST_QUERIES:
         state = cog.process(query)
-        recall = _recall_context(query)
-        prompt = _build_llm_prompt(query, state, recall)
+        gate_state, facts = _recall_with_gate(query)
+        prompt = _build_llm_prompt(query, state, gate_state, facts)
         resp = engine.generate(prompt, max_tokens=128, temperature=0.3, raw=True)
         resp = re.sub(r"</?think>\s*", "", resp).strip()
 
         if expected.lower() in resp.lower():
             passed += 1
         else:
-            failed.append((query, expected, resp[:80], state.winner, desc))
+            failed.append((query, expected, resp[:80], state.winner, desc, gate_state))
 
     total = len(TEST_QUERIES)
     print(f"  {label}: {passed}/{total} ({passed / total * 100:.0f}%)")
 
     if failed:
         print()
-        for query, expected, got, winner, desc in failed:
-            print(f"    MISS [{desc}]: \"{query}\" (route: {winner})")
+        for query, expected, got, winner, desc, gate in failed:
+            print(f"    MISS [{desc}]: \"{query}\" (route: {winner}, gate: {gate})")
             print(f"          expected \"{expected}\", got \"{got}\"")
 
     return passed, total

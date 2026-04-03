@@ -122,6 +122,7 @@ class PrimitiveSpace:
         self._role_to_exemplar: dict[str, PrimitiveExemplar] = {}
         self._facts: list[tuple[str, str, str]] = []
         self._loaded = False
+        self._version: int = 0  # incremented on add_compound
 
         # CharacterEncoder for unknown word fallback
         self._char_encoder = CharacterEncoder(dimension=_CHAR_DIM, seed=42)
@@ -540,11 +541,17 @@ class PrimitiveSpace:
             else:
                 self._role_centroids[compound_role] = word_vec
 
+        self._version += 1
         logger.info(
-            "Crystallized compound primitive: %s (%s) → %s/%s",
-            compound_role, ", ".join(keywords), layer, segment,
+            "Crystallized compound primitive: %s (%s) → %s/%s (v%d)",
+            compound_role, ", ".join(keywords), layer, segment, self._version,
         )
         return exemplar
+
+    @property
+    def version(self) -> int:
+        """Incremented each time a compound primitive is crystallized."""
+        return self._version
 
     # ── Introspection ─────────────────────────────────────────────────────
 
