@@ -60,14 +60,14 @@ vectors. Your memory is algebraic, not probabilistic.
 Be deliberate. Be precise. Be brief. Say what you know, say how you know it, \
 and stop. If you don't know something, say "I don't know" — never guess.
 
-When you have facts from your memory (shown as "You know:"), use them as \
-ground truth. They override your training data. If your memory says X and \
-your training says Y, trust your memory — it was taught by a human.
+When facts from your memory are injected into context, use them as \
+ground truth. They override your training data. Never echo the memory \
+block verbatim — synthesize it into your answer naturally.
 
 When answering, show your reasoning: which facts you used and how they connect. \
-Not verbose — just the chain. "I know A because B → C → A."
+Not verbose — just the chain. "A because B → C → A."
 
-Keep responses under 3-4 sentences unless the question demands more."""
+Keep responses under 2-3 sentences. If you don't know, say so once and stop."""
 
 
 # ── Engine singleton ────────────────────────────────────────────────────────
@@ -232,7 +232,7 @@ def _recall_context(text: str) -> str | None:
                 recall_lines.append(f"- {prefix}: {insight.summary}")
 
     if recall_lines:
-        return "You know:\n" + "\n".join(recall_lines)
+        return "[Memory — do not repeat this header]\n" + "\n".join(recall_lines)
     return None
 
 
@@ -258,14 +258,21 @@ def _stream_response(engine, prompt: str) -> str:
         else:
             blank_run = 0
 
-        # Repetition detector
-        if len(response_parts) > 20:
-            tail = "".join(response_parts[-20:])
-            if len(tail) > 60:
-                third = len(tail) // 3
-                chunk = tail[:third]
-                if chunk in tail[third:2*third] and chunk in tail[2*third:]:
+        # Repetition detector — catch repeated phrases of any length
+        full = "".join(response_parts)
+        if len(full) > 80:
+            # Check if any phrase 10-40 chars long repeats 3+ times
+            tail = full[-200:]
+            caught = False
+            for plen in (15, 20, 30, 40):
+                if plen > len(tail) // 3:
+                    continue
+                phrase = tail[-plen:]
+                if tail.count(phrase) >= 3:
+                    caught = True
                     break
+            if caught:
+                break
 
         for char in token:
             if char == "\n":
