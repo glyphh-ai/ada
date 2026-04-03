@@ -399,7 +399,8 @@ class CognitiveLoop:
         Returns formatted lines for injection into the LLM prompt.
         This replaces the string-matching hack.
         """
-        # Extract content words
+        # Extract content words — keep pronouns (my/your/i) since they
+        # distinguish "what is my name" from "what is your name"
         stop = {"what", "does", "did", "do", "is", "are", "the", "a", "an", "who",
                 "how", "why", "when", "where", "can", "will", "would", "should",
                 "tell", "me", "about", "for", "responsible"}
@@ -410,20 +411,24 @@ class CognitiveLoop:
             return []
 
         # Find atoms that match query words (including compound names)
-        matched_atoms = set()
+        # Score atoms by how many query words they match — prefer specific hits
+        atom_scores: dict[str, int] = {}
         for word in words:
             if self._forge.has(word):
-                matched_atoms.add(word)
+                atom_scores[word] = atom_scores.get(word, 0) + 1
             for atom in self._forge.all_atoms():
                 if atom.kind != "role" and word in atom.name:
-                    matched_atoms.add(atom.name)
+                    atom_scores[atom.name] = atom_scores.get(atom.name, 0) + 1
 
-        if not matched_atoms:
+        if not atom_scores:
             return []
 
-        # Reason from each matched atom
+        # Sort by match count — atoms matching more query words come first
+        ranked = sorted(atom_scores.items(), key=lambda x: -x[1])
+
+        # Reason from the best-matching atoms
         all_chains: list[ReasoningChain] = []
-        for atom_name in list(matched_atoms)[:4]:
+        for atom_name, _score in ranked[:4]:
             # Open reasoning — find everything connected
             chains = self.reason(atom_name, relation=None, top_k=5)
             all_chains.extend(chains)
