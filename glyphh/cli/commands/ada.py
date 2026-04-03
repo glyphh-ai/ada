@@ -241,7 +241,6 @@ def _recall_context(text: str) -> str | None:
 def _stream_response(engine, prompt: str) -> str:
     """Stream Ada's response with word-wrap, hang detection, and loop detection."""
     click.echo()
-    _dream_animate(0.5)
     click.secho("  ada", fg=theme.ACCENT, bold=True)
     click.echo("  ", nl=False)
     response_parts = []
@@ -674,52 +673,11 @@ def _dispatch(engine, conversation: Conversation, line: str) -> bool:
 ADA_VERSION = "2.1.1"
 ADA_TAGLINE = "i don't guess."
 
-# Dream display — animated spinner between turns, static line during input
+# Dream display
 
 
 # ── Banner & help ───────────────────────────────────────────────────────────
 
-_dream_tick = 0
-_dream_anim_stop = None
-
-
-def _dream_line() -> str | None:
-    """Static dream line — pattern shifts each call."""
-    global _dream_tick
-    from ..spinner import _FRAMES
-    if _dream_loop is None or not _dream_loop._running:
-        return None
-    n = 16
-    chars = "".join(_FRAMES[(_dream_tick + i * 2) % len(_FRAMES)] for i in range(n))
-    _dream_tick += 1
-    return chars
-
-
-def _dream_animate(duration: float = 1.5) -> None:
-    """Animated dream spinners on one line using \\r. Blocks for duration."""
-    from ..spinner import _FRAMES, _INTERVAL
-
-    if _dream_loop is None or not _dream_loop._running:
-        return
-
-    n_spinners = 16
-    offsets = [i * 2 for i in range(n_spinners)]
-    clr = "\033[36m"
-    rst = "\033[0m"
-
-    end = time.monotonic() + duration
-    tick = 0
-    while time.monotonic() < end:
-        chars = "".join(
-            _FRAMES[(tick + off) % len(_FRAMES)] for off in offsets
-        )
-        sys.stdout.write(f"\r  {clr}{chars}{rst} ")
-        sys.stdout.flush()
-        tick += 1
-        time.sleep(_INTERVAL)
-    # Clear spinner line
-    sys.stdout.write("\r\033[K")
-    sys.stdout.flush()
 
 
 def _print_banner(engine, elapsed: float):
@@ -785,9 +743,6 @@ def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
         insights = dream.drain_insights()
         if insights:
             _show_insights(insights)
-
-        # Animated dream spinners — runs between turns
-        _dream_animate(1.0)
 
         prompt_str = (
             click.style("  ", fg=theme.TEXT_DIM)

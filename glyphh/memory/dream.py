@@ -147,6 +147,7 @@ class DreamLoop:
 
         # Track what we've already discovered to avoid repeats
         self._seen_connections: set[tuple[str, str]] = set()
+        self._seen_insights: set[str] = set()  # dedup by summary
         self._convergence_map: dict[str, set[str]] = {}  # answer → set of starting atoms
 
         # Persistent insight log (not drained — used for recall)
@@ -232,7 +233,11 @@ class DreamLoop:
         return [i for i, _ in scored[:max_results]]
 
     def _surface(self, insight: Insight) -> None:
-        """Queue an insight for the user and log it for recall."""
+        """Queue an insight for the user and log it for recall. Deduplicates."""
+        if insight.summary in self._seen_insights:
+            return
+        self._seen_insights.add(insight.summary)
+
         # Log for recall (persistent)
         self._insight_log.append(insight)
         if len(self._insight_log) > self._max_log:
