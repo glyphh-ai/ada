@@ -196,14 +196,11 @@ class ThoughtGlyphSpace:
         if not candidates:
             return []
 
-        # Stage 2: full hierarchy similarity (pipedream pattern)
+        # Stage 2: full hierarchy similarity
         #
-        # Iterate layers → segments → roles, cosine at each ROLE level,
-        # weighted by layer importance. Only compare ACTIVATED segments
-        # (the SDK creates vectors for all configured segments, but only
-        # activated ones carry signal — non-activated are noise).
-        #
-        # Layer weights from THOUGHT_ENCODER_CONFIG:
+        # Role-level cosine per activated segment, weighted by layer
+        # importance. Non-activated segments skipped. Missing segments
+        # contribute 0, penalizing structural mismatch.
         _LAYER_WEIGHTS = {
             "perspective": 0.25,
             "semantic": 0.30,
@@ -212,17 +209,14 @@ class ThoughtGlyphSpace:
             "direction": 0.10,
         }
 
-        # Get query's activated attrs (layer_segment format)
         query_activated = set(query_glyph.metadata.get("_activated_attrs", []))
 
         results: list[RecallResult] = []
         for stored, global_sim in candidates:
-            # Get stored thought's activated attrs
             stored_activated = set(
                 stored.glyph.metadata.get("_activated_attrs", [])
             )
 
-            # Role-level weighted similarity — only activated segments
             layer_sims: dict[str, float] = {}
             total_weighted_sim = 0.0
             total_weight = 0.0
@@ -234,13 +228,14 @@ class ThoughtGlyphSpace:
                 layer_weight = _LAYER_WEIGHTS.get(layer_name, 0.1)
 
                 layer_sim_sum = 0.0
-                layer_weight_sum = 0.0
+                layer_seg_count = 0
 
                 for seg_name, query_seg in query_layer.segments.items():
                     attr_key = f"{layer_name}_{seg_name}"
-                    # Only compare segments activated in BOTH query and stored
                     if attr_key not in query_activated:
                         continue
+                    layer_seg_count += 1
+
                     if attr_key not in stored_activated:
                         continue
                     if seg_name not in stored_layer.segments:
@@ -251,27 +246,25 @@ class ThoughtGlyphSpace:
                         if role_name not in stored_seg.roles:
                             continue
                         stored_role_vec = stored_seg.roles[role_name]
-
                         rsim = float(cosine_similarity(
                             query_role_vec.data,
                             stored_role_vec.data,
                         ))
-                        layer_sim_sum += rsim * layer_weight
-                        layer_weight_sum += layer_weight
+                        layer_sim_sum += rsim
 
-                if layer_weight_sum > 0:
-                    layer_sims[layer_name] = layer_sim_sum / layer_weight_sum
-                    total_weighted_sim += layer_sim_sum
-                    total_weight += layer_weight_sum
+                if layer_seg_count > 0:
+                    layer_sim = layer_sim_sum / layer_seg_count
+                    layer_sims[layer_name] = layer_sim
+                    total_weighted_sim += layer_sim * layer_weight
+                    total_weight += layer_weight
 
             role_sim = total_weighted_sim / total_weight if total_weight > 0 else 0.0
 
-            # Segment-level structural overlap (activated segments only)
             seg_overlap = len(query_activated & stored_activated)
             seg_total = len(query_activated | stored_activated) or 1
             structural = seg_overlap / seg_total
 
-            combined = role_sim * 0.7 + structural * 0.3
+            combined = role_sim * 0.9 + structural * 0.1
             results.append(RecallResult(
                 thought=stored,
                 global_similarity=combined,

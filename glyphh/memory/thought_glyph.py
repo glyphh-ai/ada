@@ -34,14 +34,60 @@ from glyphh.encoder.base import Encoder
 logger = logging.getLogger(__name__)
 
 # ── Filler words — stripped before encoding ──────────────────────────────
+#
+# ONLY true articles. Everything else is either a primitive keyword
+# (structural signal) or a content word (semantic signal). Previous
+# filler set stripped 20+ primitive keywords: "not", "and", "or",
+# "but", "in", "at", "to", "for", "do", "it", "so", "if", "just",
+# etc. — killing structural differentiation.
 
-_FILLER = frozenset({
-    "a", "an", "the", "and", "or", "but", "of", "to", "for",
-    "in", "on", "at", "by", "with", "from", "so", "if", "then",
-    "that", "this", "it", "do", "does", "did", "just", "very",
-    "too", "also", "not", "don't", "doesn't", "didn't", "can't",
-    "won't", "isn't", "aren't", "wasn't", "weren't",
-})
+_FILLER = frozenset({"a", "an", "the"})
+
+# ── Contraction expansion ─────────────────────────────────────────────────
+#
+# Contractions hide primitive keywords: "don't" = "do" + "not" (action +
+# negation), "can't" = "can" + "not" (ability + negation). Expand them
+# so both structural signals fire.
+
+_CONTRACTIONS: dict[str, list[str]] = {
+    "don't":   ["do", "not"],
+    "doesn't": ["does", "not"],
+    "didn't":  ["did", "not"],
+    "can't":   ["can", "not"],
+    "won't":   ["will", "not"],
+    "couldn't": ["could", "not"],
+    "shouldn't": ["should", "not"],
+    "wouldn't": ["would", "not"],
+    "isn't":   ["is", "not"],
+    "aren't":  ["are", "not"],
+    "wasn't":  ["was", "not"],
+    "weren't": ["were", "not"],
+    "haven't": ["have", "not"],
+    "hasn't":  ["has", "not"],
+    "hadn't":  ["had", "not"],
+    "i'm":     ["i", "am"],
+    "i've":    ["i", "have"],
+    "i'll":    ["i", "will"],
+    "i'd":     ["i", "would"],
+    "you're":  ["you", "are"],
+    "you've":  ["you", "have"],
+    "you'll":  ["you", "will"],
+    "he's":    ["he", "is"],
+    "she's":   ["she", "is"],
+    "it's":    ["it", "is"],
+    "we're":   ["we", "are"],
+    "we've":   ["we", "have"],
+    "we'll":   ["we", "will"],
+    "they're": ["they", "are"],
+    "they've": ["they", "have"],
+    "they'll": ["they", "will"],
+    "that's":  ["that", "is"],
+    "there's": ["there", "is"],
+    "what's":  ["what", "is"],
+    "who's":   ["who", "is"],
+    "where's": ["where", "is"],
+    "let's":   ["let", "us"],
+}
 
 # ── Primitive role → (layer, segment) mapping ───────────────────────────
 #
@@ -278,19 +324,13 @@ class ThoughtGlyphEncoder:
         if not words:
             words = [text.lower().strip()]
 
-        # Classify each word as primitive (structural) or content.
+        # Classify words: primitive (structural) or content (semantic).
+        # Multi-role: "who" → question + identity. All fire their segments.
         #
-        # Multi-role matching: each word can activate MULTIPLE roles
-        # simultaneously. "who" → question + identity. "where" → question
-        # + location. All matched roles fire their respective layer/segments.
-        #
-        # Primitives contribute their ROLE NAME (not the surface word) to
-        # the segment. This is the generative core: "i", "my", "me" all
-        # contribute "self" to perspective_self — same vector regardless of
-        # which surface form triggered it.
-        #
-        # Content words (no role match) fill ALL activated segments.
-        segment_words: dict[str, list[str]] = {}  # attr_key → role names
+        # Segment encoding: role name + content words (for glyph hierarchy).
+        # Content words stored separately in metadata for direct matching
+        # in recall — avoids role name dilution in cosine similarity.
+        segment_roles: dict[str, str] = {}  # attr_key → single role name
         content_words: list[str] = []
 
         for word in words:
@@ -300,22 +340,23 @@ class ThoughtGlyphEncoder:
                     if role in ROLE_TO_LAYER_SEGMENT:
                         layer, segment = ROLE_TO_LAYER_SEGMENT[role]
                         attr_key = f"{layer}_{segment}"
-                        segment_words.setdefault(attr_key, []).append(role)
+                        if attr_key not in segment_roles:
+                            segment_roles[attr_key] = role
             else:
                 content_words.append(word)
 
-        # Content words are appended to every activated segment
+        # Each segment: role name + content words
         attributes: dict[str, str] = {}
-        for attr_key, prim_words in segment_words.items():
-            all_words = prim_words + content_words
+        for attr_key, role_name in segment_roles.items():
+            all_words = [role_name] + content_words
             attributes[attr_key] = " ".join(all_words)
 
-        # If no primitives matched, put content into a default segment
-        if not segment_words:
+        # If no primitives matched, put content into default segment
+        if not segment_roles:
             content_str = " ".join(content_words) if content_words else " ".join(words)
             attributes["semantic_category"] = content_str
 
-        # Always set direction — with content words for semantic signal
+        # Direction — with content words
         dir_key = f"direction_{speaker}"
         dir_value = " ".join(content_words) if content_words else " ".join(words)
         if dir_key not in attributes:
@@ -328,6 +369,7 @@ class ThoughtGlyphEncoder:
         stable_id = int(hashlib.md5(text.encode()).hexdigest()[:8], 16)
         meta = metadata.copy() if metadata else {}
         meta["_activated_attrs"] = sorted(attributes.keys())
+        meta["_content_words"] = content_words
 
         concept = Concept(
             name=f"thought_{stable_id:08d}",
@@ -339,10 +381,15 @@ class ThoughtGlyphEncoder:
         return glyph
 
     def _tokenize(self, text: str) -> list[str]:
-        """Tokenize text into lowercase words, stripping filler."""
+        """Tokenize text: expand contractions, strip filler (articles only)."""
         words = []
         for w in text.lower().split():
             w = w.strip("?.,!;:'\"()-")
-            if w and w not in _FILLER:
+            if not w or w in _FILLER:
+                continue
+            # Expand contractions: "don't" → ["do", "not"]
+            if w in _CONTRACTIONS:
+                words.extend(_CONTRACTIONS[w])
+            else:
                 words.append(w)
         return words

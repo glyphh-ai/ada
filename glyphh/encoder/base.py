@@ -793,15 +793,33 @@ class Encoder:
                 self._morphology_engine = None
         return self._morphology_engine
 
+    def _get_char_encoder(self):
+        """Lazily initialize CharacterEncoder for bag-of-words encoding."""
+        if not hasattr(self, '_char_encoder'):
+            from glyphh.linguistics.character import CharacterEncoder
+            self._char_encoder = CharacterEncoder(
+                dimension=self.dimension, seed=self.seed,
+            )
+        return self._char_encoder
+
     def _encode_bag_of_words(self, text: str) -> Vector:
         """
-        Encode a text value using bag-of-words bundling.
+        Encode a text value using bag-of-words bundling with character
+        n-gram word vectors.
 
-        Splits the text into individual words, normalizes morphology
-        (plurals, tenses, etc.) via MorphologyEngine, encodes each word
-        as a deterministic symbol via generate_symbol(), and bundles them.
-        Shared words between two bag-of-words vectors produce shared
-        signal in cosine similarity.
+        Each word is encoded via CharacterEncoder (positional char n-grams),
+        giving fuzzy matching between morphological variants, misspellings,
+        and partial matches:
+          - "wife" ↔ "wifes" ≈ 0.8 (shared n-grams)
+          - "love" ↔ "loves" ≈ 0.8
+          - "delete" ↔ "deploy" ≈ 0.3 (some prefix overlap)
+
+        This replaces the previous generate_symbol() approach where every
+        distinct string got a random orthogonal vector — "wife" and "wifes"
+        had cosine ≈ 0, breaking natural language matching entirely.
+
+        Morphology normalization is still applied as a first pass for cases
+        CharacterEncoder alone can't handle (irregular forms).
 
         Args:
             text: The text value to encode
@@ -837,7 +855,20 @@ class Encoder:
             if w not in seen:
                 seen.add(w)
                 unique_words.append(w)
-        word_vecs = [self.generate_symbol(w) for w in unique_words]
+
+        # CharacterEncoder: positional char n-grams give fuzzy matching
+        # between word variants. Same interface as generate_symbol (returns
+        # bipolar np.ndarray) but similarity degrades gracefully with
+        # character distance instead of being all-or-nothing.
+        char_enc = self._get_char_encoder()
+        word_vecs = [
+            Vector(
+                data=char_enc.encode_word(w),
+                dimension=self.dimension,
+                space_id=self.space_id,
+            )
+            for w in unique_words
+        ]
         return self.bundle(word_vecs)
     
     def encode_segment(

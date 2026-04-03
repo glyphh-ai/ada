@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 _LESSONS_DIR = Path(__file__).parent / "lessons"
 
 # Cosine threshold for exemplar Glyph matching.
-_MATCH_THRESHOLD = 0.15
+_MATCH_THRESHOLD = 0.30
 
 # CharacterEncoder for unknown word fallback (morphological matching).
 _CHAR_DIM = 2000

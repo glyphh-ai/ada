@@ -48,6 +48,7 @@ from glyphh.core.ops import bind, bundle, cosine_similarity
 from glyphh.memory.thought_space import ThoughtGlyphSpace, StoredThought, RecallResult
 from glyphh.memory.glyph_cognitive import GlyphCognitiveLoop, GlyphReasoningChain
 from glyphh.memory.primitives import PrimitiveSpace
+from glyphh.memory.cognitive_glyph import CognitiveGlyph, CognitiveState, Action
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,9 @@ class GlyphDreamLoop:
         self._paused = False
         self._lock = threading.Lock()
 
+        # CognitiveGlyph — optional, wired in by CLI
+        self._cognitive: CognitiveGlyph | None = None
+
         # Stats
         self._localized_cycles = 0
         self._deep_cycles = 0
@@ -203,6 +207,10 @@ class GlyphDreamLoop:
             "pathways": len(self._loop.library),
             "crystallization_candidates": len(self._crystallization_candidates),
         }
+
+    def set_cognitive(self, cognitive: CognitiveGlyph) -> None:
+        """Wire in the CognitiveGlyph for idle→dream transitions."""
+        self._cognitive = cognitive
 
     def notify_absorb(self) -> None:
         """Called when a new thought is absorbed — signals conversation activity."""
@@ -404,12 +412,26 @@ class GlyphDreamLoop:
                 time.sleep(5.0)
                 continue
 
+            # Check cognitive idle state — dream agent ramps up over time
+            # When CognitiveGlyph's dream agent fires, reduce deep interval
+            deep_wait = self._deep_interval
+            if self._cognitive is not None:
+                idle_state = self._cognitive.idle_tick()
+                if idle_state and idle_state.action == Action.DREAM:
+                    # Dream agent is active — Ada wants to reflect
+                    # Scale interval inversely with dream confidence
+                    deep_wait = max(5.0, self._deep_interval * (1.0 - idle_state.confidence))
+                    logger.debug(
+                        "Cognitive dream active (%.3f) — deep interval %.1fs",
+                        idle_state.confidence, deep_wait,
+                    )
+
             try:
                 self._deep_cycle()
             except Exception as e:
                 logger.error("Deep loop error: %s", e, exc_info=True)
             self._deep_cycles += 1
-            time.sleep(self._deep_interval)
+            time.sleep(deep_wait)
 
     def _deep_cycle(self) -> None:
         """One deep cycle: Survey → Connect → Generate → Crystallize → Prune."""
