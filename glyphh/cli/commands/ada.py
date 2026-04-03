@@ -1,18 +1,17 @@
 """
 CLI ada command — Ada cognitive agent with HDC memory + local LLM.
 
-glyphh ada                          Interactive REPL
-glyphh ada "what does chris do?"    Single query
-glyphh ada teach "chris builds glyphh"
-glyphh ada decompose "Alice manages payments. Bob manages infra."
-glyphh ada query "what does chris build?"
-glyphh ada infer chris uses
-glyphh ada facts
-glyphh ada atoms
-glyphh ada learn glyphh
-glyphh ada reset
+No commands. Just talk to her. She absorbs everything — sentence by
+sentence, like hearing speech. The DreamLoop decomposes what she heard
+into structured facts in the background.
+
+glyphh ada                    Interactive REPL
+glyphh ada "my name is chris" Single message
+glyphh ada reset              Clear all memory
+glyphh ada dream status       Background reasoning
 """
 
+import logging
 import os
 import re
 import sys
@@ -20,10 +19,18 @@ import time
 
 import click
 
+logger = logging.getLogger(__name__)
+
 from .. import theme
 from ..spinner import GridSpinner
-from glyphh.memory import ThoughtEncoder, ThoughtStore, AtomForge, FactStore, Teacher, CognitiveLoop
-from glyphh.memory.dream import DreamLoop, InsightKind
+
+# Glyph-based memory system
+from glyphh.memory.primitives import PrimitiveSpace
+from glyphh.memory.thought_glyph import ThoughtGlyphEncoder
+from glyphh.memory.thought_space import ThoughtGlyphSpace
+from glyphh.memory.glyph_cognitive import GlyphCognitiveLoop
+from glyphh.memory.glyph_dream import GlyphDreamLoop, InsightKind
+
 
 # ── Readline history ────────────────────────────────────────────────────────
 
@@ -60,12 +67,17 @@ vectors. Your memory is algebraic, not probabilistic.
 Be deliberate. Be precise. Be brief. Say what you know, say how you know it, \
 and stop. If you don't know something, say "I don't know" — never guess.
 
+Perspective rules — critical:
+- "the user said" means the human told you this. In their words: \
+"my" = the user's, "your" = yours (Ada's).
+- "Ada said" means you said this. In your words: \
+"my" = yours (Ada's), "your" = the user's.
+- You are Ada. The user is the human talking to you. Never confuse the two.
+- When asked "who are you?", answer about yourself (Ada), not the user.
+
 When facts from your memory are injected into context, use them as \
 ground truth. They override your training data. Never echo the memory \
 block verbatim — synthesize it into your answer naturally.
-
-When answering, show your reasoning: which facts you used and how they connect. \
-Not verbose — just the chain. "A because B → C → A."
 
 Keep responses under 2-3 sentences. If you don't know, say so once and stop."""
 
@@ -86,78 +98,76 @@ def _get_engine():
 # ── Memory singletons ─────────────────────────────────────────────────────
 
 _MEMORY_DIR = os.path.expanduser("~/.glyphh/memory")
-_thought_store = None
-_forge = None
-_fact_store = None
-_teacher = None
-_cognitive_loop = None
+_thought_space = None
+_glyph_loop = None
 _dream_loop = None
 
 
-def _get_memory() -> ThoughtStore:
-    global _thought_store
-    if _thought_store is None:
-        _thought_store = ThoughtStore(ThoughtEncoder())
-        _thought_store.load()
-    return _thought_store
+def _get_thought_space() -> ThoughtGlyphSpace:
+    """Get or create the ThoughtGlyphSpace."""
+    global _thought_space
+    if _thought_space is None:
+        _thought_space = ThoughtGlyphSpace()
+    return _thought_space
 
 
-def _get_forge() -> AtomForge:
-    global _forge
-    if _forge is None:
-        _forge = AtomForge(dimension=2048)
-        _forge.load(_MEMORY_DIR)
-    return _forge
+def _get_glyph_loop() -> GlyphCognitiveLoop:
+    """Get or create the GlyphCognitiveLoop."""
+    global _glyph_loop
+    if _glyph_loop is None:
+        _glyph_loop = GlyphCognitiveLoop(_get_thought_space())
+    return _glyph_loop
 
 
-def _get_facts() -> FactStore:
-    global _fact_store
-    if _fact_store is None:
-        _fact_store = FactStore(_get_forge())
-        _fact_store.load(_MEMORY_DIR)
-    return _fact_store
-
-
-def _get_teacher() -> Teacher:
-    global _teacher
-    if _teacher is None:
-        _teacher = Teacher(_get_forge(), _get_facts())
-    return _teacher
-
-
-def _get_loop() -> CognitiveLoop:
-    global _cognitive_loop
-    if _cognitive_loop is None:
-        _cognitive_loop = CognitiveLoop(_get_forge(), _get_facts())
-        _cognitive_loop.load(_MEMORY_DIR)
-    return _cognitive_loop
-
-
-def _get_dream() -> DreamLoop:
+def _get_dream() -> GlyphDreamLoop:
+    """Get or create the dual GlyphDreamLoop."""
     global _dream_loop
     if _dream_loop is None:
-        _dream_loop = DreamLoop(
-            _get_loop(), _get_forge(), _get_facts(),
-            cycle_budget=8,
-            cycle_interval=3.0,
+        _dream_loop = GlyphDreamLoop(
+            _get_glyph_loop(),
+            localized_interval=3.0,
+            deep_interval=30.0,
         )
     return _dream_loop
 
 
-def _nudge_dream() -> None:
-    """Auto-start background reasoning if facts exist and dream isn't running."""
-    if _dream_loop is not None and not _dream_loop.is_running and _get_facts().count > 0:
-        _dream_loop.start()
-
-
 def _save_memory() -> None:
-    """Save all persistent state to disk."""
-    if _forge is not None:
-        _forge.save(_MEMORY_DIR)
-    if _fact_store is not None:
-        _fact_store.save(_MEMORY_DIR)
-    if _cognitive_loop is not None:
-        _cognitive_loop.save(_MEMORY_DIR)
+    """Save persistent state to disk."""
+    # ThoughtGlyphSpace is in-memory for now (pgvector later)
+    # Save glyph activation pathways
+    if _glyph_loop is not None:
+        _glyph_loop.save(_MEMORY_DIR)
+
+
+# ── Sentence splitting ─────────────────────────────────────────────────────
+
+def _ensure_primitives() -> None:
+    """Ensure ThoughtGlyphSpace is initialized (loads primitives automatically)."""
+    space = _get_thought_space()
+    if not space.primitives.loaded:
+        logger.warning("Primitives failed to load — Ada's wiring may be incomplete")
+
+
+_SENTENCE_RE = re.compile(r'(?<=[.!?])\s+')
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Split text into sentences. Returns at least one entry."""
+    sentences = [s.strip() for s in _SENTENCE_RE.split(text) if s.strip()]
+    return sentences or [text.strip()]
+
+
+# ── Absorption — store each sentence as a thought ──────────────────────────
+
+def _absorb(text: str, speaker: str = "incoming") -> None:
+    """Absorb input sentence by sentence as thought glyphs."""
+    space = _get_thought_space()
+    sentences = _split_sentences(text)
+
+    for sentence in sentences:
+        if len(sentence) < 2:
+            continue
+        space.absorb(sentence, speaker=speaker)
 
 
 # ── Conversation history ────────────────────────────────────────────────────
@@ -165,24 +175,31 @@ def _save_memory() -> None:
 class Conversation:
     """Manages multi-turn conversation as a ChatML prompt."""
 
-    def __init__(self, system_prompt: str, max_turns: int = 20):
+    def __init__(self, system_prompt: str, max_turns: int = 3):
         self._system = system_prompt
         self._turns: list[tuple[str, str]] = []
         self._max_turns = max_turns
 
     def build_prompt(self, user_msg: str, recall: str | None = None) -> str:
-        system = self._system
-        if recall:
-            system = f"{self._system}\n\n{recall}"
-        parts = [f"<|im_start|>system\n{system}<|im_end|>"]
+        parts = [f"<|im_start|>system\n{self._system}<|im_end|>"]
         for user, assistant in self._turns:
             parts.append(f"<|im_start|>user\n{user}<|im_end|>")
             parts.append(f"<|im_start|>assistant\n{assistant}<|im_end|>")
+        # Inject recall right before the current message — keeps facts
+        # close to where the LLM generates, not buried in system prompt
+        if recall:
+            parts.append(f"<|im_start|>system\n{recall}<|im_end|>")
         parts.append(f"<|im_start|>user\n{user_msg}<|im_end|>")
         parts.append("<|im_start|>assistant\n<think>\n</think>\n\n")
         return "\n".join(parts)
 
     def add_turn(self, user_msg: str, assistant_msg: str) -> None:
+        # Don't store identical responses — prevents the LLM from
+        # locking into a pattern by seeing its own repeated output
+        if self._turns and self._turns[-1][1] == assistant_msg:
+            # Replace the last turn instead of stacking duplicates
+            self._turns[-1] = (user_msg, assistant_msg)
+            return
         self._turns.append((user_msg, assistant_msg))
         if len(self._turns) > self._max_turns:
             self._turns = self._turns[-self._max_turns:]
@@ -195,25 +212,14 @@ class Conversation:
         return len(self._turns)
 
 
-# ── Fact recall ─────────────────────────────────────────────────────────────
+# ── Recall context ─────────────────────────────────────────────────────────
 
 def _recall_context(text: str) -> str | None:
-    """Build a 'You know:' block — driven by CognitiveLoop reasoning + dream insights."""
-    recall_lines = []
+    """Build memory context — glyph reasoning + dream insights."""
+    # GlyphCognitiveLoop does multi-hop recall with pattern matching
+    recall_str = _get_glyph_loop().recall(text, top_k=5)
 
-    # Flat text memories
-    memory = _get_memory()
-    memories = memory.recall(text, top_k=2, min_score=0.10)
-    for t, _score in memories:
-        recall_lines.append(f"- {t.content}")
-
-    # Structured reasoning via CognitiveLoop
-    if _get_facts().count > 0:
-        loop = _get_loop()
-        chain_lines = loop.recall(text)
-        recall_lines.extend(chain_lines)
-
-    # Dream insights — things Ada figured out while thinking in the background
+    # Dream insights from background reasoning
     if _dream_loop is not None:
         stop = {"what", "does", "did", "do", "is", "are", "the", "a", "an", "who",
                 "how", "why", "when", "where", "can", "will", "would", "should",
@@ -229,10 +235,10 @@ def _recall_context(text: str) -> str | None:
                     InsightKind.CONVERGENCE: "Multiple paths confirm",
                     InsightKind.QUESTION: "I'm unsure about",
                 }.get(insight.kind, "I noticed")
-                recall_lines.append(f"- {prefix}: {insight.summary}")
+                recall_str += f"\n- {prefix}: {insight.summary}"
 
-    if recall_lines:
-        return "[Memory — do not repeat this header]\n" + "\n".join(recall_lines)
+    if recall_str:
+        return "[Memory — do not repeat this header]\n" + recall_str
     return None
 
 
@@ -261,7 +267,6 @@ def _stream_response(engine, prompt: str) -> str:
         # Repetition detector — catch repeated phrases of any length
         full = "".join(response_parts)
         if len(full) > 80:
-            # Check if any phrase 10-40 chars long repeats 3+ times
             tail = full[-200:]
             caught = False
             for plen in (15, 20, 30, 40):
@@ -293,257 +298,52 @@ def _stream_response(engine, prompt: str) -> str:
     return "".join(response_parts).strip()
 
 
-# ── Core actions ────────────────────────────────────────────────────────────
+# ── Core action — everything is conversation ───────────────────────────────
 
-def _do_ask(engine, conversation: Conversation, text: str) -> str:
-    """Ask Ada a question — recall facts, stream response, auto-learn."""
+def _do_talk(engine, conversation: Conversation, text: str) -> str:
+    """Absorb what was said, recall what's relevant, respond."""
+    # Absorb — every sentence becomes a thought
+    _absorb(text)
+
+    # Recall — pull relevant thoughts + facts + insights
     recall = _recall_context(text)
+
+    # Respond
     prompt = conversation.build_prompt(text, recall=recall)
     response = _stream_response(engine, prompt)
     conversation.add_turn(text, response)
+
+    # Save periodically
+    _save_memory()
+
+    # Nudge dream loop
+    dream = _get_dream()
+    dream.notify_absorb()
+    if not dream._running and _get_thought_space().count > 0:
+        dream.start()
+
     return response
 
 
-def _do_teach(text: str) -> None:
-    """Teach Ada a simple fact: subject verb object."""
-    if not text:
-        click.secho("  Usage: teach <fact>  e.g. teach chris builds glyphh", fg=theme.TEXT_DIM)
-        return
-    teacher = _get_teacher()
-    facts = teacher.parse(text)
-    if facts:
-        for f in facts:
-            click.secho(f"  ◆ {f.subject} → {f.relation} → {f.object}", fg=theme.ACCENT)
-        _save_memory()
-        _nudge_dream()
-    else:
-        click.secho("  Couldn't parse. Try: subject verb object", fg=theme.TEXT_DIM)
-    click.secho(f"  ({_get_facts().count} facts, {_get_forge().count} atoms)", fg=theme.TEXT_DIM)
+# ── Commands (only dream and reset) ────────────────────────────────────────
 
-
-def _do_decompose(engine, text: str) -> None:
-    """LLM decomposes complex text into atomic facts."""
-    if not text:
-        click.secho("  Usage: decompose <paragraph>", fg=theme.TEXT_DIM)
-        return
-    with GridSpinner(prefix="  ada> "):
-        teacher = _get_teacher()
-        learned = teacher.decompose(text, engine)
-    if learned:
-        for f in learned:
-            click.secho(f"  ◆ {f.subject} → {f.relation} → {f.object}", fg=theme.ACCENT)
-        _save_memory()
-        _nudge_dream()
-        click.secho(f"  ({_get_facts().count} facts, {_get_forge().count} atoms)", fg=theme.TEXT_DIM)
-    else:
-        click.secho("  Couldn't extract facts from that.", fg=theme.TEXT_DIM)
-
-
-# ── Query parser ────────────────────────────────────────────────────────────
-
-_Q_WHAT_DOES_VERB = re.compile(
-    r"^what\s+(?:does|did|do|will)\s+(\w+)\s+(\w+)\??$", re.IGNORECASE)
-_Q_WHAT_IS = re.compile(
-    r"^what\s+is\s+(?:a\s+|an\s+|the\s+)?(\w+)\??$", re.IGNORECASE)
-_Q_WHAT_DOES = re.compile(
-    r"^what\s+(?:does|did|do|will|can)\s+(\w+)\s+do\??$", re.IGNORECASE)
-_Q_WHO_VERB = re.compile(
-    r"^who\s+(\w+)\s+(\w+)\??$", re.IGNORECASE)
-
-
-def _parse_query(text: str) -> dict:
-    """Parse NL query into subject/relation/object/mode."""
-    text = text.strip().rstrip("?").strip()
-
-    m = _Q_WHAT_DOES.match(text + "?")
-    if m:
-        return {"subject": m.group(1).lower(), "relation": None, "object": None, "mode": "all"}
-
-    m = _Q_WHAT_DOES_VERB.match(text + "?")
-    if m:
-        return {"subject": m.group(1).lower(), "relation": m.group(2).lower(), "object": None, "mode": "object"}
-
-    m = _Q_WHAT_IS.match(text + "?")
-    if m:
-        return {"subject": m.group(1).lower(), "relation": "is", "object": None, "mode": "object"}
-
-    m = _Q_WHO_VERB.match(text + "?")
-    if m:
-        rel = m.group(1).lower()
-        if rel.endswith("s") and not rel.endswith("ss"):
-            rel = rel[:-1]
-        return {"subject": None, "relation": rel, "object": m.group(2).lower(), "mode": "subject"}
-
-    parts = text.split()
-    if len(parts) >= 2:
-        return {"subject": parts[0].lower(), "relation": parts[1].lower(), "object": None, "mode": "object"}
-    elif len(parts) == 1:
-        return {"subject": parts[0].lower(), "relation": None, "object": None, "mode": "all"}
-    return {"subject": None, "relation": None, "object": None, "mode": "all"}
-
-
-def _do_query(text: str) -> None:
-    """Query Ada's HDC memory."""
-    if not text:
-        click.secho("  Usage: query chris builds  or  query what does chris build?", fg=theme.TEXT_DIM)
-        return
-
-    q = _parse_query(text)
-    facts = _get_facts()
-    found = False
-
-    if q["mode"] == "object" and q["subject"] and q["relation"]:
-        results = facts.query_object(q["subject"], q["relation"])
-        if results:
-            click.echo()
-            for name, score in results:
-                click.secho(f"  {q['subject']} {q['relation']} → {name}  [{score:.2f}]", fg=theme.TEXT)
-            found = True
-
-    elif q["mode"] == "subject" and q["relation"] and q["object"]:
-        results = facts.query(relation=q["relation"], object=q["object"], top_k=5)
-        if results:
-            click.echo()
-            for fact, score in results:
-                click.secho(f"  {fact.subject} → {fact.relation} → {fact.object}  [{score:.2f}]", fg=theme.TEXT)
-            found = True
-
-    if not found and q["subject"]:
-        results = facts.query(subject=q["subject"], top_k=10)
-        if results:
-            click.echo()
-            for fact, score in results:
-                click.secho(f"  {fact.subject} → {fact.relation} → {fact.object}  [{score:.2f}]", fg=theme.TEXT)
-            found = True
-
-    if not found:
-        click.secho("  No results.", fg=theme.TEXT_DIM)
-
-
-def _do_infer(text: str) -> None:
-    """Transitive inference via CognitiveLoop."""
-    if not text:
-        click.secho("  Usage: infer chris uses", fg=theme.TEXT_DIM)
-        return
-    parts = text.split()
-    if len(parts) < 2:
-        click.secho("  Need subject and relation.", fg=theme.TEXT_DIM)
-        return
-
-    loop = _get_loop()
-    chains = loop.reason(parts[0].lower(), parts[1].lower())
-    if chains:
-        click.echo()
-        for chain in chains:
-            flag = " ⚡" if chain.pattern_boost > 0 else ""
-            warn = " ⚠ contradicted" if chain.contradicted else ""
-            click.secho(
-                f"  {parts[0]} {parts[1]} → {chain.answer}  "
-                f"[{chain.confidence:.3f}]{flag}{warn}",
-                fg=theme.ACCENT,
-            )
-            for subj, rel, obj, conf in chain.hops:
-                click.secho(f"    {subj} → {rel} → {obj}  [{conf:.2f}]", fg=theme.TEXT_DIM)
-            if chain.pathway_name:
-                click.secho(f"    pattern: {chain.pathway_name}", fg=theme.TEXT_DIM)
-    else:
-        click.secho("  No inferences found.", fg=theme.TEXT_DIM)
-
-
-def _do_confirm(text: str) -> None:
-    """Confirm the last reasoning chain — Hebbian strengthening."""
-    loop = _get_loop()
-    loop.confirm()
-    _save_memory()
-    click.secho("  ◆ pathway strengthened", fg=theme.ACCENT)
-
-
-def _do_reject(text: str) -> None:
-    """Reject the last reasoning chain — weaken pathway."""
-    loop = _get_loop()
-    loop.reject()
-    _save_memory()
-    click.secho("  ◆ pathway weakened", fg=theme.TEXT_DIM)
-
-
-def _do_facts() -> None:
-    """Show all stored facts."""
-    facts = _get_facts().facts
-    if not facts:
-        click.secho("  No facts. Use teach or decompose to add some.", fg=theme.TEXT_DIM)
-    else:
-        click.echo()
-        for f in facts:
-            click.secho(f"  {f.subject} → {f.relation} → {f.object}  [{f.strength:.2f}]", fg=theme.TEXT)
-
-
-def _do_atoms() -> None:
-    """Show all known atoms."""
-    atoms = _get_forge().all_atoms()
-    entity_atoms = [a for a in atoms if a.kind != "role"]
-    if not entity_atoms:
-        click.secho("  No atoms yet.", fg=theme.TEXT_DIM)
-    else:
-        click.echo()
-        for a in entity_atoms[:30]:
-            click.secho(f"  {a.name:24s}  {a.kind:10s}  str={a.strength:.2f}", fg=theme.TEXT)
-        if len(entity_atoms) > 30:
-            click.secho(f"  ... and {len(entity_atoms) - 30} more", fg=theme.TEXT_DIM)
-
-
-def _do_learn(name: str) -> None:
-    """Load a .teach lesson file."""
-    if not name:
-        click.secho("  Usage: learn <lesson>  e.g. learn glyphh", fg=theme.TEXT_DIM)
-        from pathlib import Path
-        lessons_dir = Path(__file__).parent.parent.parent / "memory" / "lessons"
-        if lessons_dir.exists():
-            available = [p.stem for p in lessons_dir.glob("*.teach")]
-            if available:
-                click.secho(f"  Available: {', '.join(available)}", fg=theme.TEXT_DIM)
-        return
-    teacher = _get_teacher()
-    try:
-        if os.path.isfile(name) or os.path.isfile(name + ".teach"):
-            path = name if os.path.isfile(name) else name + ".teach"
-            result = teacher.learn_file(path)
-        else:
-            result = teacher.learn_lesson(name)
-        parts = []
-        if result.atoms_created:
-            parts.append(f"{result.atoms_created} sounds")
-        if result.pairs_created:
-            parts.append(f"{result.pairs_created} pairs")
-        if result.compositions_created:
-            parts.append(f"{result.compositions_created} words")
-        if result.facts_created:
-            parts.append(f"{result.facts_created} facts")
-        click.secho(f"  ◆ {', '.join(parts) or 'nothing new'}", fg=theme.ACCENT)
-        click.secho(f"  ({_get_facts().count} facts, {_get_forge().count} atoms)", fg=theme.TEXT_DIM)
-        _save_memory()
-    except FileNotFoundError as e:
-        click.secho(f"  {e}", fg=theme.TEXT_DIM)
-
-
-def _do_reset() -> None:
-    """Clear all of Ada's memory — facts, atoms, pathways, thoughts."""
+def _do_reset(conversation: Conversation | None = None) -> None:
+    """Clear all of Ada's memory — thought glyphs + pathways."""
     import shutil
-    # Stop dreaming first
-    global _dream_loop
+    global _dream_loop, _thought_space, _glyph_loop
     if _dream_loop is not None:
         _dream_loop.stop()
         _dream_loop = None
-    # Wipe all persistent storage (thoughts, atoms, facts, pathways all live here)
+    if _thought_space is not None:
+        _thought_space.clear()
+        _thought_space = None
+    _glyph_loop = None
+    # Clear disk state (legacy + pathways)
     path = os.path.expanduser("~/.glyphh/memory")
     if os.path.exists(path):
         shutil.rmtree(path)
-    # Reset all singletons
-    global _forge, _fact_store, _teacher, _cognitive_loop, _thought_store
-    _forge = None
-    _fact_store = None
-    _teacher = None
-    _cognitive_loop = None
-    _thought_store = None
+    if conversation is not None:
+        conversation.clear()
     click.secho("  Memory cleared.", fg=theme.ACCENT)
 
 
@@ -563,21 +363,18 @@ def _do_dream(text: str) -> None:
         dream.stop()
         click.secho("  ◆ background reasoning stopped", fg=theme.ACCENT)
 
-    elif cmd == "pause":
-        dream.pause()
-        click.secho("  ◆ paused", fg=theme.TEXT_DIM)
-
-    elif cmd == "resume":
-        dream.resume()
-        click.secho("  ◆ resumed", fg=theme.ACCENT)
-
     elif cmd in ("status", "stats"):
         stats = dream.stats
+        space = _get_thought_space()
         click.echo()
-        click.secho(f"  running:  {'yes' if dream.is_running else 'no'}", fg=theme.TEXT)
-        click.secho(f"  cycles:   {stats['cycles']}", fg=theme.TEXT)
-        click.secho(f"  chains:   {stats['total_chains']}", fg=theme.TEXT)
-        click.secho(f"  insights: {stats['total_insights']} ({stats['queued_insights']} pending)", fg=theme.TEXT)
+        click.secho(f"  running:    {'yes' if dream.is_running else 'no'}", fg=theme.TEXT)
+        click.secho(f"  localized:  {stats['localized_cycles']} cycles (REM)", fg=theme.TEXT)
+        click.secho(f"  deep:       {stats['deep_cycles']} cycles (slow-wave)", fg=theme.TEXT)
+        click.secho(f"  chains:     {stats['total_chains']}", fg=theme.TEXT)
+        click.secho(f"  insights:   {stats['total_insights']} ({stats['queued_insights']} pending)", fg=theme.TEXT)
+        click.secho(f"  thoughts:   {stats['thoughts']} glyphs", fg=theme.TEXT)
+        click.secho(f"  pathways:   {stats['pathways']} activation patterns", fg=theme.TEXT)
+        click.secho(f"  primitives: {space.primitives.count} words → {len(space.primitives.all_roles())} roles", fg=theme.TEXT)
 
     elif cmd in ("insights", "thoughts"):
         insights = dream.drain_insights()
@@ -596,7 +393,7 @@ def _do_dream(text: str) -> None:
                 click.secho(f"  ? {gap.summary}", fg="yellow")
 
     else:
-        click.secho("  dream [start|stop|pause|resume|status|insights|gaps]", fg=theme.TEXT_DIM)
+        click.secho("  dream [start|stop|status|insights|gaps]", fg=theme.TEXT_DIM)
 
 
 _INSIGHT_ICONS = {
@@ -604,6 +401,7 @@ _INSIGHT_ICONS = {
     InsightKind.CONTRADICTION: ("⚠", "yellow"),
     InsightKind.CONVERGENCE: ("◆", "cyan"),
     InsightKind.QUESTION: ("?", "yellow"),
+    InsightKind.CRYSTALLIZATION: ("✦", "bright_cyan"),
 }
 
 
@@ -622,73 +420,80 @@ def _show_insights(insights, max_show: int = 5) -> None:
     click.echo()
 
 
-# ── Command dispatch ────────────────────────────────────────────────────────
+def _do_know() -> None:
+    """Show what Ada knows — thought glyphs with layer structure."""
+    space = _get_thought_space()
 
-COMMANDS = {
-    "teach":     lambda engine, args: _do_teach(args),
-    "decompose": lambda engine, args: _do_decompose(engine, args),
-    "query":     lambda engine, args: _do_query(args),
-    "infer":     lambda engine, args: _do_infer(args),
-    "yes":       lambda engine, args: _do_confirm(args),
-    "no":        lambda engine, args: _do_reject(args),
-    "facts":     lambda engine, args: _do_facts(),
-    "atoms":     lambda engine, args: _do_atoms(),
-    "learn":     lambda engine, args: _do_learn(args),
-    "reset":     lambda engine, args: _do_reset(),
-    "dream":     lambda engine, args: _do_dream(args),
-}
+    click.echo()
+
+    if space.count == 0:
+        click.secho("  Ada knows nothing yet.", fg=theme.TEXT_DIM)
+        return
+
+    # Thought glyphs (strongest first)
+    click.secho(f"  thought glyphs ({space.count}):", fg=theme.ACCENT, bold=True)
+    for t in space.all_thoughts()[:20]:
+        # Show content + activated layers
+        layers = []
+        for layer_name, layer in t.glyph.layers.items():
+            active_segs = [s for s in layer.segments.values()
+                           if hasattr(s, 'roles') and s.roles]
+            if active_segs:
+                seg_names = [s.name for s in active_segs]
+                layers.append(f"{layer_name}/{','.join(seg_names)}")
+        strength = f" ×{t.strength:.2f}" if t.strength != 1.0 else ""
+        layer_str = " · ".join(layers) if layers else "—"
+        click.secho(f"    [{t.speaker[0]}] {t.content}", fg=theme.TEXT)
+        click.secho(f"        {layer_str}{strength}", fg=theme.TEXT_DIM)
+    if space.count > 20:
+        click.secho(f"    ... and {space.count - 20} more", fg=theme.TEXT_DIM)
+    click.echo()
+
+    # Primitive stats
+    stats = space.primitives.stats()
+    click.secho(f"  primitives: {stats['words']} words → {stats['roles']} roles, {stats['axioms']} axioms",
+                fg=theme.TEXT_DIM)
 
 
-def _dispatch(engine, conversation: Conversation, line: str) -> bool:
-    """Dispatch a line to the right handler. Returns True if handled."""
+# ── Dispatch — only dream, reset, quit ──────────────────────────────────────
+
+def _dispatch(line: str, conversation: Conversation | None = None) -> str | None:
+    """Check for the few remaining commands. Returns 'handled', 'quit', or None."""
     parts = line.split(None, 1)
     cmd = parts[0].lower().lstrip("/")
     args = parts[1] if len(parts) > 1 else ""
 
-    if cmd in COMMANDS:
-        COMMANDS[cmd](engine, args)
+    if cmd == "dream":
+        _do_dream(args)
         click.echo()
-        return True
+        return "handled"
+
+    if cmd == "reset":
+        _do_reset(conversation)
+        click.echo()
+        return "handled"
+
+    if cmd in ("know", "memory", "facts"):
+        _do_know()
+        click.echo()
+        return "handled"
 
     if cmd in ("quit", "exit", "q"):
-        return False  # signal exit
+        return "quit"
 
-    if cmd in ("clear", "home"):
-        conversation.clear()
-        click.clear()
-        _print_banner(engine, 0)
-        return True
+    if cmd == "clear":
+        return "clear"
 
-    if cmd == "history":
-        if not conversation.turn_count:
-            click.secho("  No conversation history.", fg=theme.TEXT_DIM)
-        else:
-            click.echo()
-            for i, (u, a) in enumerate(conversation._turns, 1):
-                click.secho(f"  [{i}] You: {u[:60]}{'...' if len(u) > 60 else ''}", fg=theme.TEXT_DIM)
-                click.secho(f"      Ada: {a[:60]}{'...' if len(a) > 60 else ''}", fg=theme.TEXT_DIM)
-        click.echo()
-        return True
-
-    if cmd == "help":
-        _print_help()
-        return True
-
-    # Not a command — treat as conversation
     return None
 
 
 # ── Version ────────────────────────────────────────────────────────────────
 
-ADA_VERSION = "2.1.1"
+ADA_VERSION = "2.2.0"
 ADA_TAGLINE = "i don't guess."
 
-# Dream display
 
-
-# ── Banner & help ───────────────────────────────────────────────────────────
-
-
+# ── Banner ─────────────────────────────────────────────────────────────────
 
 def _print_banner(engine, elapsed: float):
     click.echo()
@@ -701,55 +506,30 @@ def _print_banner(engine, elapsed: float):
     click.echo()
     click.secho(f"  {ADA_TAGLINE}", fg="bright_cyan", bold=True)
     click.echo()
-    facts_count = _get_facts().count
-    atoms_count = _get_forge().count
+    space = _get_thought_space()
     parts = []
     if elapsed > 0:
         parts.append(f"{engine.backend_name} · {elapsed:.1f}s")
-    parts.append(f"{facts_count} facts · {atoms_count} atoms")
+    parts.append(f"{space.count} thoughts · {space.primitives.count} primitives")
     click.secho(f"  {' · '.join(parts)}", fg=theme.TEXT_DIM)
-    click.echo()
-
-
-def _print_help():
-    click.echo()
-    click.secho("  Commands:", fg=theme.TEXT_DIM)
-    click.secho("    teach <fact>            Teach a simple fact (subject verb object)", fg=theme.TEXT)
-    click.secho("    decompose <text>        LLM breaks text into atomic facts", fg=theme.TEXT)
-    click.secho("    query <question>        Query HDC memory", fg=theme.TEXT)
-    click.secho("    infer <subject> <rel>   Reason via cognitive loop + pathways", fg=theme.TEXT)
-    click.secho("    yes                     Confirm last inference (strengthen pathway)", fg=theme.TEXT)
-    click.secho("    no                      Reject last inference (weaken pathway)", fg=theme.TEXT)
-    click.secho("    dream [start|stop|status|insights|gaps]", fg=theme.TEXT)
-    click.secho("                            Background reasoning — Ada thinks on her own", fg=theme.TEXT)
-    click.secho("    learn <lesson>          Load a .teach lesson file", fg=theme.TEXT)
-    click.secho("    facts                   Show all stored facts", fg=theme.TEXT)
-    click.secho("    atoms                   Show all known atoms", fg=theme.TEXT)
-    click.secho("    reset                   Clear all memory", fg=theme.TEXT)
-    click.secho("    clear                   Clear conversation", fg=theme.TEXT)
-    click.secho("    quit                    Exit", fg=theme.TEXT)
-    click.echo()
-    click.secho("  Or just talk — anything else goes to Ada.", fg=theme.TEXT_DIM)
     click.echo()
 
 
 # ── REPL ────────────────────────────────────────────────────────────────────
 
 def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
-    click.secho("  teach · decompose · query · infer · dream · yes/no · learn · help · quit", fg=theme.TEXT_DIM)
+    click.secho("  just talk — know · dream · reset · quit", fg=theme.TEXT_DIM)
     click.echo()
 
     _setup_history()
 
-    # Start background reasoning if there are facts to think about
+    # Start background reasoning
     dream = _get_dream()
-    if _get_facts().count > 0:
+    if _get_thought_space().count > 0:
         dream.start()
-        click.secho("  ◆ background reasoning active", fg=theme.TEXT_DIM)
-        click.echo()
 
     while True:
-        # Show any insights Ada discovered while we were busy
+        # Show any insights Ada discovered
         insights = dream.drain_insights()
         if insights:
             _show_insights(insights)
@@ -766,36 +546,31 @@ def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
             click.echo()
             dream.stop()
             _save_history()
-            _get_memory().save()
             _save_memory()
             break
-
-        dream.pause()
 
         if not line:
-            dream.resume()
             continue
 
-        # Resume dreaming while we process the command
-        dream.resume()
-
-        if line.startswith("!"):
-            import subprocess
-            subprocess.run(line[1:].strip(), shell=True)
+        # Check for commands
+        result = _dispatch(line, conversation)
+        if result == "handled":
+            # Re-acquire dream ref — reset may have replaced it
+            dream = _get_dream()
             continue
-
-        result = _dispatch(engine, conversation, line)
-
-        if result is None:
-            # Not a command — ask Ada
-            _do_ask(engine, conversation, line)
-        elif result is False:
-            # quit
+        elif result == "quit":
             dream.stop()
             _save_history()
-            _get_memory().save()
             _save_memory()
             break
+        elif result == "clear":
+            conversation.clear()
+            click.clear()
+            _print_banner(engine, 0)
+            continue
+
+        # Everything else is conversation
+        _do_talk(engine, conversation, line)
 
 
 # ── CLI command ─────────────────────────────────────────────────────────────
@@ -805,46 +580,42 @@ def _run_repl(engine, conversation: Conversation, load_time: float = 0.0):
 @click.argument("action", required=False)
 @click.argument("text", required=False, nargs=-1)
 def ada_command(version, action, text):
-    """Ada — when your llm can't afford to be wrong.
+    """Ada — i don't guess.
 
     \b
     Examples:
-      glyphh ada                                      Interactive REPL
-      glyphh ada "what does chris do?"                 Ask a question
-      glyphh ada teach "chris builds glyphh"           Teach a fact
-      glyphh ada decompose "Alice manages payments."   LLM decomposition
-      glyphh ada query "what does chris build?"        Query memory
-      glyphh ada infer chris uses                      Transitive inference
-      glyphh ada dream status                          Background reasoning
-      glyphh ada learn glyphh                          Load a lesson
-      glyphh ada facts                                 Show all facts
-      glyphh ada reset                                 Clear memory
+      glyphh ada                           Interactive REPL
+      glyphh ada "my name is chris"        Talk to Ada
+      glyphh ada dream status              Background reasoning
+      glyphh ada reset                     Clear all memory
     """
     if version:
         click.echo(f"Ada v{ADA_VERSION}")
         return
+
     engine = _get_engine()
     conversation = Conversation(ADA_SYSTEM_PROMPT)
 
-    # If action is a known command, run it directly (no REPL)
-    if action and action.lower() in COMMANDS:
+    # Direct commands (no LLM needed)
+    if action and action.lower() in ("reset", "dream"):
         args = " ".join(text) if text else ""
-        # Only load LLM for commands that need it
-        if action.lower() in ("decompose",):
-            with GridSpinner(prefix="  ada> "):
-                engine._ensure_loaded()
-        COMMANDS[action.lower()](engine, args)
+        if action.lower() == "reset":
+            _do_reset()
+        else:
+            _do_dream(args)
         return
 
-    # Load LLM with spinner
+    # Load primitives on first boot
+    _ensure_primitives()
+
+    # Load LLM
     with GridSpinner(prefix="  ada> "):
         engine._ensure_loaded()
-    start = time.monotonic()
 
     if action:
-        # Single query: "glyphh ada 'what does chris do?'"
+        # Single message
         query_text = action + (" " + " ".join(text) if text else "")
-        _do_ask(engine, conversation, query_text)
+        _do_talk(engine, conversation, query_text)
     else:
         _print_banner(engine, 0)
         _run_repl(engine, conversation)
@@ -859,24 +630,27 @@ def handle_ada(func: str | None, args: str = ""):
 
     full = " ".join(p for p in [func, args] if p).strip()
 
-    # Check if it's a known command
+    # Direct commands
     if full:
         parts = full.split(None, 1)
         cmd = parts[0].lower()
         cmd_args = parts[1] if len(parts) > 1 else ""
-        if cmd in COMMANDS:
-            if cmd in ("decompose",):
-                with GridSpinner(prefix="  ada> "):
-                    engine._ensure_loaded()
-            COMMANDS[cmd](engine, cmd_args)
+        if cmd == "reset":
+            _do_reset()
+            return
+        if cmd == "dream":
+            _do_dream(cmd_args)
             return
 
-    # Otherwise load LLM and either query or REPL
+    # Load primitives on first boot
+    _ensure_primitives()
+
+    # Load LLM
     with GridSpinner(prefix="  ada> "):
         engine._ensure_loaded()
 
     if full:
-        _do_ask(engine, conversation, full)
+        _do_talk(engine, conversation, full)
     else:
         _print_banner(engine, 0)
         _run_repl(engine, conversation)

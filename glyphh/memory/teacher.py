@@ -58,10 +58,10 @@ logger = logging.getLogger(__name__)
 
 # Patterns for basic declarative sentences (no LLM needed)
 _IS_A_PATTERN = re.compile(
-    r"^(.+?)\s+(?:is\s+(?:a|an|the)\s+)(.+)$", re.IGNORECASE
+    r"^(.+?)\s+(?:(?:is|am|are)\s+(?:a|an|the)\s+)(.+)$", re.IGNORECASE
 )
 _IS_PATTERN = re.compile(
-    r"^(.+?)\s+is\s+(.+)$", re.IGNORECASE
+    r"^(.+?)\s+(?:is|am|are)\s+(.+)$", re.IGNORECASE
 )
 _SVO_PATTERN = re.compile(
     r"^(.+?)\s+(builds?|creates?|uses?|has|makes?|runs?|likes?|loves?|hates?|knows?|wants?|needs?|owns?|writes?|reads?|teaches?|learns?|helps?|affects?|influences?|controls?|manages?|contains?|includes?|requires?|provides?|supports?|enables?|produces?|generates?|processes?|handles?|stores?|tracks?|monitors?|deploys?|encodes?|decodes?|binds?|bundles?)\s+(.+)$",
@@ -80,11 +80,15 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", "_", text.strip().lower())
 
 
-def _parse_simple(text: str) -> list[dict[str, str]]:
-    """Try to parse a simple declarative sentence into role dicts.
+def _split_clauses(text: str) -> list[str]:
+    """Split compound sentences on 'and'/'but' into individual clauses."""
+    # Only split on " and " / " but " that join independent clauses
+    parts = re.split(r"\s+(?:and|but)\s+", text, flags=re.IGNORECASE)
+    return [p.strip() for p in parts if p.strip()]
 
-    Returns a list of role dicts, or empty list if unparseable.
-    """
+
+def _parse_one(text: str) -> list[dict[str, str]]:
+    """Try to parse a single clause into role dicts."""
     text = text.strip().rstrip(".")
 
     # "Chris's name is Christopher"
@@ -137,6 +141,19 @@ def _parse_simple(text: str) -> list[dict[str, str]]:
         }]
 
     return []
+
+
+def _parse_simple(text: str) -> list[dict[str, str]]:
+    """Try to parse a declarative sentence into role dicts.
+
+    Handles compound sentences ("X is Y and Z is W") by splitting
+    on conjunctions first, then parsing each clause.
+    """
+    clauses = _split_clauses(text)
+    results = []
+    for clause in clauses:
+        results.extend(_parse_one(clause))
+    return results
 
 
 # ── LLM decomposition prompt ──────────────────────────────────────────────

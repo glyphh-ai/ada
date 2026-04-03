@@ -10,6 +10,8 @@ from glyphh.memory.atom import AtomForge
 from glyphh.memory.binding import FactStore
 from glyphh.memory.cognitive import CognitiveLoop
 from glyphh.memory.dream import DreamLoop, InsightKind, Insight
+from glyphh.memory.thought import ThoughtEncoder
+from glyphh.memory.store import ThoughtStore
 
 
 @pytest.fixture
@@ -235,6 +237,115 @@ class TestGuardrails:
 
         # User-confirmed pattern should be above cap
         assert loop.library._pathways[name].strength > 0.5
+
+
+class TestThoughtAbsorption:
+
+    def test_absorbs_co_occurrences(self, system):
+        """DreamLoop should create atoms and co-occurrence facts from thoughts."""
+        forge, facts, loop = system
+        thoughts = ThoughtStore(ThoughtEncoder(), storage_dir="/tmp/test_dream_thoughts")
+
+        thoughts.remember("Chris is a developer")
+        thoughts.remember("Chris likes coffee")
+
+        dream = DreamLoop(
+            loop, forge, facts,
+            thoughts=thoughts,
+            cycle_interval=0.1,
+        )
+        dream.start()
+        time.sleep(1.0)
+        dream.stop()
+
+        # Atoms should exist for content words
+        assert forge.has("chris")
+        assert forge.has("developer")
+        assert forge.has("coffee")
+        # Co-occurrence facts should exist
+        assert facts.count >= 2
+        assert dream.stats["thoughts_absorbed"] == 2
+
+    def test_repetition_strengthens(self, system):
+        """Same co-occurrence in multiple thoughts should reinforce."""
+        forge, facts, loop = system
+        thoughts = ThoughtStore(ThoughtEncoder(), storage_dir="/tmp/test_dream_thoughts2")
+
+        # "chris" and "name" co-occur twice
+        thoughts.remember("my name is chris")
+        thoughts.remember("chris is my name")
+
+        dream = DreamLoop(
+            loop, forge, facts,
+            thoughts=thoughts,
+            cycle_interval=0.1,
+        )
+        dream.start()
+        time.sleep(1.0)
+        dream.stop()
+
+        assert forge.has("chris")
+        assert forge.has("name")
+        assert dream.stats["thoughts_absorbed"] == 2
+
+    def test_does_not_reprocess_thoughts(self, system):
+        """Already-absorbed thoughts should not be processed again."""
+        forge, facts, loop = system
+        thoughts = ThoughtStore(ThoughtEncoder(), storage_dir="/tmp/test_dream_thoughts3")
+
+        thoughts.remember("Alice manages payments")
+
+        dream = DreamLoop(
+            loop, forge, facts,
+            thoughts=thoughts,
+            cycle_interval=0.1,
+        )
+        dream.start()
+        time.sleep(0.5)
+        dream.stop()
+
+        fact_count_after_first = facts.count
+
+        # Run again — same thought should not create duplicate facts
+        dream.start()
+        time.sleep(0.5)
+        dream.stop()
+
+        assert facts.count == fact_count_after_first
+        assert dream.stats["thoughts_absorbed"] == 1
+
+    def test_works_without_thought_store(self, system):
+        """DreamLoop should work fine if no ThoughtStore is provided."""
+        forge, facts, loop = system
+        facts.teach("alpha", "is", "new")
+
+        dream = DreamLoop(loop, forge, facts, cycle_interval=0.1)
+        dream.start()
+        time.sleep(0.5)
+        dream.stop()
+
+        assert dream.stats["cycles"] >= 1
+        assert dream.stats["thoughts_absorbed"] == 0
+
+    def test_single_word_gets_direction(self, system):
+        """Even single-word thoughts get tagged with direction."""
+        forge, facts, loop = system
+        thoughts = ThoughtStore(ThoughtEncoder(), storage_dir="/tmp/test_dream_thoughts4")
+
+        thoughts.remember("hello", metadata={"speaker": "incoming"})
+
+        dream = DreamLoop(
+            loop, forge, facts,
+            thoughts=thoughts,
+            cycle_interval=0.1,
+        )
+        dream.start()
+        time.sleep(0.5)
+        dream.stop()
+
+        assert dream.stats["thoughts_absorbed"] == 1
+        # "hello" + "incoming" = 2 words, creates a co-occurrence
+        assert forge.has("hello")
 
 
 class TestEmptyMemory:

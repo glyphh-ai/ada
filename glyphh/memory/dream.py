@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from .atom import AtomForge
     from .binding import FactStore
     from .cognitive import CognitiveLoop, ReasoningChain
+    from .store import ThoughtStore
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,8 @@ class _CuriosityState:
 class DreamLoop:
     """Ada's background reasoning — continuous thought with guardrails.
 
-    The loop cycles through three phases:
+    The loop cycles through four phases:
+      0. Absorb   — decompose unprocessed thoughts into structured facts
       1. Wander   — pick curious atoms, reason between them
       2. Hunt     — look for contradictions and gaps
       3. Converge — check if different paths reach the same conclusion
@@ -104,6 +106,7 @@ class DreamLoop:
         loop:           CognitiveLoop for reasoning.
         forge:          AtomForge for atom access.
         facts:          FactStore for fact access.
+        thoughts:       ThoughtStore for absorbing raw thoughts (optional).
         cycle_budget:   Max reasoning chains per cycle.
         cycle_interval: Seconds between thinking cycles.
         max_insights:   Max queued insights before oldest are dropped.
@@ -118,6 +121,7 @@ class DreamLoop:
         loop: CognitiveLoop,
         forge: AtomForge,
         facts: FactStore,
+        thoughts: ThoughtStore | None = None,
         cycle_budget: int = 10,
         cycle_interval: float = 2.0,
         max_insights: int = 50,
@@ -126,6 +130,7 @@ class DreamLoop:
         self._loop = loop
         self._forge = forge
         self._facts = facts
+        self._thoughts = thoughts
 
         self._cycle_budget = cycle_budget
         self._cycle_interval = cycle_interval
@@ -134,6 +139,13 @@ class DreamLoop:
 
         self._insights: Queue[Insight] = Queue(maxsize=max_insights)
         self._curiosity: dict[str, _CuriosityState] = {}
+
+        # Track which thoughts have been decomposed into facts
+        self._absorbed_ids: set[str] = set()
+
+        # Content atoms — atoms from user thoughts, not primitives.
+        # The DreamLoop only reasons over these. Primitives are substrate.
+        self._content_atoms: set[str] = set()
 
         self._thread: threading.Thread | None = None
         self._running = False
@@ -196,6 +208,8 @@ class DreamLoop:
             "total_insights": self._total_insights,
             "queued_insights": self._insights.qsize(),
             "atoms_tracked": len(self._curiosity),
+            "content_atoms": len(self._content_atoms),
+            "thoughts_absorbed": len(self._absorbed_ids),
         }
 
     # ── Insight access ────────────────────────────────────────────────
@@ -275,7 +289,18 @@ class DreamLoop:
 
     def _think_cycle(self) -> None:
         """One cycle of background reasoning."""
-        atoms = self._forge.all_atoms()
+        # Phase 0: Absorb — decompose unprocessed thoughts into facts
+        with self._lock:
+            self._absorb_thoughts()
+
+        # Only reason over content atoms — primitives are substrate, not content.
+        # If no ThoughtStore is wired in, treat all non-role atoms as content.
+        all_atoms = self._forge.all_atoms()
+        if self._content_atoms:
+            atoms = [a for a in all_atoms
+                     if a.kind != "role" and a.name in self._content_atoms]
+        else:
+            atoms = [a for a in all_atoms if a.kind != "role"]
         if len(atoms) < 2:
             return
 
@@ -298,6 +323,124 @@ class DreamLoop:
         # Phase 3: Converge — check for convergent conclusions
         with self._lock:
             self._check_convergence(converge_budget)
+
+    # ── Phase 0: Thought absorption ──────────────────────────────────
+
+    # Filler words that carry no structural or content meaning
+    _FILLER = frozenset({
+        "a", "an", "the", "to", "of", "in", "on", "at", "by", "from",
+        "as", "into", "than", "just", "too", "also", "there", "here",
+        "really", "very", "quite", "well", "oh", "um", "uh", "ok",
+    })
+
+    def _absorb_thoughts(self) -> None:
+        """Absorb unprocessed thoughts using primitive role bindings.
+
+        Every word matters. Structural words (is, my, has) carry role
+        information from the primitives layer. Content words carry meaning.
+        The absorption binds them together using the roles the primitives
+        established — not flat co-occurrence, but structured association.
+
+          "my name is chris" →
+            my  has primitive role SELF
+            is  has primitive role EQUALS
+            name, chris are content
+          → bind: self with name, name equals chris
+        """
+        if self._thoughts is None:
+            return
+
+        absorbed = 0
+        for thought in self._thoughts.thoughts:
+            if thought.id in self._absorbed_ids:
+                continue
+            self._absorbed_ids.add(thought.id)
+
+            words = [
+                w.lower().strip("?.,!;:'\"")
+                for w in thought.content.split()
+            ]
+            words = [w for w in words if w and w not in self._FILLER]
+
+            # Tag with direction — who said this?
+            speaker = thought.metadata.get("speaker", "incoming") if thought.metadata else "incoming"
+            words.append(speaker)  # "incoming" or "outgoing" becomes part of the thought
+
+            if len(words) < 2:
+                continue
+
+            # Separate structural words (have primitive roles) from content
+            structural = []  # (word, role) — words bound to primitive roles
+            content = []     # words that ARE the content
+
+            for word in words:
+                # Check if this word has a primitive role binding
+                role = self._get_primitive_role(word)
+                if role:
+                    structural.append((word, role))
+                else:
+                    content.append(word)
+
+            # Create atoms for all content words and track them
+            for word in content:
+                self._forge.atom(word)
+                self._content_atoms.add(word)
+
+            if not content:
+                continue
+
+            # Bind content words to each other via structural roles
+            # "my name is chris" → structural: [(my, self), (is, equals)]
+            #                      content: [name, chris]
+            # → self with name, name equals chris
+            for word, role in structural:
+                for c in content:
+                    self._facts.teach(role, "with", c, source="absorbed")
+
+            # Adjacent content words are directly associated
+            for i in range(len(content) - 1):
+                if content[i] != content[i + 1]:
+                    self._facts.teach(
+                        content[i], "with", content[i + 1], source="absorbed"
+                    )
+
+            # If structural words indicate equivalence, bind the content
+            roles_present = {role for _, role in structural}
+            if "equals" in roles_present and len(content) >= 2:
+                # "X is Y" — first content equals last content
+                self._facts.teach(
+                    content[0], "equals", content[-1], source="absorbed"
+                )
+
+            absorbed += 1
+
+        if absorbed:
+            logger.info("Absorbed %d thoughts into atoms", absorbed)
+
+    def _get_primitive_role(self, word: str) -> str | None:
+        """Check if a word has a primitive role binding (from 00_primitives).
+
+        Returns the role name if the strongest associated_with connection
+        is significantly stronger than the next best (clear signal, not noise).
+        """
+        connections = self._facts._get_connections(word)
+        best_role = None
+        best_score = 0.0
+        second_score = 0.0
+
+        for obj, relation, score in connections:
+            if relation == "associated_with":
+                if score > best_score:
+                    second_score = best_score
+                    best_score = score
+                    best_role = obj
+                elif score > second_score and obj != best_role:
+                    second_score = score
+
+        # The top hit must be meaningfully stronger than noise
+        if best_role and best_score > 0.05 and best_score > second_score * 1.5:
+            return best_role
+        return None
 
     # ── Curiosity ─────────────────────────────────────────────────────
 

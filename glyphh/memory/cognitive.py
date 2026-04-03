@@ -401,11 +401,14 @@ class CognitiveLoop:
         """
         # Extract content words — keep pronouns (my/your/i) since they
         # distinguish "what is my name" from "what is your name"
-        stop = {"what", "does", "did", "do", "is", "are", "the", "a", "an", "who",
-                "how", "why", "when", "where", "can", "will", "would", "should",
-                "tell", "me", "about", "for", "responsible"}
+        stop = {"what", "does", "did", "do", "is", "am", "are", "the", "a", "an",
+                "who", "how", "why", "when", "where", "can", "will", "would",
+                "should", "tell", "me", "about", "for", "responsible"}
+        # Keep pronouns (i/my/your) — they distinguish "my name" from "your name"
+        pronouns = {"i", "my", "your", "you", "her", "his", "our", "we"}
         words = [w.lower().strip("?.,!") for w in text.split()
-                 if w.lower().strip("?.,!") not in stop and len(w) > 1]
+                 if w.lower().strip("?.,!") not in stop
+                 and (len(w) > 1 or w.lower() in pronouns)]
 
         if not words:
             return []

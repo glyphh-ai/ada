@@ -208,7 +208,7 @@ class AtomForge:
             return []
 
         results = []
-        for atom in self._atoms.values():
+        for atom in list(self._atoms.values()):  # snapshot — thread-safe
             sim = float(cosine_similarity(vector, atom.vector))
             if sim >= min_sim:
                 results.append((atom, sim))

@@ -102,3 +102,4 @@ include = ["glyphh*", "domains*", "api*", "infrastructure*", "shared*", "scripts
 "glyphh.docker" = ["docker-compose.yml", "init.sql"]
 "glyphh.intent" = ["data/*.json", "data/*.jsonl", "data/packs/*.json"]
 "glyphh.state" = ["data/*.json", "data/packs/*.json"]
+"glyphh.memory" = ["lessons/*.jsonl"]

@@ -107,8 +107,13 @@ from .linguistics import LinguisticIntentParser
 # LLM — local language model inference (Ada's voice)
 from .llm import LLMEngine
 
-# Memory — Ada's lifelong thought storage, structured facts, and inference
-from .memory import Thought, ThoughtEncoder, ThoughtStore, Atom, AtomForge, Fact, FactStore, Teacher
+# Memory — Ada's thought glyph system + legacy types
+from .memory import (
+    PrimitiveSpace, ThoughtGlyphEncoder, ThoughtGlyphSpace,
+    GlyphCognitiveLoop, GlyphDreamLoop,
+    # Legacy
+    Thought, ThoughtEncoder, ThoughtStore, Atom, AtomForge, Fact, FactStore, Teacher,
+)
 
 from .visualization import (
     visualize_similarity_graph,
@@ -227,7 +232,13 @@ __all__ = [
     "LinguisticIntentParser",
     # LLM Engine (Ada's voice)
     "LLMEngine",
-    # Memory (Ada's lifelong thought store + structured reasoning)
+    # Memory — Thought Glyph system
+    "PrimitiveSpace",
+    "ThoughtGlyphEncoder",
+    "ThoughtGlyphSpace",
+    "GlyphCognitiveLoop",
+    "GlyphDreamLoop",
+    # Memory — legacy
     "Thought",
     "ThoughtEncoder",
     "ThoughtStore",
