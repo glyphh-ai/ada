@@ -187,6 +187,7 @@ class CognitiveState:
 # These are the SEED patterns — crystallization adds more over time.
 
 _QUESTION_EXEMPLARS = [
+    # wh- questions
     "what is my name",
     "who am i",
     "who are you",
@@ -195,8 +196,6 @@ _QUESTION_EXEMPLARS = [
     "how old is jake",
     "what does sarah do",
     "what is your favorite",
-    "do you remember",
-    "can you tell me",
     "what happened yesterday",
     "when did i say that",
     "why do you think that",
@@ -208,30 +207,57 @@ _QUESTION_EXEMPLARS = [
     "where do we live",
     "who is sarah",
     "who is jake",
-    "who is emma",
     "who works there",
+    # yes/no questions (does/is/are/do/has/have/can/will)
+    "does he have children",
+    "does she like pizza",
+    "does he work there",
+    "is he married",
+    "is she a doctor",
+    "are they related",
+    "do i have a dog",
+    "do you know my name",
+    "do you remember what i said",
+    "has he been there before",
+    "have i told you about that",
+    "can you tell me",
+    "can she come",
+    "will it rain tomorrow",
 ]
 
 _STATEMENT_EXEMPLARS = [
+    # identity / names
     "my name is chris",
-    "i like pizza",
+    "his name is jake",
+    "her name is sarah",
+    "she is a mom",
+    "he is a doctor",
+    # relationships
     "my wife is named sarah",
-    "i work as a software engineer",
-    "we live in austin texas",
-    "jake is seven years old",
-    "i went to the store yesterday",
-    "my favorite color is blue",
+    "chris is married to brandi",
+    "they have two kids",
     "i have two kids",
-    "sarah works at the hospital",
-    "i am tired today",
-    "i feel happy when i code",
-    "the sky is blue",
-    "dogs are mammals",
-    "i learned python ten years ago",
+    # preferences
+    "i like pizza",
     "jake loves minecraft",
     "emma likes drawing",
     "he enjoys playing soccer",
     "she prefers reading books",
+    # facts / work / life
+    "i work as a software engineer",
+    "sarah works at the hospital",
+    "we live in austin texas",
+    "jake is seven years old",
+    "i went to the store yesterday",
+    "my favorite color is blue",
+    "the sky is blue",
+    "dogs are mammals",
+    "i learned python ten years ago",
+    # third-person facts
+    "he is a software engineer",
+    "she is a film student",
+    "he works at the office",
+    "she lives in new york",
 ]
 
 _EMOTION_EXEMPLARS = [
