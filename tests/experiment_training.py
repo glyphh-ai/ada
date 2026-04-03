@@ -1,13 +1,15 @@
 """
-Experiment: Training Ada at scale.
+Experiment: Full Ada pipeline — CognitiveGlyph + HDC Recall + LLM Synthesis.
 
-Feed Ada diverse natural conversation — identity, preferences, facts,
-emotions, stories, questions — and measure how well the HDC recall
-differentiates after DreamLoop crystallization.
+Tests the complete 3-tier architecture:
+  Tier 1: CognitiveGlyph routes input (question/statement/emotion/etc.)
+  Tier 2: HDC thought space recalls relevant memories
+  Tier 3: LLM synthesizes natural language response
 
-This is the test bed for the hypothesis: primitives provide structural
-axes, content words provide semantic signal, and the DreamLoop derives
-compound concepts through crystallization. No LLM needed.
+Three test modes:
+  - HDC only: raw recall, no LLM (baseline)
+  - LLM + HDC: cognitive routing + recall + LLM synthesis
+  - Cognitive routing: does the right agent fire?
 
 Run:
     cd glyphh-runtime
@@ -15,17 +17,19 @@ Run:
 """
 
 import logging
+import re
 import time
-
-from glyphh.memory.thought_space import ThoughtGlyphSpace
-from glyphh.memory.glyph_cognitive import GlyphCognitiveLoop
-from glyphh.memory.glyph_dream import GlyphDreamLoop, InsightKind
 
 logging.basicConfig(
     level=logging.WARNING,
     format="%(asctime)s %(name)s %(message)s",
     datefmt="%H:%M:%S",
 )
+
+from glyphh.memory.thought_space import ThoughtGlyphSpace
+from glyphh.memory.glyph_cognitive import GlyphCognitiveLoop
+from glyphh.memory.glyph_dream import GlyphDreamLoop, InsightKind
+from glyphh.memory.cognitive_glyph import CognitiveGlyph, Action
 
 
 # ── Training data: natural conversation ─────────────────────────────────
@@ -101,7 +105,7 @@ TRAINING_DATA = [
 # ── Test queries with expected top-1 content ─────────────────────────────
 
 TEST_QUERIES = [
-    # (query, expected substring in top-1 result, description)
+    # (query, expected substring in answer, description)
     ("who am i?", "chris", "identity - user"),
     ("who are you?", "ada", "identity - ada"),
     ("what is my name?", "chris", "name - user"),
@@ -126,6 +130,27 @@ TEST_QUERIES = [
     ("what makes me happy?", "code", "emotion - trigger"),
 ]
 
+# ── Cognitive routing tests ──────────────────────────────────────────────
+
+ROUTING_TESTS = [
+    # (text, expected_action)
+    ("my name is chris", Action.STORE),
+    ("i like pizza", Action.STORE),
+    ("jake loves minecraft", Action.STORE),
+    ("what is my name?", Action.RECALL),
+    ("who am i?", Action.RECALL),
+    ("where do i live?", Action.RECALL),
+    ("i am so happy right now", Action.FEEL),
+    ("i love you", Action.FEEL),
+    ("that makes me worried", Action.FEEL),
+    ("no that is wrong", Action.CONTRADICT),
+    ("you are mistaken", Action.CONTRADICT),
+    ("i never said that", Action.CONTRADICT),
+    ("tell me more about that", Action.WONDER),
+    ("that is interesting", Action.WONDER),
+    ("i wonder why", Action.WONDER),
+]
+
 
 def print_section(title: str) -> None:
     print(f"\n{'=' * 70}")
@@ -133,10 +158,10 @@ def print_section(title: str) -> None:
     print(f"{'=' * 70}\n")
 
 
-def run_test(space: ThoughtGlyphSpace, label: str) -> tuple[int, int]:
-    """Run test queries and return (passed, total)."""
+def run_hdc_test(space: ThoughtGlyphSpace, label: str) -> tuple[int, int]:
+    """Run test queries with pure HDC recall (no LLM)."""
     passed = 0
-    failed_details = []
+    failed = []
 
     for query, expected, desc in TEST_QUERIES:
         results = space.recall(query, top_k=3, speaker="incoming")
@@ -145,60 +170,128 @@ def run_test(space: ThoughtGlyphSpace, label: str) -> tuple[int, int]:
             if expected.lower() in top:
                 passed += 1
             else:
-                failed_details.append((query, expected, top, results[0].global_similarity))
+                failed.append((query, expected, top, results[0].global_similarity, desc))
         else:
-            failed_details.append((query, expected, "(no results)", 0.0))
+            failed.append((query, expected, "(no results)", 0.0, desc))
 
     total = len(TEST_QUERIES)
-    pct = passed / total * 100
+    print(f"  {label}: {passed}/{total} ({passed / total * 100:.0f}%)")
 
-    print(f"  {label}: {passed}/{total} ({pct:.0f}%)")
-
-    if failed_details:
+    if failed:
         print()
-        for query, expected, got, sim in failed_details:
-            print(f"    MISS: \"{query}\"")
-            print(f"          expected \"{expected}\" in top-1, got [{sim:.3f}] \"{got}\"")
+        for query, expected, got, sim, desc in failed:
+            print(f"    MISS [{desc}]: \"{query}\"")
+            print(f"          expected \"{expected}\", got [{sim:.3f}] \"{got}\"")
+
+    return passed, total
+
+
+def run_llm_test(space, cog, engine, label: str) -> tuple[int, int]:
+    """Run test queries with LLM synthesis + HDC recall."""
+    # Lazy import to avoid circular
+    from glyphh.cli.commands.ada import _build_llm_prompt, _recall_context
+
+    passed = 0
+    failed = []
+
+    for query, expected, desc in TEST_QUERIES:
+        state = cog.process(query)
+        recall = _recall_context(query)
+        prompt = _build_llm_prompt(query, state, recall)
+        resp = engine.generate(prompt, max_tokens=128, temperature=0.3, raw=True)
+        resp = re.sub(r"</?think>\s*", "", resp).strip()
+
+        if expected.lower() in resp.lower():
+            passed += 1
+        else:
+            failed.append((query, expected, resp[:80], state.winner, desc))
+
+    total = len(TEST_QUERIES)
+    print(f"  {label}: {passed}/{total} ({passed / total * 100:.0f}%)")
+
+    if failed:
+        print()
+        for query, expected, got, winner, desc in failed:
+            print(f"    MISS [{desc}]: \"{query}\" (route: {winner})")
+            print(f"          expected \"{expected}\", got \"{got}\"")
+
+    return passed, total
+
+
+def run_routing_test(cog: CognitiveGlyph, label: str) -> tuple[int, int]:
+    """Test cognitive routing accuracy."""
+    passed = 0
+    failed = []
+
+    for text, expected_action in ROUTING_TESTS:
+        state = cog.process(text)
+        if state.action == expected_action:
+            passed += 1
+        else:
+            failed.append((text, expected_action.value, state.winner, state.confidence))
+
+    total = len(ROUTING_TESTS)
+    print(f"  {label}: {passed}/{total} ({passed / total * 100:.0f}%)")
+
+    if failed:
+        print()
+        for text, expected, winner, conf in failed:
+            print(f"    MISS: \"{text}\" → {winner} ({conf:.2f}), expected {expected}")
 
     return passed, total
 
 
 def main() -> None:
-    print_section("EXPERIMENT: Training Ada at Scale")
+    print_section("EXPERIMENT: Ada Full Pipeline")
 
     # ── Initialize ──
     space = ThoughtGlyphSpace()
     loop = GlyphCognitiveLoop(thought_space=space)
+    cog = CognitiveGlyph(thought_space=space)
 
     stats = space.primitives.stats()
-    print(f"Primitives: {stats['words']} words, {stats['roles']} roles")
+    print(f"  Primitives: {stats['words']} words, {stats['roles']} roles")
+    print(f"  Cognitive agents: {len(cog.agents)} ({', '.join(cog.agents.keys())})")
+
+    # Check LLM
+    engine = None
+    try:
+        from glyphh.llm import LLMEngine
+        engine = LLMEngine(system_prompt="You are Ada.")
+        engine._ensure_loaded()
+        print(f"  LLM: {engine.backend_name}")
+    except Exception as e:
+        print(f"  LLM: not available ({e})")
 
     # ── Phase 1: Absorb training data ──
     print_section("PHASE 1: Absorbing training data")
-
     for text, speaker in TRAINING_DATA:
         space.absorb(text, speaker=speaker)
-
     print(f"  Absorbed {space.count} thoughts")
 
-    # Show content word extraction for a few
-    print("\n  Sample encodings:")
-    for text in ["my name is chris", "my favorite color is blue", "jake loves minecraft"]:
-        t = space._thoughts
-        for stored in t.values():
-            if stored.content == text:
-                attrs = stored.glyph.metadata.get("_activated_attrs", [])
-                print(f"    \"{text}\"")
-                print(f"      segments: {attrs}")
-                break
+    # ── Phase 2: Cognitive Routing ──
+    print_section("PHASE 2: Cognitive Routing")
+    routing_passed, routing_total = run_routing_test(cog, "Routing accuracy")
 
-    # ── Phase 2: Test before dreaming ──
-    print_section("PHASE 2: Recall BEFORE dreaming")
-    before_passed, before_total = run_test(space, "Before dreaming")
+    # ── Phase 3: HDC Recall (baseline) ──
+    print_section("PHASE 3: HDC Recall (no LLM)")
+    hdc_passed, hdc_total = run_hdc_test(space, "HDC recall")
 
-    # ── Phase 3: Dream ──
-    print_section("PHASE 3: Dreaming")
+    # ── Phase 4: LLM + HDC ──
+    if engine is not None:
+        # Need to wire up the ada module singletons
+        import glyphh.cli.commands.ada as ada_mod
+        ada_mod._thought_space = space
+        ada_mod._cognitive = cog
 
+        print_section("PHASE 4: LLM + HDC (full pipeline)")
+        llm_passed, llm_total = run_llm_test(space, cog, engine, "LLM + HDC")
+    else:
+        print_section("PHASE 4: SKIPPED (no LLM)")
+        llm_passed, llm_total = 0, len(TEST_QUERIES)
+
+    # ── Phase 5: Dream ──
+    print_section("PHASE 5: Dreaming (40s)")
     dream = GlyphDreamLoop(
         glyph_loop=loop,
         localized_interval=1.0,
@@ -206,81 +299,51 @@ def main() -> None:
         localized_size=100,
         deep_size=200,
     )
+    dream.set_cognitive(cog)
     dream.start()
 
     all_insights = []
-    crystallizations = 0
     for i in range(8):
         time.sleep(5)
         insights = dream.drain_insights()
         all_insights.extend(insights)
-
-        new_crystal = sum(1 for ins in insights if ins.kind == InsightKind.CRYSTALLIZATION)
-        crystallizations += new_crystal
-
         loc = dream.stats.get("localized_cycles", 0)
         deep = dream.stats.get("deep_cycles", 0)
         cands = dream.stats.get("crystallization_candidates", 0)
-
         print(f"  [{i*5:2d}s] localized={loc}, deep={deep}, "
-              f"candidates={cands}, insights={len(insights)}, "
-              f"crystallized={new_crystal}")
+              f"candidates={cands}, insights={len(insights)}")
 
     dream.stop()
 
-    # Insight summary
     by_kind = {}
     for ins in all_insights:
         by_kind[ins.kind.value] = by_kind.get(ins.kind.value, 0) + 1
-
     print(f"\n  Total insights: {len(all_insights)}")
     for kind, count in sorted(by_kind.items()):
         print(f"    {kind}: {count}")
 
-    # ── Phase 4: Test after dreaming ──
-    print_section("PHASE 4: Recall AFTER dreaming")
-    after_passed, after_total = run_test(space, "After dreaming")
+    # ── Phase 6: Post-dream recall ──
+    print_section("PHASE 6: HDC Recall AFTER dreaming")
+    hdc_after, _ = run_hdc_test(space, "HDC recall (post-dream)")
 
-    # ── Phase 5: Compound primitives ──
-    print_section("PHASE 5: Compound primitives")
-
-    stats_after = space.primitives.stats()
-    new_words = stats_after["words"] - stats["words"]
-    new_roles = stats_after["roles"] - stats["roles"]
-
-    print(f"  Before: {stats['words']} words, {stats['roles']} roles")
-    print(f"  After:  {stats_after['words']} words, {stats_after['roles']} roles")
-    print(f"  New:    {new_words} words, {new_roles} roles")
-
-    if crystallizations > 0:
-        print(f"\n  {crystallizations} crystallization events")
-
-    # ── Phase 6: Detailed recall inspection ──
-    print_section("PHASE 6: Detailed recall (top 3)")
-
-    for query, expected, desc in TEST_QUERIES[:10]:
-        results = space.recall(query, top_k=3, speaker="incoming")
-        print(f"  \"{query}\" ({desc}):")
-        for r in results:
-            who = "you said" if r.thought.speaker == "incoming" else "I said"
-            layers = ", ".join(f"{k}={v:.2f}" for k, v in r.layer_similarities.items())
-            marker = " <--" if expected.lower() in r.thought.content.lower() else ""
-            print(f"    [{r.global_similarity:.3f}] {who}: \"{r.thought.content}\"{marker}")
-        if not results:
-            print("    (no results)")
-        print()
+    if engine is not None:
+        print_section("PHASE 7: LLM + HDC AFTER dreaming")
+        llm_after, _ = run_llm_test(space, cog, engine, "LLM + HDC (post-dream)")
+    else:
+        llm_after = 0
 
     # ── Summary ──
     print_section("SUMMARY")
 
-    delta = after_passed - before_passed
-    delta_str = f"+{delta}" if delta > 0 else str(delta)
-    print(f"  Before dreaming:  {before_passed}/{before_total} ({before_passed/before_total*100:.0f}%)")
-    print(f"  After dreaming:   {after_passed}/{after_total} ({after_passed/after_total*100:.0f}%)")
-    print(f"  Delta:            {delta_str}")
-    print(f"  Crystallizations: {crystallizations}")
-    print(f"  New primitives:   {new_words} words, {new_roles} roles")
-    print(f"  Total thoughts:   {space.count}")
+    print(f"  Cognitive routing:   {routing_passed}/{routing_total} ({routing_passed/routing_total*100:.0f}%)")
+    print(f"  HDC recall:          {hdc_passed}/{hdc_total} ({hdc_passed/hdc_total*100:.0f}%)")
+    if engine:
+        print(f"  LLM + HDC:           {llm_passed}/{llm_total} ({llm_passed/llm_total*100:.0f}%)")
+    print(f"  HDC after dream:     {hdc_after}/{hdc_total} ({hdc_after/hdc_total*100:.0f}%)")
+    if engine:
+        print(f"  LLM + HDC post-dream:{llm_after}/{llm_total} ({llm_after/llm_total*100:.0f}%)")
+    print(f"  Thoughts:            {space.count}")
+    print(f"  Insights:            {len(all_insights)}")
     print()
 
 
