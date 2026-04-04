@@ -9,7 +9,9 @@ model init       Scaffold a new model project
 model package    Package a model directory into a .glyphh file
 """
 
+import importlib.util
 import os
+import sys
 import click
 from pathlib import Path
 
@@ -857,7 +859,81 @@ def _find_model_source(model_id: str | None) -> str | None:
     return None
 
 
-def _dispatch_model_cmd(cmd: str, args: str, model_id: str | None = None):
+def _build_command_context(model_id: str | None) -> dict | None:
+    """Build a context dict for model commands.py handlers.
+
+    Returns {model_id, runtime_url, org_id, token, headers, source_dir}
+    or None if auth is missing.
+    """
+    if not is_logged_in():
+        return None
+    runtime_url = resolve_runtime_url()
+    token = resolve_runtime_token()
+    org_id = resolve_org_id(runtime_url)
+    if not org_id:
+        return None
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    source_dir = _find_model_source(model_id)
+    return {
+        "model_id": model_id,
+        "runtime_url": runtime_url,
+        "org_id": org_id,
+        "token": token,
+        "headers": headers,
+        "source_dir": Path(source_dir) if source_dir else None,
+    }
+
+
+def _load_model_commands(model_id: str | None) -> dict:
+    """Discover custom commands from a model's commands.py.
+
+    Looks for commands.py in the model's source directory (hub-installed
+    or cwd). If found, dynamically imports it and calls register(ctx).
+
+    Returns a dict of {name: {"handler": fn, "help": str}} or empty dict.
+    """
+    source = _find_model_source(model_id)
+    if not source:
+        return {}
+
+    commands_file = Path(source) / "commands.py"
+    if not commands_file.exists():
+        return {}
+
+    ctx = _build_command_context(model_id)
+
+    try:
+        spec = importlib.util.spec_from_file_location(
+            f"glyphh_model_commands_{model_id}", str(commands_file)
+        )
+        if not spec or not spec.loader:
+            return {}
+        mod = importlib.util.module_from_spec(spec)
+
+        # Add the model source dir to sys.path temporarily so relative
+        # imports within commands.py resolve (e.g. from .compile import ...)
+        source_parent = str(Path(source).parent)
+        added = source_parent not in sys.path
+        if added:
+            sys.path.insert(0, source_parent)
+        try:
+            spec.loader.exec_module(mod)
+        finally:
+            if added and source_parent in sys.path:
+                sys.path.remove(source_parent)
+
+        register_fn = getattr(mod, "register", None)
+        if not callable(register_fn):
+            return {}
+        return register_fn(ctx) or {}
+    except Exception as e:
+        click.secho(f"  Warning: failed to load commands.py for {model_id}: {e}", fg=theme.WARNING)
+        return {}
+
+
+def _dispatch_model_cmd(cmd: str, args: str, model_id: str | None = None, custom_commands: dict | None = None):
     """Execute a single model subcommand. model_id scopes data commands."""
     if cmd == "list":
         _list_remote_models()
@@ -924,11 +1000,19 @@ def _dispatch_model_cmd(cmd: str, args: str, model_id: str | None = None):
         else:
             click.secho("  Enter a model first: model <model-id>", fg=theme.MUTED)
     else:
+        # Check custom commands from model's commands.py
+        if custom_commands and cmd in custom_commands:
+            entry = custom_commands[cmd]
+            handler = entry.get("handler")
+            if callable(handler):
+                ctx = _build_command_context(model_id)
+                handler(args, ctx)
+                return True
         return False  # unknown command
     return True
 
 
-def _print_model_help(model_id: str | None = None):
+def _print_model_help(model_id: str | None = None, custom_commands: dict | None = None):
     """Print help for the model REPL."""
     if model_id:
         click.echo()
@@ -943,6 +1027,12 @@ def _print_model_help(model_id: str | None = None):
         click.secho("    undeploy                   Remove from runtime", fg=theme.MUTED)
         click.secho("    chat [query]               Interactive chat REPL", fg=theme.MUTED)
         click.secho("    query <question>           Single query", fg=theme.MUTED)
+        if custom_commands:
+            click.echo()
+            click.secho("    model commands", fg=theme.TEXT_DIM)
+            for name, entry in custom_commands.items():
+                help_text = entry.get("help", "")
+                click.secho(f"    {name:<27}{help_text}", fg=theme.MUTED)
     else:
         click.secho("  model commands", fg=theme.TEXT)
         click.echo()
@@ -1037,7 +1127,7 @@ _SCOPED_CMDS = [
 ]
 
 
-def _setup_model_completer(model_id: str | None, deployed_ids: set):
+def _setup_model_completer(model_id: str | None, deployed_ids: set, custom_commands: dict | None = None):
     """Install a readline completer for the model REPL."""
     try:
         import readline
@@ -1045,7 +1135,9 @@ def _setup_model_completer(model_id: str | None, deployed_ids: set):
         return None
 
     if model_id:
-        completions = _SCOPED_CMDS
+        completions = list(_SCOPED_CMDS)
+        if custom_commands:
+            completions.extend(sorted(custom_commands.keys()))
     else:
         completions = _UNSCOPED_CMDS + sorted(deployed_ids)
 
@@ -1078,6 +1170,11 @@ def _model_repl(model_id: str | None = None):
     else:
         prompt_label = "model"
 
+    # Load custom commands from model's commands.py (scoped REPL only)
+    custom_commands = {}
+    if model_id:
+        custom_commands = _load_model_commands(model_id)
+
     # Show model table on REPL entry
     deployed_ids = set()
     if model_id:
@@ -1086,15 +1183,17 @@ def _model_repl(model_id: str | None = None):
         _list_remote_models()
         deployed_ids = _get_deployed_model_ids()
 
-    _print_model_help(model_id)
+    _print_model_help(model_id, custom_commands)
 
     known_cmds = {
         "list", "deploy", "status", "undeploy", "init", "package",
         "load", "data", "count", "clear", "re-encode", "test",
         "chat", "query",
     }
+    if custom_commands:
+        known_cmds.update(custom_commands.keys())
 
-    old_completer = _setup_model_completer(model_id, deployed_ids)
+    old_completer = _setup_model_completer(model_id, deployed_ids, custom_commands)
 
     while True:
         try:
@@ -1111,7 +1210,7 @@ def _model_repl(model_id: str | None = None):
             _restore_completer(old_completer)
             return
         if line.lower() == "help":
-            _print_model_help(model_id)
+            _print_model_help(model_id, custom_commands)
             continue
 
         parts = line.split(None, 1)
@@ -1134,7 +1233,7 @@ def _model_repl(model_id: str | None = None):
                 deployed_ids = _get_deployed_model_ids()
                 continue
 
-        if not _dispatch_model_cmd(cmd, cmd_args, model_id):
+        if not _dispatch_model_cmd(cmd, cmd_args, model_id, custom_commands):
             click.secho(f"  Unknown: {cmd}. Type 'help' for commands.", fg=theme.MUTED)
 
 

@@ -27,140 +27,153 @@ except ImportError:
     theme = _FallbackTheme()
 
 
+# ── Release download base URL ─────────────────────────────────────────────────
+# Models are published as .glyphh files attached to GitHub Releases.
+# Tag format: <model-dir>/v<version>  e.g. firewall/v0.9.0
+# Asset name: <model-id>.glyphh       e.g. model-firewall.glyphh
+#
+# When the Platform hub API is ready, this switches to:
+#   GET /hub/models/{id}/download → signed URL to .glyphh artifact
+
+_RELEASES_REPO = "glyphh-ai/glyphh-models"
+_RELEASES_API = f"https://api.github.com/repos/{_RELEASES_REPO}/releases"
+
+
 # ── Model registry (hardcoded — will switch to Platform API) ────────────────
 
 MODELS = [
     {
         "id": "toolrouter",
+        "model_id": "model-toolrouter",
         "name": "SaaS Tool Router",
         "description": "Routes NL SaaS requests to tool functions across 8 domains. 38 tools, sub-10ms, zero tokens.",
         "category": "routing",
         "icon": "\U0001f500",
         "version": "2.2.0",
         "author": "Glyphh AI",
-        "license": "MIT",
         "tags": ["tool-routing", "saas", "intent-matching"],
-        "repo": "https://github.com/glyphh-ai/model-toolrouter",
+        "release_tag": "toolrouter/v2.2.0",
     },
     {
         "id": "faq-helpdesk",
+        "model_id": "model-faq",
         "name": "Glyphh AI Knowledge Base",
         "description": "FAQ model covering all aspects of the Glyphh platform. 156 entries across 11 categories.",
         "category": "faq",
         "icon": "\U0001f4ac",
         "version": "0.2.0",
         "author": "Glyphh AI",
-        "license": "MIT",
         "tags": ["faq", "knowledge-base", "documentation"],
-        "repo": "https://github.com/glyphh-ai/model-faq",
+        "release_tag": "faq/v0.2.0",
     },
     {
         "id": "customer-churn",
+        "model_id": "model-churn",
         "name": "Customer Churn Predictor",
         "description": "Encodes customer usage metrics into HDC vectors to identify churn risk patterns via similarity.",
         "category": "prediction",
         "icon": "\U0001f4c9",
         "version": "0.1.0",
         "author": "Glyphh AI",
-        "license": "MIT",
         "tags": ["churn", "prediction", "customer-success"],
-        "repo": "https://github.com/glyphh-ai/model-churn",
+        "release_tag": "churn/v0.1.0",
     },
     {
         "id": "pipedream-router",
+        "model_id": "model-pipedream",
         "name": "Pipedream Action Router",
         "description": "Routes NL to 3,000+ API actions across the Pipedream registry. Sub-millisecond, zero LLM calls.",
         "category": "routing",
         "icon": "\u26a1",
         "version": "0.7.2",
         "author": "Glyphh AI",
-        "license": "MIT",
         "tags": ["pipedream", "api-routing", "automation"],
-        "repo": "https://github.com/glyphh-ai/model-pipedream",
+        "release_tag": "pipedream/v0.7.2",
     },
     {
         "id": "iris",
+        "model_id": "model-iris",
         "name": "Glyphh Iris",
         "description": "Structured visual encoder — decomposes images into searchable glyphs. Face, pose, depth, OCR, objects.",
         "category": "vision",
         "icon": "\U0001f440",
         "version": "0.1.0",
         "author": "Glyphh AI",
-        "license": "MIT",
         "tags": ["vision", "image-search", "feature-extraction"],
-        "repo": "https://github.com/glyphh-ai/model-iris",
+        "release_tag": "iris/v0.1.0",
     },
     {
         "id": "marketing",
+        "model_id": "model-marketing",
         "name": "Marketing Intelligence",
         "description": "Encodes campaigns, posts, and audiences as searchable HDC glyphs with performance vectors.",
         "category": "matching",
         "icon": "\U0001f4ca",
         "version": "0.1.0",
         "author": "Glyphh AI",
-        "license": "MIT",
         "tags": ["marketing", "campaigns", "analytics"],
-        "repo": "https://github.com/glyphh-ai/model-marketing",
+        "release_tag": "marketing/v0.1.0",
     },
     {
         "id": "deals",
+        "model_id": "model-deals",
         "name": "Deal Intelligence",
         "description": "Encodes sales deals as HDC glyphs with pipeline metrics. CRM sync via webhooks, MCP-native.",
         "category": "prediction",
         "icon": "\U0001f91d",
         "version": "0.1.0",
         "author": "Glyphh AI",
-        "license": "MIT",
         "tags": ["deals", "sales", "pipeline", "crm"],
-        "repo": "https://github.com/glyphh-ai/model-deals",
+        "release_tag": "deals/v0.1.0",
     },
     {
         "id": "code",
+        "model_id": "model-code",
         "name": "Code Intelligence",
         "description": "File-level codebase search and drift scoring. MCP-native, sub-millisecond, zero LLM calls.",
         "category": "search",
         "icon": "\U0001f50d",
         "version": "0.1.0",
         "author": "Glyphh AI",
-        "license": "MIT",
         "tags": ["code-search", "drift-scoring", "mcp"],
-        "repo": "https://github.com/glyphh-ai/glyphh-code",
+        "release_tag": "code/v0.1.0",
+        "has_commands": True,
     },
     {
         "id": "firewall",
+        "model_id": "model-firewall",
         "name": "Prompt Injection Firewall",
         "description": "Detects prompt injection attacks in microseconds. 4-layer analysis, 6 attack families, full explainability.",
         "category": "security",
         "icon": "\U0001f512",
         "version": "0.9.0",
         "author": "Glyphh AI",
-        "license": "AGPL-3.0",
         "tags": ["prompt-injection", "firewall", "security", "guardrails"],
-        "repo": "https://github.com/glyphh-ai/model-firewall",
+        "release_tag": "firewall/v0.9.0",
     },
     {
         "id": "voice",
+        "model_id": "model-voice",
         "name": "Glyphh Voice",
         "description": "Voice identity and cognitive/emotional state via HDC + openSMILE. Speaker recognition, liveness, emotion.",
         "category": "identity",
         "icon": "\U0001f3a4",
         "version": "0.12.0",
         "author": "Glyphh AI",
-        "license": "AGPL-3.0",
         "tags": ["voice", "identity", "liveness", "biometrics"],
-        "repo": "https://github.com/glyphh-ai/model-voice",
+        "release_tag": "voice/v0.12.0",
     },
     {
         "id": "sentinel",
+        "model_id": "model-sentinel",
         "name": "Sentinel Security",
         "description": "MITRE ATT&CK kill chain detection via HDC + Ada dreaming. Correlates security events no SIEM can find.",
         "category": "security",
         "icon": "\U0001f6a8",
         "version": "0.1.0",
         "author": "Glyphh AI",
-        "license": "AGPL-3.0",
         "tags": ["security", "mitre", "kill-chain", "siem"],
-        "repo": "https://github.com/glyphh-ai/model-sentinel",
+        "release_tag": "sentinel/v0.1.0",
     },
 ]
 
@@ -211,7 +224,7 @@ def _render_detail(model: dict):
     """Render full model detail view."""
     click.echo()
     click.secho(f"  {model['icon']}  {model['name']}", fg=theme.TEXT, bold=True)
-    click.secho(f"  {model['author']}  \u00b7  v{model['version']}  \u00b7  {model['license']}", fg=theme.MUTED)
+    click.secho(f"  {model['author']}  \u00b7  v{model['version']}", fg=theme.MUTED)
     click.echo()
     click.secho(f"  {model['description']}", fg=theme.TEXT_DIM)
     click.echo()
@@ -290,140 +303,70 @@ def _hub_browse(models: list[dict]):
             click.secho(f"  Unknown: {resp}  (try a number, next, back, install, or q)", fg=theme.MUTED)
 
 
-# ── Command handlers ────────────────────────────────────────────────────────
+# ── Download + install ─────────────────────────────────────────────────────
 
-def _cmd_list(args: str):
-    """hub list — browse all models."""
-    _hub_browse(MODELS)
+def _download_release(model: dict) -> Path | None:
+    """Download .glyphh artifact from GitHub Releases.
 
+    Tries the release API first. Falls back to constructing the direct
+    download URL from the tag. Returns path to downloaded file or None.
+    """
+    import httpx
 
-def _cmd_search(args: str):
-    """hub search <query> — filter models by name/tag/category."""
-    query = args.strip().lower()
-    if not query:
-        click.secho("  Usage: hub search <query>", fg=theme.MUTED)
-        return
+    release_tag = model.get("release_tag")
+    model_id = model.get("model_id", model["id"])
+    asset_name = f"{model_id}.glyphh"
 
-    filtered = [
-        m for m in MODELS
-        if query in m["name"].lower()
-        or query in m["description"].lower()
-        or query in m["category"].lower()
-        or any(query in t for t in m["tags"])
-    ]
+    cache_dir = Path.home() / ".glyphh" / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    dest = cache_dir / asset_name
 
-    if not filtered:
-        click.secho(f"  No models match \"{args.strip()}\".", fg=theme.TEXT_DIM)
-        return
+    if not release_tag:
+        return None
 
-    click.secho(f"  {len(filtered)} model(s) matching \"{args.strip()}\"", fg=theme.TEXT_DIM)
-    _hub_browse(filtered)
-
-
-def _resolve_model(identifier: str, models: list[dict] | None = None) -> dict | None:
-    """Resolve a model by number or id from a model list."""
-    models = models or MODELS
-    # Try number first
+    # Try GitHub Releases API to find the asset download URL
+    tag_url = f"{_RELEASES_API}/tags/{release_tag}"
     try:
-        num = int(identifier)
-        if 1 <= num <= len(models):
-            return models[num - 1]
-    except ValueError:
+        with httpx.Client(timeout=15, follow_redirects=True) as client:
+            res = client.get(tag_url)
+            if res.status_code == 200:
+                for asset in res.json().get("assets", []):
+                    if asset["name"] == asset_name:
+                        download_url = asset["browser_download_url"]
+                        click.secho(f"         Downloading {asset_name}...", fg=theme.TEXT_DIM)
+                        r = client.get(download_url)
+                        if r.status_code == 200:
+                            dest.write_bytes(r.content)
+                            size_kb = dest.stat().st_size / 1024
+                            click.secho(f"         {size_kb:.0f} KB", fg=theme.TEXT_DIM)
+                            return dest
+    except Exception:
         pass
-    # Then by id
-    return next((m for m in models if m["id"] == identifier), None)
+
+    return None
 
 
 def _install_model(model: dict):
-    """Clone a model from GitHub, package it, and deploy to the runtime."""
-    import shutil
-    import subprocess
+    """Download a .glyphh release artifact and deploy to the runtime."""
     import time
 
     click.echo()
     click.secho(f"  Installing {model['icon']}  {model['name']}...", fg=theme.TEXT)
     click.echo()
 
-    # Persistent model source dir: ~/.glyphh/models/<model-id>/
-    models_dir = Path.home() / ".glyphh" / "models"
-    models_dir.mkdir(parents=True, exist_ok=True)
+    model_id = model.get("model_id", model["id"])
 
-    # Resolve model_id early from registry
-    registry_id = model["id"]
+    # Step 1: Download release artifact
+    click.secho("  [1/2] Downloading...", fg=theme.MUTED)
+    glyphh_file = _download_release(model)
 
-    # Step 1: Clone
-    click.secho("  [1/4] Cloning...", fg=theme.MUTED)
-    clone_dir = models_dir / registry_id
-
-    # If already cloned, pull instead
-    if clone_dir.exists() and (clone_dir / ".git").exists():
-        result = subprocess.run(
-            ["git", "-C", str(clone_dir), "pull", "--ff-only"],
-            capture_output=True, text=True, timeout=60,
-        )
-        if result.returncode == 0:
-            click.secho(f"         Updated existing clone", fg=theme.TEXT_DIM)
-        else:
-            # Fresh clone
-            shutil.rmtree(clone_dir, ignore_errors=True)
-            clone_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        if clone_dir.exists():
-            shutil.rmtree(clone_dir, ignore_errors=True)
-
-    if not (clone_dir / ".git").exists():
-        try:
-            result = subprocess.run(
-                ["git", "clone", "--depth", "1", f"{model['repo']}.git", str(clone_dir)],
-                capture_output=True, text=True, timeout=120,
-            )
-            if result.returncode != 0:
-                click.secho(f"  Clone failed: {result.stderr.strip()[:120]}", fg=theme.ERROR)
-                return
-            click.secho(f"         Cloned to ~/.glyphh/models/{registry_id}/", fg=theme.TEXT_DIM)
-        except FileNotFoundError:
-            click.secho("  git not found. Install git and try again.", fg=theme.ERROR)
-            return
-        except subprocess.TimeoutExpired:
-            click.secho("  Clone timed out.", fg=theme.ERROR)
-            return
-
-    # Step 2: Build (if build.py exists)
-    click.secho("  [2/4] Building...", fg=theme.MUTED)
-    build_script = clone_dir / "build.py"
-    if build_script.exists():
-        import sys
-        result = subprocess.run(
-            [sys.executable, str(build_script)],
-            capture_output=True, text=True, timeout=300,
-            cwd=str(clone_dir),
-        )
-        if result.returncode != 0:
-            click.secho(f"  Build failed: {result.stderr.strip()[:200]}", fg=theme.ERROR)
-            return
-        click.secho(f"         Build complete", fg=theme.TEXT_DIM)
-    else:
-        click.secho(f"         No build.py, skipping", fg=theme.TEXT_DIM)
-
-    # Step 3: Package
-    click.secho("  [3/4] Packaging...", fg=theme.MUTED)
-    try:
-        from glyphh.cli.packaging import package_model, read_manifest, is_model_dir
-
-        if not is_model_dir(clone_dir):
-            click.secho("  Not a valid model (no manifest.yaml).", fg=theme.ERROR)
-            return
-
-        manifest = read_manifest(clone_dir)
-        model_id = manifest.get("model_id", registry_id)
-        glyphh_file = package_model(clone_dir)
-        click.secho(f"         {glyphh_file.name}", fg=theme.TEXT_DIM)
-    except Exception as e:
-        click.secho(f"  Package failed: {e}", fg=theme.ERROR)
+    if not glyphh_file:
+        click.secho("  No release found. Model may not be published yet.", fg=theme.WARNING)
+        click.secho(f"  Expected release tag: {model.get('release_tag', '?')}", fg=theme.TEXT_DIM)
         return
 
-    # Step 4: Deploy
-    click.secho("  [4/4] Deploying...", fg=theme.MUTED)
+    # Step 2: Deploy
+    click.secho("  [2/2] Deploying...", fg=theme.MUTED)
     try:
         from glyphh.cli.auth import is_logged_in, get_org_id
         from glyphh.cli.config import resolve_runtime_url, resolve_runtime_token
@@ -494,20 +437,68 @@ def _install_model(model: dict):
         click.secho(f"  Model:    {model_id}", fg=theme.TEXT_DIM)
         click.secho(f"  Version:  v{model.get('version', '?')}", fg=theme.TEXT_DIM)
         click.secho(f"  Glyphs:   {glyph_count}", fg=theme.TEXT_DIM)
-        click.secho(f"  Source:   ~/.glyphh/models/{registry_id}/", fg=theme.TEXT_DIM)
         click.echo()
+
+        if model.get("has_commands"):
+            click.secho(f"  This model has custom commands. Enter the model REPL:", fg=theme.MUTED)
+            click.secho(f"    model {model_id}", fg=theme.TEXT_DIM)
+            click.echo()
 
     except ImportError:
         click.secho("  Runtime not installed. Run: pip install glyphh[runtime]", fg=theme.ERROR)
     except Exception as e:
         click.secho(f"  Deploy failed: {e}", fg=theme.ERROR)
+    finally:
+        # Clean up cached download
+        try:
+            if glyphh_file and glyphh_file.exists():
+                glyphh_file.unlink()
+        except Exception:
+            pass
 
-    # Clean up packaged file (source dir is kept)
+
+# ── Command handlers ────────────────────────────────────────────────────────
+
+def _cmd_list(args: str):
+    """hub list — browse all models."""
+    _hub_browse(MODELS)
+
+
+def _cmd_search(args: str):
+    """hub search <query> — filter models by name/tag/category."""
+    query = args.strip().lower()
+    if not query:
+        click.secho("  Usage: hub search <query>", fg=theme.MUTED)
+        return
+
+    filtered = [
+        m for m in MODELS
+        if query in m["name"].lower()
+        or query in m["description"].lower()
+        or query in m["category"].lower()
+        or any(query in t for t in m["tags"])
+    ]
+
+    if not filtered:
+        click.secho(f"  No models match \"{args.strip()}\".", fg=theme.TEXT_DIM)
+        return
+
+    click.secho(f"  {len(filtered)} model(s) matching \"{args.strip()}\"", fg=theme.TEXT_DIM)
+    _hub_browse(filtered)
+
+
+def _resolve_model(identifier: str, models: list[dict] | None = None) -> dict | None:
+    """Resolve a model by number or id from a model list."""
+    models = models or MODELS
+    # Try number first
     try:
-        if glyphh_file.exists():
-            glyphh_file.unlink()
-    except Exception:
+        num = int(identifier)
+        if 1 <= num <= len(models):
+            return models[num - 1]
+    except ValueError:
         pass
+    # Then by id
+    return next((m for m in models if m["id"] == identifier), None)
 
 
 def _cmd_install(args: str):
