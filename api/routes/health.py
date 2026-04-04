@@ -31,8 +31,26 @@ async def health_check() -> Dict[str, Any]:
     if sdk_status["degraded"]:
         status = "degraded"
     
+    # License and usage info
+    from glyphh.licensing import get_current_license
+    from glyphh.metering import get_meter
+
+    license_info = get_current_license()
+    meter = get_meter()
+    usage = meter.get_usage(license_info.org_id)
+
     return {
         "status": status,
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "sdk_compatibility": sdk_status,
+        "license": {
+            "tier": license_info.tier,
+            "org_id": license_info.org_id,
+            "max_encodings_per_month": license_info.max_encodings_per_month,
+            "max_runtimes": license_info.max_runtimes,
+        },
+        "usage": {
+            "operations_this_month": usage,
+            "limit": license_info.max_encodings_per_month,
+        },
     }

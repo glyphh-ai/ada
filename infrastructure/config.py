@@ -14,41 +14,38 @@ from pydantic_settings import BaseSettings
 
 @dataclass
 class TierConfig:
-    """Resolved plan limits for the authenticated user/deployment."""
+    """Resolved plan limits for the authenticated user/deployment.
 
-    tier: str                   # "free" | "advanced" | "pro" | "enterprise"
-    max_models: int             # -1 = unlimited
-    max_glyphs_per_model: int   # -1 = unlimited
-    rate_limit_per_minute: int  # -1 = unlimited
+    Billing is based on glyphh operations (encoding calls via MCP).
+    Tiers: free (5K ops/mo), pro (500K ops/mo, $49), team (unlimited, $499).
+    """
+
+    tier: str                       # "free" | "pro" | "team"
+    max_encodings_per_month: int    # -1 = unlimited
+    max_runtimes: int               # max concurrent runtimes
+    rate_limit_per_minute: int      # -1 = unlimited
     allow_commercial: bool
     allow_external_db: bool
 
     @classmethod
     def free(cls) -> "TierConfig":
         return cls(
-            tier="free", max_models=3, max_glyphs_per_model=10_000,
+            tier="free", max_encodings_per_month=5_000, max_runtimes=1,
             rate_limit_per_minute=60, allow_commercial=False, allow_external_db=False,
-        )
-
-    @classmethod
-    def advanced(cls) -> "TierConfig":
-        return cls(
-            tier="advanced", max_models=10, max_glyphs_per_model=250_000,
-            rate_limit_per_minute=300, allow_commercial=True, allow_external_db=True,
         )
 
     @classmethod
     def pro(cls) -> "TierConfig":
         return cls(
-            tier="pro", max_models=-1, max_glyphs_per_model=-1,
-            rate_limit_per_minute=1_000, allow_commercial=True, allow_external_db=True,
+            tier="pro", max_encodings_per_month=500_000, max_runtimes=2,
+            rate_limit_per_minute=300, allow_commercial=True, allow_external_db=True,
         )
 
     @classmethod
-    def enterprise(cls) -> "TierConfig":
+    def team(cls) -> "TierConfig":
         return cls(
-            tier="enterprise", max_models=-1, max_glyphs_per_model=-1,
-            rate_limit_per_minute=-1, allow_commercial=True, allow_external_db=True,
+            tier="team", max_encodings_per_month=-1, max_runtimes=10,
+            rate_limit_per_minute=1_000, allow_commercial=True, allow_external_db=True,
         )
 
     @classmethod
@@ -56,36 +53,30 @@ class TierConfig:
         """Resolve tier from JWT claims. Named tier sets the baseline; individual
         claim overrides allow custom plans without new tier names."""
         tier = payload.get("tier", "free")
-        if tier == "advanced":
-            base = cls.advanced()
-        elif tier == "pro":
+        if tier == "pro":
             base = cls.pro()
-        elif tier == "enterprise":
-            base = cls.enterprise()
+        elif tier == "team":
+            base = cls.team()
         else:
             base = cls.free()
         return cls(
             tier=base.tier,
-            max_models=payload.get("max_models", base.max_models),
-            max_glyphs_per_model=payload.get("max_glyphs_per_model", base.max_glyphs_per_model),
+            max_encodings_per_month=payload.get("max_encodings_per_month", base.max_encodings_per_month),
+            max_runtimes=payload.get("max_runtimes", base.max_runtimes),
             rate_limit_per_minute=payload.get("rate_limit_per_minute", base.rate_limit_per_minute),
             allow_commercial=payload.get("allow_commercial", base.allow_commercial),
             allow_external_db=payload.get("allow_external_db", base.allow_external_db),
         )
 
-    def check_model_limit(self, current_count: int) -> bool:
-        """True if another model can be created."""
-        return self.max_models == -1 or current_count < self.max_models
+    def check_encoding_limit(self, current_count: int) -> bool:
+        """True if another encoding operation is within the monthly limit."""
+        return self.max_encodings_per_month == -1 or current_count < self.max_encodings_per_month
 
-    def check_glyph_limit(self, current_count: int) -> bool:
-        """True if another glyph can be written."""
-        return self.max_glyphs_per_model == -1 or current_count < self.max_glyphs_per_model
-
-    def glyph_warning_threshold(self) -> Optional[int]:
+    def encoding_warning_threshold(self) -> Optional[int]:
         """Return the 90% warning count, or None if unlimited."""
-        if self.max_glyphs_per_model == -1:
+        if self.max_encodings_per_month == -1:
             return None
-        return int(self.max_glyphs_per_model * 0.9)
+        return int(self.max_encodings_per_month * 0.9)
 
 
 class Settings(BaseSettings):

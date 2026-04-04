@@ -99,12 +99,21 @@ def _verify_token(token_str: str) -> Optional[dict]:
 
 @dataclass
 class LicenseInfo:
-    """License information determining tier and limits."""
+    """License information determining tier and limits.
+
+    Billing is based on *glyphh operations* — any encoding call made
+    through an MCP endpoint (nl_query, gql_query, model tools, etc.).
+
+    Tiers:
+      free  — 5,000 ops/month, 1 runtime
+      pro   — 500,000 ops/month, 2 runtimes, $49/mo
+      team  — unlimited ops, 10 runtimes, $499/mo
+    """
 
     org_id: str = "default"
     tier: str = "free"
-    max_models: int = 3
-    max_glyphs_per_model: int = 25_000
+    max_encodings_per_month: int = 5_000
+    max_runtimes: int = 1
     rate_limit_per_minute: int = 60
     license_id: Optional[str] = None
     issued_at: Optional[str] = None
@@ -124,13 +133,25 @@ class LicenseInfo:
     def is_free(self) -> bool:
         return self.tier == "free"
 
-    def check_model_limit(self, current_count: int) -> bool:
-        """True if another model can be created."""
-        return self.max_models == -1 or current_count < self.max_models
+    @property
+    def is_unlimited(self) -> bool:
+        return self.max_encodings_per_month == -1
 
-    def check_glyph_limit(self, current_count: int) -> bool:
-        """True if another glyph can be written."""
-        return self.max_glyphs_per_model == -1 or current_count < self.max_glyphs_per_model
+    def check_encoding_limit(self, current_count: int) -> bool:
+        """True if another encoding operation is within the monthly limit."""
+        return self.max_encodings_per_month == -1 or current_count < self.max_encodings_per_month
+
+    def encoding_warning_threshold(self) -> Optional[int]:
+        """Return 90% of the monthly limit, or None if unlimited."""
+        if self.max_encodings_per_month == -1:
+            return None
+        return int(self.max_encodings_per_month * 0.9)
+
+    def format_limit(self) -> str:
+        """Human-readable encoding limit string."""
+        if self.max_encodings_per_month == -1:
+            return "unlimited"
+        return f"{self.max_encodings_per_month:,}"
 
 
 # Tier presets
@@ -151,10 +172,9 @@ def get_current_license() -> LicenseInfo:
     return _current_license or FREE_TIER
 
 _TIER_DEFAULTS = {
-    "free": {"max_models": 3, "max_glyphs_per_model": 25_000, "rate_limit_per_minute": 60},
-    "advanced": {"max_models": 10, "max_glyphs_per_model": 250_000, "rate_limit_per_minute": 300},
-    "pro": {"max_models": -1, "max_glyphs_per_model": -1, "rate_limit_per_minute": 1_000},
-    "enterprise": {"max_models": -1, "max_glyphs_per_model": -1, "rate_limit_per_minute": -1},
+    "free": {"max_encodings_per_month": 5_000, "max_runtimes": 1, "rate_limit_per_minute": 60},
+    "pro": {"max_encodings_per_month": 500_000, "max_runtimes": 2, "rate_limit_per_minute": 300},
+    "team": {"max_encodings_per_month": -1, "max_runtimes": 10, "rate_limit_per_minute": 1_000},
 }
 
 
@@ -166,8 +186,8 @@ def _claims_to_license_info(claims: dict) -> LicenseInfo:
     info = LicenseInfo(
         org_id=claims.get("org_id", "default"),
         tier=tier,
-        max_models=claims.get("max_models", defaults["max_models"]),
-        max_glyphs_per_model=claims.get("max_glyphs_per_model", defaults["max_glyphs_per_model"]),
+        max_encodings_per_month=claims.get("max_encodings_per_month", defaults["max_encodings_per_month"]),
+        max_runtimes=claims.get("max_runtimes", defaults["max_runtimes"]),
         rate_limit_per_minute=claims.get("rate_limit_per_minute", defaults["rate_limit_per_minute"]),
         license_id=claims.get("license_id"),
         issued_at=claims.get("issued_at"),

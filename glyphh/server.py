@@ -71,7 +71,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     license_info = load_license()
     app.state.license = license_info
     set_current_license(license_info)
-    logger.info(f"License: tier={license_info.tier}, org={license_info.org_id}")
+    logger.info(
+        f"License: tier={license_info.tier}, org={license_info.org_id}, "
+        f"ops={license_info.format_limit()}/mo, runtimes={license_info.max_runtimes}"
+    )
+
+    # Show current month's usage
+    from glyphh.metering import get_meter
+    meter = get_meter()
+    usage = meter.get_usage(license_info.org_id)
+    if usage > 0:
+        logger.info(f"Usage this month: {usage:,} ops")
+        if not license_info.is_unlimited:
+            if usage >= license_info.max_encodings_per_month:
+                logger.warning(
+                    f"Monthly operation limit exceeded ({usage:,}/{license_info.max_encodings_per_month:,})"
+                )
+            elif license_info.encoding_warning_threshold() and usage >= license_info.encoding_warning_threshold():
+                logger.warning(
+                    f"Approaching monthly limit ({usage:,}/{license_info.max_encodings_per_month:,})"
+                )
 
     await init_db()
     logger.info("Database initialized")
@@ -108,6 +127,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Graceful shutdown
     logger.info("Shutting down Glyphh Runtime...")
+    meter.flush()
     logger.info("Draining connections...")
     await close_db()
     logger.info("Database connections closed")
@@ -119,7 +139,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="Glyphh Runtime",
     description="Execution environment for directory-based models",
-    version="1.3.8",
+    version="2.6.1",
     docs_url="/docs" if settings.enable_docs else None,
     redoc_url="/redoc" if settings.enable_docs else None,
     lifespan=lifespan,

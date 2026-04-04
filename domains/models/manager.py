@@ -656,19 +656,6 @@ class ModelManager:
                     await self._clear_staged_exemplars(org_id, model_id)
                     return
 
-                # Check license limits
-                from glyphh.licensing import get_current_license
-                license_info = get_current_license()
-                max_glyphs = license_info.max_glyphs_per_model
-                if max_glyphs >= 0 and total > max_glyphs:
-                    logger.warning(
-                        f"Model {model_id} has {total:,} entries but "
-                        f"{license_info.tier} tier allows {max_glyphs:,}. "
-                        f"Encoding first {max_glyphs:,}."
-                    )
-                    lines = lines[:max_glyphs]
-                    total = len(lines)
-
                 # Resume: skip already-encoded entries
                 start_index = existing_count if 0 < existing_count < total else 0
                 if existing_count > 0 and start_index == 0:

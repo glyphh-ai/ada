@@ -52,14 +52,25 @@ def auth_status():
         click.secho(f"  ● Logged in as {name}", fg=theme.SUCCESS)
         click.secho(f"    Org:     {org_id}", fg=theme.MUTED)
 
-        # Show license tier
+        # Show license tier and usage
         from ...licensing import load_license
+        from ...metering import get_meter
         info = load_license()
         if info.is_free and not info.license_id:
             click.secho(f"    License: free (no license)", fg=theme.TEXT_DIM)
         else:
-            glyphs = "unlimited" if info.max_glyphs_per_model == -1 else f"{info.max_glyphs_per_model:,}"
-            click.secho(f"    License: {info.tier} ({glyphs} glyphs/model)", fg=theme.MUTED)
+            click.secho(f"    License: {info.tier} ({info.format_limit()} ops/mo)", fg=theme.MUTED)
+
+        meter = get_meter()
+        usage = meter.get_usage(info.org_id)
+        if not info.is_unlimited and usage > 0:
+            pct = usage / info.max_encodings_per_month * 100
+            if usage >= info.max_encodings_per_month:
+                click.secho(f"    Usage:   {usage:,} / {info.format_limit()} ops (over limit)", fg=theme.WARNING)
+            elif info.encoding_warning_threshold() and usage >= info.encoding_warning_threshold():
+                click.secho(f"    Usage:   {usage:,} / {info.format_limit()} ops ({pct:.0f}%)", fg=theme.WARNING)
+            else:
+                click.secho(f"    Usage:   {usage:,} / {info.format_limit()} ops", fg=theme.MUTED)
 
         # Show runtime registration
         from ..auth import _load_config

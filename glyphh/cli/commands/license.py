@@ -11,6 +11,25 @@ import click
 
 from .. import theme
 from ...licensing import load_license, save_license_token, remove_license, LICENSE_FILE, _verify_token
+from ...metering import get_meter
+
+
+def _show_usage(info):
+    """Show current month's encoding operation usage."""
+    meter = get_meter()
+    usage = meter.get_usage(info.org_id)
+    click.echo()
+    click.secho(f"  Usage this month: {usage:,} ops", fg=theme.TEXT_DIM)
+    if not info.is_unlimited:
+        remaining = max(0, info.max_encodings_per_month - usage)
+        pct = usage / info.max_encodings_per_month * 100
+        if usage >= info.max_encodings_per_month:
+            click.secho(f"  ⚠ Over limit ({pct:.0f}% used)", fg=theme.WARNING)
+        elif info.encoding_warning_threshold() and usage >= info.encoding_warning_threshold():
+            click.secho(f"  ⚠ {pct:.0f}% used — {remaining:,} ops remaining", fg=theme.WARNING)
+        else:
+            click.secho(f"  {pct:.0f}% used — {remaining:,} ops remaining", fg=theme.TEXT_DIM)
+    click.echo()
 
 
 @click.group("license")
@@ -30,12 +49,15 @@ def license_show():
 
     if info.is_free and not info.license_id:
         click.secho("  Tier:      free (no license)", fg=theme.TEXT_DIM)
-        click.secho("  Models:    3 max", fg=theme.TEXT_DIM)
-        click.secho("  Glyphs:    10,000 per model", fg=theme.TEXT_DIM)
+        click.secho(f"  Ops:       {info.format_limit()} / month", fg=theme.TEXT_DIM)
+        click.secho(f"  Runtimes:  {info.max_runtimes}", fg=theme.TEXT_DIM)
         click.echo()
         click.secho("  Activate a license to unlock higher limits:", fg=theme.MUTED)
         click.secho("    license activate '<jwt-token>'", fg=theme.MUTED)
         click.echo()
+
+        # Show current usage
+        _show_usage(info)
         return
 
     click.secho(f"  License:   {info.license_id or '—'}", fg=theme.ACCENT)
@@ -43,10 +65,8 @@ def license_show():
     click.secho(f"  Tier:      {info.tier}", fg=theme.SUCCESS)
     click.secho("  Signature: verified", fg=theme.SUCCESS)
 
-    models = "unlimited" if info.max_models == -1 else str(info.max_models)
-    glyphs = "unlimited" if info.max_glyphs_per_model == -1 else f"{info.max_glyphs_per_model:,}"
-    click.secho(f"  Models:    {models}", fg=theme.TEXT_DIM)
-    click.secho(f"  Glyphs:    {glyphs} per model", fg=theme.TEXT_DIM)
+    click.secho(f"  Ops:       {info.format_limit()} / month", fg=theme.TEXT_DIM)
+    click.secho(f"  Runtimes:  {info.max_runtimes}", fg=theme.TEXT_DIM)
 
     if info.expires_at:
         click.secho(f"  Expires:   {info.expires_at[:10]}", fg=theme.TEXT_DIM)
@@ -61,7 +81,7 @@ def license_show():
         click.secho(f"  Runtime:   {runtime_id}", fg=theme.ACCENT)
         click.secho("             Set GLYPHH_RUNTIME_ID on remote runtimes to self-fetch this license.", fg=theme.TEXT_DIM)
 
-    click.echo()
+    _show_usage(info)
 
 
 @license_group.command("activate")

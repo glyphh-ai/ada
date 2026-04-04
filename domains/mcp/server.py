@@ -300,6 +300,28 @@ class ToolHandler:
         arguments["org_id"] = org_id
         arguments["model_id"] = model_id
 
+        # ── Metering: count every MCP operation ──
+        from glyphh.metering import get_meter
+        from glyphh.licensing import get_current_license
+
+        meter = get_meter()
+        count = meter.record(org_id)
+        license_info = get_current_license()
+
+        if not license_info.is_unlimited:
+            limit = license_info.max_encodings_per_month
+            threshold = license_info.encoding_warning_threshold()
+            if count >= limit:
+                logger.warning(
+                    f"Org {org_id} has exceeded monthly operation limit "
+                    f"({count:,}/{limit:,}). Tier: {license_info.tier}"
+                )
+            elif threshold and count >= threshold:
+                logger.warning(
+                    f"Org {org_id} approaching monthly limit "
+                    f"({count:,}/{limit:,}, {count/limit*100:.0f}%)"
+                )
+
         start_time = datetime.utcnow()
 
         try:

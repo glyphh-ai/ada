@@ -67,26 +67,6 @@ class GlyphStorage:
             metadata: Optional metadata dict
             glyph_id: Optional UUID (generated if not provided)
         """
-        # Check license-based glyph limit
-        from glyphh.licensing import get_current_license
-        license_info = get_current_license()
-        max_glyphs = license_info.max_glyphs_per_model
-        if max_glyphs >= 0:
-            current_count = await self.count_glyphs(org_id, model_id)
-            if current_count >= max_glyphs:
-                raise QuotaExceededException(
-                    org_id=org_id,
-                    model_id=model_id,
-                    resource="glyphs",
-                    limit=max_glyphs,
-                    current=current_count,
-                    message=(
-                        f"Glyph limit reached: {license_info.tier} tier allows "
-                        f"{max_glyphs:,} glyphs per model (current: {current_count:,}). "
-                        f"Upgrade your plan for more capacity."
-                    ),
-                )
-
         # Validate embedding dimension against runtime max
         max_dim = settings.resolved_max_vector_dimension
         if len(embedding) > max_dim:
