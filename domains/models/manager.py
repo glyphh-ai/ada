@@ -569,13 +569,16 @@ class ModelManager:
         try:
             # Open a dedicated session that holds the advisory lock for the
             # entire encoding run. Other workers will skip immediately.
+            # Advisory locks are PostgreSQL-only — skip on SQLite.
             async with self._db_session_factory() as lock_session:
-                lock_result = await lock_session.execute(
-                    text(f"SELECT pg_try_advisory_lock({lock_id})")
-                )
-                if not lock_result.scalar():
-                    logger.info(f"Another worker is already encoding {model_id}, skipping")
-                    return
+                _engine_url = str(lock_session.bind.url) if lock_session.bind else ""
+                if "postgresql" in _engine_url:
+                    lock_result = await lock_session.execute(
+                        text(f"SELECT pg_try_advisory_lock({lock_id})")
+                    )
+                    if not lock_result.scalar():
+                        logger.info(f"Another worker is already encoding {model_id}, skipping")
+                        return
 
                 # Read staged JSONL from DB
                 async with self._db_session_factory() as session:

@@ -830,63 +830,347 @@ def model_test(path, verbose, keyword):
         click.secho("  See: https://docs.glyphh.ai/models/testing", fg=theme.MUTED)
 
 
+# ── Dispatch a single model command ──
+
+def _find_model_source(model_id: str | None) -> str | None:
+    """Find the source directory for a model.
+
+    Checks (in order):
+    1. ~/.glyphh/models/<model-id>/  (hub-installed)
+    2. Current working directory (if it's a model dir)
+    """
+    if model_id:
+        hub_dir = Path.home() / ".glyphh" / "models"
+        # Try exact model_id match
+        candidate = hub_dir / model_id
+        if candidate.is_dir() and is_model_dir(candidate):
+            return str(candidate)
+        # Try without "model-" prefix (hub uses short id like "firewall")
+        if model_id.startswith("model-"):
+            candidate = hub_dir / model_id[6:]
+            if candidate.is_dir() and is_model_dir(candidate):
+                return str(candidate)
+    # Fall back to cwd
+    model_dir = find_model_dir()
+    if model_dir:
+        return str(model_dir)
+    return None
+
+
+def _dispatch_model_cmd(cmd: str, args: str, model_id: str | None = None):
+    """Execute a single model subcommand. model_id scopes data commands."""
+    if cmd == "list":
+        _list_remote_models()
+    elif cmd == "deploy":
+        arg = args.strip()
+        if arg:
+            # If explicit arg doesn't exist in cwd, try model source dir
+            if not Path(arg).exists() and model_id:
+                source = _find_model_source(model_id)
+                if source and (Path(source) / arg).exists():
+                    arg = str(Path(source) / arg)
+            path = arg
+        else:
+            path = _find_model_source(model_id) or "."
+        c = click.Context(model_deploy)
+        c.invoke(model_deploy, path=path)
+    elif cmd == "status":
+        mid = args.strip() or model_id
+        c = click.Context(model_status)
+        c.invoke(model_status, model_id=mid)
+    elif cmd == "undeploy":
+        mid = args.strip() or model_id
+        c = click.Context(model_undeploy)
+        c.invoke(model_undeploy, model_id=mid)
+    elif cmd == "init":
+        c = click.Context(model_init)
+        c.invoke(model_init, name=args.strip() or None)
+    elif cmd == "package":
+        path = args.strip() or _find_model_source(model_id) or "."
+        c = click.Context(model_package)
+        c.invoke(model_package, path=path, output=None)
+    elif cmd == "load":
+        if not args.strip():
+            click.secho("  Usage: load <concepts.json>", fg=theme.MUTED)
+            return
+        c = click.Context(model_load)
+        c.invoke(model_load, file=args.strip(), model_id=model_id, batch_size=50)
+    elif cmd == "data":
+        c = click.Context(model_data)
+        c.invoke(model_data, model_id=model_id, limit=20, offset=0)
+    elif cmd == "count":
+        c = click.Context(model_count)
+        c.invoke(model_count, model_id=model_id)
+    elif cmd == "clear":
+        c = click.Context(model_clear)
+        c.invoke(model_clear, model_id=model_id)
+    elif cmd == "re-encode":
+        c = click.Context(model_re_encode)
+        c.invoke(model_re_encode, model_id=model_id)
+    elif cmd == "test":
+        path = args.strip() or _find_model_source(model_id) or "."
+        c = click.Context(model_test)
+        c.invoke(model_test, path=path, verbose=True, keyword=None)
+    elif cmd == "chat":
+        from .chat import handle_chat
+        if model_id:
+            handle_chat(model_id, args)
+        else:
+            click.secho("  Enter a model first: model <model-id>", fg=theme.MUTED)
+    elif cmd == "query":
+        from .query import handle_query
+        if model_id:
+            handle_query(model_id, args)
+        else:
+            click.secho("  Enter a model first: model <model-id>", fg=theme.MUTED)
+    else:
+        return False  # unknown command
+    return True
+
+
+def _print_model_help(model_id: str | None = None):
+    """Print help for the model REPL."""
+    if model_id:
+        click.echo()
+        click.secho(f"  {model_id}", fg=theme.ACCENT, bold=True)
+        click.echo()
+        click.secho("    status                     Check model status", fg=theme.MUTED)
+        click.secho("    data                       View stored glyphs", fg=theme.MUTED)
+        click.secho("    count                      Show glyph/vector counts", fg=theme.MUTED)
+        click.secho("    load <file>                Load data from file", fg=theme.MUTED)
+        click.secho("    clear                      Clear all data", fg=theme.MUTED)
+        click.secho("    re-encode                  Re-encode all glyphs", fg=theme.MUTED)
+        click.secho("    undeploy                   Remove from runtime", fg=theme.MUTED)
+        click.secho("    chat [query]               Interactive chat REPL", fg=theme.MUTED)
+        click.secho("    query <question>           Single query", fg=theme.MUTED)
+    else:
+        click.secho("  model commands", fg=theme.TEXT)
+        click.echo()
+        click.secho("    list                       List deployed models", fg=theme.MUTED)
+        click.secho("    deploy [path]              Deploy model to runtime", fg=theme.MUTED)
+        click.secho("    status [model-id]          Check deployed status", fg=theme.MUTED)
+        click.secho("    undeploy [model-id]        Remove from runtime", fg=theme.MUTED)
+        click.secho("    init [name]                Scaffold new model", fg=theme.MUTED)
+        click.secho("    package [path]             Create .glyphh file", fg=theme.MUTED)
+        click.secho("    test [path]                Run model test suite", fg=theme.MUTED)
+    click.echo()
+    click.secho("    help                       Show this message", fg=theme.MUTED)
+    click.secho("    q                          Exit model shell", fg=theme.MUTED)
+    click.echo()
+
+
+def _show_single_model(model_id: str):
+    """Show the model table filtered to a single model."""
+    try:
+        import httpx
+        runtime_url = resolve_runtime_url()
+        token = resolve_runtime_token()
+        org_id = resolve_org_id(runtime_url)
+        if not org_id:
+            return
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        with httpx.Client(timeout=10) as client:
+            res = client.get(f"{runtime_url}/{org_id}/models", headers=headers)
+        if res.status_code != 200:
+            return
+        models = [m for m in res.json().get("models", []) if m.get("model_id") == model_id]
+        if not models:
+            click.echo()
+            click.secho(f"  {model_id} — not deployed", fg=theme.WARNING)
+            return
+
+        click.echo()
+        click.secho(f"  {runtime_url}", fg=theme.TEXT_DIM)
+        click.echo()
+        header = f"  {'MODEL ID':<20} {'NAME':<28} {'VERSION':<10} {'GLYPHS':<10} STATUS"
+        click.secho(header, fg=theme.TEXT_DIM)
+        click.secho("  " + "─" * 80, fg=theme.TEXT_DIM)
+        m = models[0]
+        mid = m.get("model_id", "?")[:18]
+        name = (m.get("name") or mid)[:26]
+        ver = (m.get("version") or "—")[:8]
+        glyphs = str(m.get("glyphs", 0))
+        status = m.get("status", "—")
+        click.echo(
+            click.style(f"  {mid:<20} ", fg=theme.ACCENT)
+            + click.style(f"{name:<28} ", fg=theme.TEXT)
+            + click.style(f"{ver:<10} ", fg=theme.MUTED)
+            + click.style(f"{glyphs:<10} ", fg=theme.INFO)
+            + click.style(status, fg=theme.SUCCESS)
+        )
+    except Exception:
+        pass
+
+
+def _get_deployed_model_ids():
+    """Fetch list of deployed model IDs from the runtime."""
+    try:
+        import httpx
+        runtime_url = resolve_runtime_url()
+        token = resolve_runtime_token()
+        org_id = resolve_org_id(runtime_url)
+        if not org_id:
+            return set()
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        with httpx.Client(timeout=5) as client:
+            res = client.get(f"{runtime_url}/{org_id}/models", headers=headers)
+        if res.status_code == 200:
+            return {m.get("model_id", "") for m in res.json().get("models", [])}
+    except Exception:
+        pass
+    return set()
+
+
+_UNSCOPED_CMDS = [
+    "list", "deploy", "status", "undeploy", "init", "package", "test",
+    "help", "q", "quit", "exit",
+]
+
+_SCOPED_CMDS = [
+    "status", "data", "count", "load", "clear", "re-encode", "undeploy",
+    "deploy", "package", "test", "chat", "query",
+    "help", "q", "quit", "exit",
+]
+
+
+def _setup_model_completer(model_id: str | None, deployed_ids: set):
+    """Install a readline completer for the model REPL."""
+    try:
+        import readline
+    except ImportError:
+        return None
+
+    if model_id:
+        completions = _SCOPED_CMDS
+    else:
+        completions = _UNSCOPED_CMDS + sorted(deployed_ids)
+
+    old_completer = readline.get_completer()
+
+    def _completer(text, state):
+        options = [c + " " for c in completions if c.startswith(text)]
+        try:
+            return options[state]
+        except IndexError:
+            return None
+
+    readline.set_completer(_completer)
+    return old_completer
+
+
+def _restore_completer(old_completer):
+    """Restore the previous readline completer."""
+    try:
+        import readline
+        readline.set_completer(old_completer)
+    except ImportError:
+        pass
+
+
+def _model_repl(model_id: str | None = None):
+    """Interactive model REPL. If model_id is set, commands are scoped to it."""
+    if model_id:
+        prompt_label = model_id
+    else:
+        prompt_label = "model"
+
+    # Show model table on REPL entry
+    deployed_ids = set()
+    if model_id:
+        _show_single_model(model_id)
+    else:
+        _list_remote_models()
+        deployed_ids = _get_deployed_model_ids()
+
+    _print_model_help(model_id)
+
+    known_cmds = {
+        "list", "deploy", "status", "undeploy", "init", "package",
+        "load", "data", "count", "clear", "re-encode", "test",
+        "chat", "query",
+    }
+
+    old_completer = _setup_model_completer(model_id, deployed_ids)
+
+    while True:
+        try:
+            prompt = click.style(f"  {prompt_label}", fg=theme.PRIMARY) + click.style("> ", fg=theme.TEXT)
+            line = input(prompt).strip()
+        except (KeyboardInterrupt, EOFError):
+            click.echo()
+            _restore_completer(old_completer)
+            return
+
+        if not line:
+            continue
+        if line.lower() in ("q", "quit", "exit"):
+            _restore_completer(old_completer)
+            return
+        if line.lower() == "help":
+            _print_model_help(model_id)
+            continue
+
+        parts = line.split(None, 1)
+        cmd = parts[0].lower()
+        cmd_args = parts[1] if len(parts) > 1 else ""
+
+        # In unscoped REPL, allow typing a model-id to enter scoped REPL
+        if not model_id and cmd not in known_cmds:
+            # Could be a model-id — check deployed list or just try it
+            if cmd in deployed_ids or cmd.startswith("model-"):
+                sub_args = cmd_args.strip()
+                if sub_args:
+                    # model> model-firewall status → run single scoped command
+                    sub_parts = sub_args.split(None, 1)
+                    _dispatch_model_cmd(sub_parts[0].lower(), sub_parts[1] if len(sub_parts) > 1 else "", cmd)
+                else:
+                    # model> model-firewall → enter scoped REPL
+                    _model_repl(cmd)
+                # Refresh deployed IDs in case something changed
+                deployed_ids = _get_deployed_model_ids()
+                continue
+
+        if not _dispatch_model_cmd(cmd, cmd_args, model_id):
+            click.secho(f"  Unknown: {cmd}. Type 'help' for commands.", fg=theme.MUTED)
+
+
 # ── Handler for interactive shell ──
 
 def handle_model(func: str | None, args: str = ""):
-    """Route model subcommands from the interactive shell."""
-    if func == "list":
-        remote = "--remote" in args or "-r" in args.split()
-        ctx = click.Context(model_list)
-        ctx.invoke(model_list, remote=remote)
-    elif func == "deploy":
-        ctx = click.Context(model_deploy)
-        ctx.invoke(model_deploy, path=args.strip() or ".")
-    elif func == "status":
-        ctx = click.Context(model_status)
-        ctx.invoke(model_status, model_id=args.strip() or None)
-    elif func == "undeploy":
-        ctx = click.Context(model_undeploy)
-        ctx.invoke(model_undeploy, model_id=args.strip() or None)
-    elif func == "init":
-        ctx = click.Context(model_init)
-        ctx.invoke(model_init, name=args.strip() or None)
-    elif func == "package":
-        ctx = click.Context(model_package)
-        ctx.invoke(model_package, path=args.strip() or ".", output=None)
-    elif func == "load":
-        if not args.strip():
-            click.secho("  usage: model load <concepts.json>", fg=theme.MUTED)
-            return
-        ctx = click.Context(model_load)
-        ctx.invoke(model_load, file=args.strip(), model_id=None, batch_size=50)
-    elif func == "data":
-        ctx = click.Context(model_data)
-        ctx.invoke(model_data, model_id=None, limit=20, offset=0)
-    elif func == "count":
-        ctx = click.Context(model_count)
-        ctx.invoke(model_count, model_id=None)
-    elif func == "clear":
-        ctx = click.Context(model_clear)
-        ctx.invoke(model_clear, model_id=None)
-    elif func == "re-encode":
-        ctx = click.Context(model_re_encode)
-        ctx.invoke(model_re_encode, model_id=None)
-    elif func == "test":
-        ctx = click.Context(model_test)
-        ctx.invoke(model_test, path=args.strip() or ".", verbose=True, keyword=None)
+    """Route model subcommands from the interactive shell.
+
+    Usage:
+        model                      Enter model shell
+        model <model-id>           Enter model shell scoped to a model
+        model <subcommand> [args]  Run a single model command
+    """
+    if func is None:
+        # model → enter unscoped REPL
+        _model_repl()
+        return
+
+    # Check if func is a known subcommand
+    known_cmds = {
+        "list", "deploy", "status", "undeploy", "init", "package",
+        "load", "data", "count", "clear", "re-encode", "test",
+    }
+
+    if func in known_cmds:
+        # Direct subcommand: model list, model deploy ./path, etc.
+        _dispatch_model_cmd(func, args)
     else:
-        click.echo()
-        click.secho("  usage:", fg=theme.MUTED)
-        click.secho("    model list                 List deployed models", fg=theme.MUTED)
-        click.secho("    model deploy [path]        Deploy model to runtime", fg=theme.MUTED)
-        click.secho("    model load <file>          Load data from concepts.json", fg=theme.MUTED)
-        click.secho("    model data                 View stored glyphs", fg=theme.MUTED)
-        click.secho("    model count                Show glyph/vector counts", fg=theme.MUTED)
-        click.secho("    model clear                Clear all data (keep model)", fg=theme.MUTED)
-        click.secho("    model re-encode            Re-encode all glyphs", fg=theme.MUTED)
-        click.secho("    model status [model_id]    Check deployed status", fg=theme.MUTED)
-        click.secho("    model undeploy [model_id]  Remove from runtime", fg=theme.MUTED)
-        click.secho("    model init [name]          Scaffold new model", fg=theme.MUTED)
-        click.secho("    model package [path]       Create .glyphh file", fg=theme.MUTED)
-        click.secho("    model test [path]          Run model test suite", fg=theme.MUTED)
-        click.echo()
+        # Treat func as a model-id → enter scoped REPL
+        model_id = func.strip()
+        if args.strip():
+            # model model-firewall status → run single scoped command
+            parts = args.strip().split(None, 1)
+            cmd = parts[0].lower()
+            cmd_args = parts[1] if len(parts) > 1 else ""
+            _dispatch_model_cmd(cmd, cmd_args, model_id)
+        else:
+            # model model-firewall → enter scoped REPL
+            _model_repl(model_id)

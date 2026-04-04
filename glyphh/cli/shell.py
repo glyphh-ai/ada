@@ -23,6 +23,7 @@ from .commands.chat import handle_chat
 from .commands.ada import handle_ada
 from .commands.config import handle_config
 from .commands.docker import handle_docker
+from .commands.hub import handle_hub
 from .commands.license import handle_license
 from . import theme
 
@@ -45,6 +46,7 @@ COMMAND_HANDLERS = {
     "ada": handle_ada,
     "config": handle_config,
     "docker": handle_docker,
+    "hub": handle_hub,
     "license": handle_license,
 }
 
@@ -90,6 +92,39 @@ _discover_plugins()
 import glob as _glob
 import os as _os
 
+# Cache deployed model IDs for tab completion (refreshed periodically)
+_deployed_ids_cache: list[str] = []
+_deployed_ids_ts: float = 0
+
+
+def _get_deployed_model_ids() -> list[str]:
+    """Return cached list of deployed model IDs for tab completion."""
+    import time
+    global _deployed_ids_cache, _deployed_ids_ts
+    now = time.time()
+    if now - _deployed_ids_ts < 10:  # cache for 10s
+        return _deployed_ids_cache
+    try:
+        from .config import resolve_runtime_url, resolve_runtime_token
+        from .auth import resolve_org_id
+        import httpx
+        runtime_url = resolve_runtime_url()
+        token = resolve_runtime_token()
+        org_id = resolve_org_id(runtime_url)
+        if not org_id:
+            return _deployed_ids_cache
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        with httpx.Client(timeout=2) as client:
+            res = client.get(f"{runtime_url}/{org_id}/models", headers=headers)
+        if res.status_code == 200:
+            _deployed_ids_cache = [m["model_id"] for m in res.json().get("models", [])]
+            _deployed_ids_ts = now
+    except Exception:
+        pass
+    return _deployed_ids_cache
+
 # Commands that take file/directory path arguments
 _FILE_ARG_COMMANDS = {
     ("model", "load"),
@@ -109,6 +144,7 @@ _SUBCOMMANDS = {
     "ada": [],
     "config": ["show", "set", "clear"],
     "docker": ["init"],
+    "hub": ["list", "search", "install"],
     "license": ["show", "activate", "deactivate", "refresh"],
 }
 
@@ -126,9 +162,13 @@ def _completer(text, state):
         # Completing first word — category
         options = [c + " " for c in _CATEGORIES if c.startswith(text)]
     elif n_complete == 1:
-        # Completing second word — subcommand
+        # Completing second word — subcommand (+ deployed model IDs for "model")
         cat = parts[0].lower()
-        subs = _SUBCOMMANDS.get(cat, [])
+        subs = list(_SUBCOMMANDS.get(cat, []))
+        if cat == "model":
+            subs.extend(_get_deployed_model_ids())
+        elif cat in ("chat", "query"):
+            subs.extend(_get_deployed_model_ids())
         options = [s + " " for s in subs if s.startswith(text)]
     else:
         # Third word+ — file path completion
@@ -485,15 +525,21 @@ def _print_help():
     click.secho("    token revoke <id>        Revoke a token", fg=theme.MUTED)
     click.echo()
     click.secho("  query", fg=theme.ACCENT)
-    click.secho("    query <question>         Query the model", fg=theme.MUTED)
+    click.secho("    query <model-id> <question>  Query a deployed model", fg=theme.MUTED)
     click.echo()
     click.secho("  chat", fg=theme.ACCENT)
-    click.secho("    chat                     Open interactive chat REPL", fg=theme.MUTED)
-    click.secho("    chat <question>          Single query and return", fg=theme.MUTED)
+    click.secho("    chat <model-id>          Open interactive chat REPL", fg=theme.MUTED)
+    click.secho("    chat <model-id> <query>  Single query and return", fg=theme.MUTED)
     click.echo()
     click.secho("  ada", fg=theme.ACCENT)
     click.secho("    ada                      Talk to Ada (local LLM)", fg=theme.MUTED)
     click.secho("    ada <question>           Single query and return", fg=theme.MUTED)
+    click.echo()
+    click.secho("  hub", fg=theme.ACCENT)
+    click.secho("    hub                      Browse model registry", fg=theme.MUTED)
+    click.secho("    hub list                 Browse with paginated cards", fg=theme.MUTED)
+    click.secho("    hub search <query>       Search by name, tag, category", fg=theme.MUTED)
+    click.secho("    hub install <id>         Install a model from the registry", fg=theme.MUTED)
     click.echo()
     click.secho("  docker", fg=theme.ACCENT)
     click.secho("    docker init [--force]    Write docker-compose.yml + init.sql", fg=theme.MUTED)
@@ -512,7 +558,7 @@ def _print_help():
     click.echo()
     # Show installed plugin commands
     builtin_categories = {
-        "auth", "model", "token", "query", "chat", "config", "docker", "license",
+        "auth", "model", "token", "query", "chat", "config", "docker", "hub", "license",
     }
     plugin_categories = [c for c in _SUBCOMMANDS if c not in builtin_categories]
     if plugin_categories:

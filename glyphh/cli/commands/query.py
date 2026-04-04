@@ -165,7 +165,7 @@ def query_command(text, model_id, gql, debug):
     # Interactive chat mode
     click.echo()
     click.secho(f"  Querying {ctx['model_id']} (org: {ctx['org_id']})", fg=theme.INFO)
-    click.secho("  Type a question, or /gql to switch to GQL mode. /quit to exit.", fg=theme.MUTED)
+    click.secho("  Type a question, or /gql to switch to GQL mode. q to exit.", fg=theme.MUTED)
     click.echo()
 
     current_tool = tool
@@ -181,7 +181,7 @@ def query_command(text, model_id, gql, debug):
         if not line:
             continue
 
-        if line.lower() in ("/quit", "/exit", "/q"):
+        if line.lower() in ("q", "quit", "exit"):
             break
         elif line.lower() == "/gql":
             current_tool = "gql_query"
@@ -202,14 +202,23 @@ def query_command(text, model_id, gql, debug):
 # ── Handler for interactive shell ──
 
 def handle_query(func: str | None, args: str = ""):
-    """Route query subcommands from the interactive shell."""
-    # Rejoin func + args since the shell splits on spaces
-    # e.g. "query how do I reset" -> func="how", args="do I reset"
-    full_query = " ".join(p for p in [func, args] if p).strip()
-    if full_query:
-        ctx = _resolve_query_context()
-        if ctx:
-            _do_query(ctx, full_query)
-    else:
-        click.secho("  usage: query <your question>", fg=theme.MUTED)
-        click.secho("  Or run: glyphh query  (for interactive mode)", fg=theme.MUTED)
+    """Route query subcommands from the interactive shell.
+
+    Usage:
+        query <model-id> <question>   Query a deployed model
+    """
+    if not func:
+        click.secho("  Usage: query <model-id> <question>", fg=theme.MUTED)
+        click.secho("  Run 'model list' to see deployed models.", fg=theme.TEXT_DIM)
+        return
+
+    model_id = func.strip()
+    query_text = args.strip() if args else ""
+
+    if not query_text:
+        click.secho("  Usage: query <model-id> <question>", fg=theme.MUTED)
+        return
+
+    ctx = _resolve_query_context(model_id_override=model_id)
+    if ctx:
+        _do_query(ctx, query_text)

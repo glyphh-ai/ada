@@ -228,6 +228,78 @@ _STATE_COLOR = {
 }
 
 
+_SKIP_FIELDS = {
+    "state", "confidence", "match_method", "query_time_ms", "query_type",
+    "fact_tree", "features", "content", "result", "isError", "error",
+    "_status_code", "_detail",
+}
+
+_VERDICT_COLORS = {
+    "BLOCK": "ERROR",
+    "FLAG": "WARNING",
+    "PASS": "SUCCESS",
+}
+
+
+def _print_model_response(content_data: dict) -> bool:
+    """Render a model-specific tool response. Returns True if anything was printed."""
+    # Filter to meaningful fields
+    fields = {k: v for k, v in content_data.items()
+              if k not in _SKIP_FIELDS and v is not None and v != ""}
+
+    if not fields:
+        return False
+
+    # Verdict-style response (firewall, etc.)
+    verdict = fields.pop("verdict", None)
+    if verdict:
+        color_attr = _VERDICT_COLORS.get(verdict, "INFO")
+        color = getattr(theme, color_attr, theme.INFO)
+        click.secho(f"  {verdict}", fg=color, bold=True)
+
+    # Threat/confidence score with bar
+    threat = fields.pop("threat_score", None)
+    if threat is not None:
+        pct = threat * 100
+        filled = round(threat * 12)
+        bar = "\u2588" * filled + "\u2591" * (12 - filled)
+        click.echo(
+            click.style(f"  {pct:>5.1f}%  ", fg=theme.ACCENT, bold=True)
+            + click.style(f"[{bar}]", fg=theme.TEXT_DIM)
+        )
+
+    # Explanation
+    explanation = fields.pop("explanation", None)
+    if explanation:
+        click.secho(f"  {explanation}", fg=theme.TEXT)
+
+    # Layer scores
+    layer_scores = fields.pop("layer_scores", None)
+    if layer_scores and isinstance(layer_scores, dict):
+        parts = []
+        for layer, score in layer_scores.items():
+            if isinstance(score, (int, float)):
+                parts.append(f"{layer}={score:.2f}")
+            else:
+                parts.append(f"{layer}={score}")
+        click.secho(f"  {' · '.join(parts)}", fg=theme.TEXT_DIM)
+
+    # Remaining fields
+    for key in ("matched_family", "matched_label"):
+        val = fields.pop(key, None)
+        if val and val != "none" and val != "benign":
+            click.secho(f"  {key}: {val}", fg=theme.MUTED)
+
+    # Any other fields — show as key: value
+    for key, val in fields.items():
+        if isinstance(val, dict):
+            continue  # skip nested objects
+        display = str(val)[:80]
+        click.secho(f"  {key}: {display}", fg=theme.TEXT_DIM)
+
+    return True
+
+
 def _print_result(data):
     """Render a MCP response to the terminal using the same logic as the web UI."""
     ft = data.get("result")  # fact_tree JSON
@@ -353,7 +425,10 @@ def _print_result(data):
             if response_text:
                 click.secho(f"          {response_text}", fg=theme.TEXT_DIM)
     elif not matches and not exemplar:
-        click.secho("  No matches found.", fg=theme.WARNING)
+        # Model-specific tool response — render key fields from content_data
+        _rendered = _print_model_response(content_data)
+        if not _rendered:
+            click.secho("  No matches found.", fg=theme.WARNING)
 
     # Timing / method footer
     parts = []
@@ -375,7 +450,7 @@ def _print_result(data):
 
 # ── Single query execution ───────────────────────────────────────────────────
 
-def _do_query(ctx, query_text, tool="nl_query", stage="auto", confirmed=False, selected_glyph_id=None):
+def _do_query(ctx, query_text, tool="nl_query", stage="auto", confirmed=False, selected_glyph_id=None, custom_arg_name=None):
     """POST one query to the MCP endpoint and print the result.
     Returns a list of disambiguation option dicts if ASK state, else None.
     """
@@ -389,7 +464,13 @@ def _do_query(ctx, query_text, tool="nl_query", stage="auto", confirmed=False, s
         return None
 
     url = f"{ctx['runtime_url']}/{ctx['org_id']}/{ctx['model_id']}/mcp"
-    args = {"query": query_text}
+
+    # For model-specific tools, use their expected argument name
+    if custom_arg_name:
+        args = {custom_arg_name: query_text}
+    else:
+        args = {"query": query_text}
+
     if tool == "nl_query" and stage != "auto":
         args["stage"] = stage
     if confirmed:
@@ -443,6 +524,50 @@ def _do_query(ctx, query_text, tool="nl_query", stage="auto", confirmed=False, s
 _STAGE_VALUES = ("auto", "patterns", "data")
 
 
+_HIDDEN_TOOLS = {"confirm", "execute"}
+
+
+def _discover_tools(ctx) -> list[dict]:
+    """Discover all MCP tools for a model.
+
+    Returns list of dicts: [{name, arg_name, description}, ...]
+    """
+    from ..mcp_client import list_tools
+
+    if not ctx.get("model_id"):
+        return []
+
+    url = f"{ctx['runtime_url']}/{ctx['org_id']}/{ctx['model_id']}/mcp"
+    raw_tools = list_tools(url, ctx["headers"])
+
+    result = []
+    for t in raw_tools:
+        name = t.get("name", "")
+        if name in _HIDDEN_TOOLS:
+            continue
+        # Figure out which arg takes the query text
+        schema = t.get("inputSchema", {})
+        props = schema.get("properties", {})
+        required = schema.get("required", [])
+        arg_name = None
+        for rn in required:
+            if props.get(rn, {}).get("type") == "string":
+                arg_name = rn
+                break
+        if not arg_name:
+            for pn, pv in props.items():
+                if pv.get("type") == "string":
+                    arg_name = pn
+                    break
+        result.append({
+            "name": name,
+            "arg_name": arg_name,
+            "description": t.get("description", ""),
+        })
+
+    return result
+
+
 def _run_repl(ctx, tool="nl_query"):
     """Run the interactive chat REPL. Returns when the user exits."""
     model_label = ctx["model_id"] or "unknown"
@@ -453,24 +578,42 @@ def _run_repl(ctx, tool="nl_query"):
     else:
         mode_label = "local"
 
+    # Discover all tools for this model
+    all_tools = _discover_tools(ctx)
+    tools_by_name = {t["name"]: t for t in all_tools}
+
+    # Auto-select: if model has a custom tool, default to it
+    core_names = {"nl_query", "gql_query"}
+    custom_tools = [t for t in all_tools if t["name"] not in core_names]
+    if custom_tools:
+        current_tool = custom_tools[0]["name"]
+    else:
+        current_tool = tool
+
     click.echo()
     click.secho(
         f"  glyphh chat  ·  {model_label}  ·  {mode_label}",
         fg=theme.TEXT, bold=True,
     )
     click.secho(
-        "  /gql  /nl  /stage <auto|patterns|data>  /quit  — or just type",
+        f"  /tools to list  ·  /<name> to switch  ·  q to exit  — or just type",
         fg=theme.TEXT_DIM,
     )
+    if current_tool not in core_names:
+        click.secho(f"  active tool: {current_tool}", fg=theme.TEXT_DIM)
     click.echo()
 
-    current_tool = tool
     current_stage = "auto"
     pending_options = []  # disambiguation options from last ASK response
     _setup_history()
 
     while True:
-        mode_indicator = click.style("GQL" if current_tool == "gql_query" else " NL", fg=theme.ACCENT)
+        if current_tool == "gql_query":
+            mode_indicator = click.style("GQL", fg=theme.ACCENT)
+        elif current_tool == "nl_query":
+            mode_indicator = click.style(" NL", fg=theme.ACCENT)
+        else:
+            mode_indicator = click.style(current_tool, fg=theme.ACCENT)
         stage_indicator = ""
         if current_tool == "nl_query" and current_stage != "auto":
             stage_indicator = click.style(f":{current_stage}", fg=theme.WARNING)
@@ -486,15 +629,34 @@ def _run_repl(ctx, tool="nl_query"):
         if not line:
             continue
 
-        if line.lower() in ("/quit", "/exit", "/q"):
+        if line.lower() in ("q", "quit", "exit"):
             _save_history()
             break
-        elif line.lower() == "/gql":
-            current_tool = "gql_query"
-            click.secho("  → GQL mode", fg=theme.TEXT_DIM)
-        elif line.lower() == "/nl":
-            current_tool = "nl_query"
-            click.secho("  → NL mode", fg=theme.TEXT_DIM)
+        elif line.lower() == "/tools":
+            click.echo()
+            for t in all_tools:
+                marker = click.style(" *", fg=theme.SUCCESS) if t["name"] == current_tool else "  "
+                click.echo(
+                    marker
+                    + click.style(f" /{t['name']}", fg=theme.ACCENT)
+                    + click.style(f"  {t['description'][:60]}", fg=theme.TEXT_DIM)
+                )
+            click.echo()
+            continue
+        elif line.lower().startswith("/") and not line.lower().startswith("/stage"):
+            tool_name = line[1:].lower().strip()
+            if tool_name in ("nl", "nl_query"):
+                current_tool = "nl_query"
+                click.secho("  → nl_query", fg=theme.TEXT_DIM)
+            elif tool_name in ("gql", "gql_query"):
+                current_tool = "gql_query"
+                click.secho("  → gql_query", fg=theme.TEXT_DIM)
+            elif tool_name in tools_by_name:
+                current_tool = tool_name
+                click.secho(f"  → {tool_name}", fg=theme.TEXT_DIM)
+            else:
+                click.secho(f"  Unknown tool: {tool_name}. Type /tools to list.", fg=theme.MUTED)
+            continue
         elif line.lower().startswith("/stage"):
             parts = line.split(None, 1)
             if len(parts) < 2 or parts[1].lower() not in _STAGE_VALUES:
@@ -517,8 +679,12 @@ def _run_repl(ctx, tool="nl_query"):
                     is_selection = True
                     click.secho(f"  → {query}", fg=theme.TEXT_DIM)
 
+            # For model-specific tools, use their expected argument name
+            tool_info = tools_by_name.get(current_tool, {})
+            custom_arg = tool_info.get("arg_name") if current_tool not in core_names else None
             result = _do_query(ctx, query, tool=current_tool, stage=current_stage,
-                               confirmed=is_selection, selected_glyph_id=selected_glyph_id)
+                               confirmed=is_selection, selected_glyph_id=selected_glyph_id,
+                               custom_arg_name=custom_arg)
             pending_options = result if result else []
 
 
@@ -547,7 +713,7 @@ def chat_command(text, model_id, gql, url, token):
     Slash commands inside the REPL:
       /gql     switch to GQL mode
       /nl      switch to natural language mode
-      /quit    exit
+      q        exit
     """
     ctx = _resolve_context(model_id, url, token)
     tool = "gql_query" if gql else "nl_query"
@@ -565,14 +731,26 @@ def chat_command(text, model_id, gql, url, token):
 # ── Handler for interactive shell ──
 
 def handle_chat(func: str | None, args: str = ""):
-    """Route chat subcommands from the interactive shell."""
-    full_query = " ".join(p for p in [func, args] if p).strip()
-    ctx = _resolve_context()
+    """Route chat subcommands from the interactive shell.
+
+    Usage:
+        chat <model-id>          Interactive REPL targeting a model
+        chat <model-id> <query>  Single query against a model
+    """
+    if not func:
+        click.secho("  Usage: chat <model-id> [query]", fg=theme.MUTED)
+        click.secho("  Run 'model list' to see deployed models.", fg=theme.TEXT_DIM)
+        return
+
+    model_id = func.strip()
+    query = args.strip() if args else None
+
+    ctx = _resolve_context(model_id_override=model_id)
 
     if not _wait_for_ready(ctx):
         return
 
-    if full_query:
-        _do_query(ctx, full_query)
+    if query:
+        _do_query(ctx, query)
     else:
         _run_repl(ctx)
