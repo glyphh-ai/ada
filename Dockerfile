@@ -42,7 +42,7 @@ import os; \
 from huggingface_hub import hf_hub_download; \
 dest = os.path.expanduser('~glyphh/.local/share/glyphh/models'); \
 os.makedirs(dest, exist_ok=True); \
-hf_hub_download('Qwen/Qwen3-1.7B-GGUF', 'Qwen3-1.7B-Q4_K_M.gguf', \
+hf_hub_download('unsloth/Qwen3-1.7B-GGUF', 'Qwen3-1.7B-Q4_K_M.gguf', \
     local_dir=dest, local_dir_use_symlinks=False)"
 
 USER glyphh

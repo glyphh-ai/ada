@@ -256,7 +256,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="Glyphh Runtime",
     description="Ada's cognitive brain with production infrastructure",
-    version="2.6.2",
+    version="2.6.5",
     docs_url="/docs" if settings.enable_docs else None,
     redoc_url="/redoc" if settings.enable_docs else None,
     lifespan=lifespan,

@@ -24,6 +24,7 @@ from .commands.token import handle_token
 from .commands.ada import handle_dream, handle_memory, handle_derivative, handle_recall
 from .commands.config import handle_config
 from .commands.license import handle_license
+from .commands.firewall import handle_firewall
 from . import theme
 from .spinner import GridSpinner
 
@@ -46,6 +47,7 @@ COMMAND_HANDLERS = {
     "recall": handle_recall,
     "config": handle_config,
     "license": handle_license,
+    "firewall": handle_firewall,
 }
 
 
@@ -60,6 +62,7 @@ _SUBCOMMANDS = {
     "config": ["show", "set", "clear"],
     "license": ["show", "activate", "deactivate", "refresh"],
     "setup": ["key", "model", "claude"],
+    "firewall": ["live", "status", "scan"],
 }
 
 _CATEGORIES = list(_SUBCOMMANDS.keys()) + ["help", "clear", "home", "exit", "quit"]
