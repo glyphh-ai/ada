@@ -31,151 +31,38 @@ except ImportError:
 # Models are published as .glyphh files attached to GitHub Releases.
 # Tag format: <model-dir>/v<version>  e.g. firewall/v0.9.0
 # Asset name: <model-id>.glyphh       e.g. model-firewall.glyphh
-#
-# When the Platform hub API is ready, this switches to:
-#   GET /hub/models/{id}/download → signed URL to .glyphh artifact
 
 _RELEASES_REPO = "glyphh-ai/glyphh-models"
 _RELEASES_API = f"https://api.github.com/repos/{_RELEASES_REPO}/releases"
 
 
-# ── Model registry (hardcoded — will switch to Platform API) ────────────────
+# ── Model registry (fetched from Platform API) ──────────────────────────────
 
-MODELS = [
-    {
-        "id": "toolrouter",
-        "model_id": "model-toolrouter",
-        "name": "SaaS Tool Router",
-        "description": "Routes NL SaaS requests to tool functions across 8 domains. 38 tools, sub-10ms, zero tokens.",
-        "category": "routing",
-        "icon": "\U0001f500",
-        "version": "2.2.0",
-        "author": "Glyphh AI",
-        "tags": ["tool-routing", "saas", "intent-matching"],
-        "release_tag": "toolrouter/v2.2.0",
-    },
-    {
-        "id": "faq-helpdesk",
-        "model_id": "model-faq",
-        "name": "Glyphh AI Knowledge Base",
-        "description": "FAQ model covering all aspects of the Glyphh platform. 156 entries across 11 categories.",
-        "category": "faq",
-        "icon": "\U0001f4ac",
-        "version": "0.2.0",
-        "author": "Glyphh AI",
-        "tags": ["faq", "knowledge-base", "documentation"],
-        "release_tag": "faq/v0.2.0",
-    },
-    {
-        "id": "customer-churn",
-        "model_id": "model-churn",
-        "name": "Customer Churn Predictor",
-        "description": "Encodes customer usage metrics into HDC vectors to identify churn risk patterns via similarity.",
-        "category": "prediction",
-        "icon": "\U0001f4c9",
-        "version": "0.1.0",
-        "author": "Glyphh AI",
-        "tags": ["churn", "prediction", "customer-success"],
-        "release_tag": "churn/v0.1.0",
-    },
-    {
-        "id": "pipedream-router",
-        "model_id": "model-pipedream",
-        "name": "Pipedream Action Router",
-        "description": "Routes NL to 3,000+ API actions across the Pipedream registry. Sub-millisecond, zero LLM calls.",
-        "category": "routing",
-        "icon": "\u26a1",
-        "version": "0.7.2",
-        "author": "Glyphh AI",
-        "tags": ["pipedream", "api-routing", "automation"],
-        "release_tag": "pipedream/v0.7.2",
-    },
-    {
-        "id": "iris",
-        "model_id": "model-iris",
-        "name": "Glyphh Iris",
-        "description": "Structured visual encoder — decomposes images into searchable glyphs. Face, pose, depth, OCR, objects.",
-        "category": "vision",
-        "icon": "\U0001f440",
-        "version": "0.1.0",
-        "author": "Glyphh AI",
-        "tags": ["vision", "image-search", "feature-extraction"],
-        "release_tag": "iris/v0.1.0",
-    },
-    {
-        "id": "marketing",
-        "model_id": "model-marketing",
-        "name": "Marketing Intelligence",
-        "description": "Encodes campaigns, posts, and audiences as searchable HDC glyphs with performance vectors.",
-        "category": "matching",
-        "icon": "\U0001f4ca",
-        "version": "0.1.0",
-        "author": "Glyphh AI",
-        "tags": ["marketing", "campaigns", "analytics"],
-        "release_tag": "marketing/v0.1.0",
-    },
-    {
-        "id": "deals",
-        "model_id": "model-deals",
-        "name": "Deal Intelligence",
-        "description": "Encodes sales deals as HDC glyphs with pipeline metrics. CRM sync via webhooks, MCP-native.",
-        "category": "prediction",
-        "icon": "\U0001f91d",
-        "version": "0.1.0",
-        "author": "Glyphh AI",
-        "tags": ["deals", "sales", "pipeline", "crm"],
-        "release_tag": "deals/v0.1.0",
-    },
-    {
-        "id": "code",
-        "model_id": "model-code",
-        "name": "Code Intelligence",
-        "description": "File-level codebase search and drift scoring. MCP-native, sub-millisecond, zero LLM calls.",
-        "category": "search",
-        "icon": "\U0001f50d",
-        "version": "0.1.0",
-        "author": "Glyphh AI",
-        "tags": ["code-search", "drift-scoring", "mcp"],
-        "release_tag": "code/v0.1.0",
-        "has_commands": True,
-    },
-    {
-        "id": "firewall",
-        "model_id": "model-firewall",
-        "name": "Prompt Injection Firewall",
-        "description": "Detects prompt injection attacks in microseconds. 4-layer analysis, 6 attack families, full explainability.",
-        "category": "security",
-        "icon": "\U0001f512",
-        "version": "0.9.0",
-        "author": "Glyphh AI",
-        "tags": ["prompt-injection", "firewall", "security", "guardrails"],
-        "release_tag": "firewall/v0.9.0",
-    },
-    {
-        "id": "voice",
-        "model_id": "model-voice",
-        "name": "Glyphh Voice",
-        "description": "Voice identity and cognitive/emotional state via HDC + openSMILE. Speaker recognition, liveness, emotion.",
-        "category": "identity",
-        "icon": "\U0001f3a4",
-        "version": "0.12.0",
-        "author": "Glyphh AI",
-        "tags": ["voice", "identity", "liveness", "biometrics"],
-        "release_tag": "voice/v0.12.0",
-    },
-    {
-        "id": "sentinel",
-        "model_id": "model-sentinel",
-        "name": "Sentinel Security",
-        "description": "MITRE ATT&CK kill chain detection via HDC + Ada dreaming. Correlates security events no SIEM can find.",
-        "category": "security",
-        "icon": "\U0001f6a8",
-        "version": "0.1.0",
-        "author": "Glyphh AI",
-        "tags": ["security", "mitre", "kill-chain", "siem"],
-        "release_tag": "sentinel/v0.1.0",
-    },
-]
+_cached_models: list[dict] | None = None
+
+
+def _fetch_models() -> list[dict]:
+    """Fetch the published model catalog from the platform hub API."""
+    global _cached_models
+    if _cached_models is not None:
+        return _cached_models
+
+    try:
+        from glyphh.cli.auth import get_api_url
+        import httpx
+
+        api_url = get_api_url()
+        with httpx.Client(timeout=10) as client:
+            res = client.get(f"{api_url}/hub/models?page=1&page_size=100")
+            if res.status_code == 200:
+                _cached_models = res.json().get("items", [])
+                return _cached_models
+    except Exception:
+        pass
+
+    click.secho("  Could not reach the model hub. Check your connection.", fg=theme.WARNING)
+    _cached_models = []
+    return _cached_models
 
 PAGE_SIZE = 15
 
@@ -308,21 +195,19 @@ def _hub_browse(models: list[dict]):
 def _download_release(model: dict) -> Path | None:
     """Download .glyphh artifact from GitHub Releases.
 
-    Tries the release API first. Falls back to constructing the direct
-    download URL from the tag. Returns path to downloaded file or None.
+    Derives the release tag and asset name from the model's id and version.
+    Returns path to downloaded file or None.
     """
     import httpx
 
-    release_tag = model.get("release_tag")
-    model_id = model.get("model_id", model["id"])
-    asset_name = f"{model_id}.glyphh"
+    model_dir = model["id"]                        # e.g. "firewall"
+    version = model.get("version", "0.1.0")
+    release_tag = f"{model_dir}/v{version}"        # e.g. "firewall/v0.9.0"
+    asset_name = f"model-{model_dir}.glyphh"       # e.g. "model-firewall.glyphh"
 
     cache_dir = Path.home() / ".glyphh" / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     dest = cache_dir / asset_name
-
-    if not release_tag:
-        return None
 
     # Try GitHub Releases API to find the asset download URL
     tag_url = f"{_RELEASES_API}/tags/{release_tag}"
@@ -354,7 +239,8 @@ def _install_model(model: dict):
     click.secho(f"  Installing {model['icon']}  {model['name']}...", fg=theme.TEXT)
     click.echo()
 
-    model_id = model.get("model_id", model["id"])
+    model_dir = model["id"]                        # e.g. "firewall"
+    model_id = f"model-{model_dir}"                  # e.g. "model-firewall"
 
     # Step 1: Download release artifact
     click.secho("  [1/2] Downloading...", fg=theme.MUTED)
@@ -461,7 +347,10 @@ def _install_model(model: dict):
 
 def _cmd_list(args: str):
     """hub list — browse all models."""
-    _hub_browse(MODELS)
+    models = _fetch_models()
+    if not models:
+        return
+    _hub_browse(models)
 
 
 def _cmd_search(args: str):
@@ -471,12 +360,16 @@ def _cmd_search(args: str):
         click.secho("  Usage: hub search <query>", fg=theme.MUTED)
         return
 
+    models = _fetch_models()
+    if not models:
+        return
+
     filtered = [
-        m for m in MODELS
+        m for m in models
         if query in m["name"].lower()
         or query in m["description"].lower()
         or query in m["category"].lower()
-        or any(query in t for t in m["tags"])
+        or any(query in t for t in m.get("tags", []))
     ]
 
     if not filtered:
@@ -489,7 +382,7 @@ def _cmd_search(args: str):
 
 def _resolve_model(identifier: str, models: list[dict] | None = None) -> dict | None:
     """Resolve a model by number or id from a model list."""
-    models = models or MODELS
+    models = models or _fetch_models()
     # Try number first
     try:
         num = int(identifier)
