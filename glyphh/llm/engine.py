@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 MLX_MODEL_REPO = "mlx-community/Qwen3.5-2B-4bit"
 MLX_MODEL_DIRNAME = "Qwen3.5-2B-4bit"
 
-GGUF_MODEL_REPO = "Qwen/Qwen3-1.7B-GGUF"
+GGUF_MODEL_REPO = "unsloth/Qwen3-1.7B-GGUF"
 GGUF_MODEL_FILENAME = "Qwen3-1.7B-Q4_K_M.gguf"
 
 

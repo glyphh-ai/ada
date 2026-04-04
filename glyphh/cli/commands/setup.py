@@ -49,7 +49,7 @@ _WHEEL_INDICES = {
 _MLX_MODEL_REPO = "mlx-community/Qwen3.5-2B-4bit"
 _MLX_MODEL_DIRNAME = "Qwen3.5-2B-4bit"
 
-_GGUF_MODEL_REPO = "Qwen/Qwen3-1.7B-GGUF"
+_GGUF_MODEL_REPO = "unsloth/Qwen3-1.7B-GGUF"
 _GGUF_MODEL_FILENAME = "Qwen3-1.7B-Q4_K_M.gguf"
 _GGUF_MODEL_URL = (
     f"https://huggingface.co/{_GGUF_MODEL_REPO}/resolve/main/{_GGUF_MODEL_FILENAME}"

@@ -31,9 +31,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY --chown=glyphh:glyphh . /app
 
 # Install the package itself (SDK + runtime + LLM backend)
-RUN pip install --no-cache-dir -e ".[runtime,llm]"
+RUN pip install --no-cache-dir -e ".[llm]"
 
-# Download Qwen3-1.5B model at build time (public model, no token required)
+# Download Qwen3-1.7B model at build time (public model, no token required)
 # Pass --secret id=hf_token,env=HF_TOKEN at build time to avoid rate limits
 RUN --mount=type=secret,id=hf_token,required=false \
     HF_TOKEN=$(cat /run/secrets/hf_token 2>/dev/null || true) \
@@ -42,7 +42,7 @@ import os; \
 from huggingface_hub import hf_hub_download; \
 dest = os.path.expanduser('~glyphh/.local/share/glyphh/models'); \
 os.makedirs(dest, exist_ok=True); \
-hf_hub_download('Qwen/Qwen3-1.7B-GGUF', 'Qwen3-1.7B-Q4_K_M.gguf', \
+hf_hub_download('unsloth/Qwen3-1.7B-GGUF', 'Qwen3-1.7B-Q4_K_M.gguf', \
     local_dir=dest, local_dir_use_symlinks=False)"
 
 USER glyphh
