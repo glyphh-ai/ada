@@ -34,7 +34,7 @@ def serve_command(host, port, reload, workers):
         glyphh serve &                   # background (shell)
         nohup glyphh serve > /dev/null & # background (survives logout)
 
-    Requires: pip install glyphh[runtime]
+    Requires: pip install glyphh
     """
     # Check runtime dependencies are installed
     try:
@@ -43,7 +43,7 @@ def serve_command(host, port, reload, workers):
         import sqlalchemy  # noqa: F401
     except ImportError:
         click.secho("  Runtime dependencies not installed.", fg=theme.ERROR)
-        click.secho("  Run: pip install glyphh[runtime]", fg=theme.ACCENT)
+        click.secho("  Run: pip install glyphh", fg=theme.ACCENT)
         sys.exit(1)
 
     # Set defaults for local use

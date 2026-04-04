@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "glyphh"
-version = "2.6.1"
+version = "2.6.2"
 description = "Hyperdimensional Computing SDK and Runtime"
 readme = "README.md"
 license = {text = "Proprietary"}
@@ -24,7 +24,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-# SDK core dependencies — pure deterministic HDC, no LLM required.
+# SDK + runtime server — pip install glyphh gets everything needed to run.
 dependencies = [
     "numpy>=1.24.0",
     "pyyaml>=6.0",
@@ -32,11 +32,6 @@ dependencies = [
     "httpx>=0.24.0",
     "pyjwt[crypto]>=2.8.0",
     "python-dotenv>=1.0.0",
-]
-
-[project.optional-dependencies]
-# Full runtime server
-runtime = [
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.23.0",
     "python-multipart>=0.0.6",
@@ -51,6 +46,8 @@ runtime = [
     "psutil>=5.9.0",
     "mcp>=1.26.0",
 ]
+
+[project.optional-dependencies]
 # LLM backends — Ada's voice (Qwen3-1.5B local inference)
 mlx = [
     "mlx>=0.18.0",

@@ -256,7 +256,7 @@ def _start_embedded_server() -> int | None:
         import fastapi  # noqa: F401
     except ImportError:
         click.secho("  Runtime dependencies not installed.", fg=theme.ERROR)
-        click.secho("  Run: pip install glyphh[runtime]", fg=theme.ACCENT)
+        click.secho("  Run: pip install glyphh", fg=theme.ACCENT)
         return None
 
     # Set up environment for the embedded server
