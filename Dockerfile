@@ -1,5 +1,4 @@
 # Glyphh Runtime Dockerfile
-# Multi-stage build: Node.js for UI, Python for runtime server.
 #
 # Usage:
 #   docker build -t glyphh/runtime .
@@ -8,17 +7,6 @@
 # Or use docker compose:
 #   docker compose up
 
-# ── Stage 1: Build the React UI ──────────────────────────────────────────────
-FROM node:20-alpine AS ui-build
-
-WORKDIR /ui
-COPY ui/package.json ui/package-lock.json ./
-RUN npm ci
-COPY ui/ ./
-ENV VITE_OUT_DIR=/ui/dist
-RUN npm run build
-
-# ── Stage 2: Python runtime ──────────────────────────────────────────────────
 FROM python:3.11-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -41,9 +29,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY --chown=glyphh:glyphh . /app
-
-# Copy built UI from stage 1
-COPY --from=ui-build --chown=glyphh:glyphh /ui/dist /app/glyphh/public/dist
 
 # Install the package itself (SDK + runtime + LLM backend)
 RUN pip install --no-cache-dir -e ".[runtime,llm]"

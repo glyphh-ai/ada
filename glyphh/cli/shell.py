@@ -24,7 +24,6 @@ from .commands.ada import handle_ada
 from .commands.config import handle_config
 from .commands.docker import handle_docker
 from .commands.license import handle_license
-from .commands.ui import handle_ui
 from . import theme
 
 # Try to import readline for history/completion
@@ -47,7 +46,6 @@ COMMAND_HANDLERS = {
     "config": handle_config,
     "docker": handle_docker,
     "license": handle_license,
-    "ui": handle_ui,
 }
 
 
@@ -112,7 +110,6 @@ _SUBCOMMANDS = {
     "config": ["show", "set", "clear"],
     "docker": ["init"],
     "license": ["show", "activate", "deactivate", "refresh"],
-    "ui": [],
 }
 
 _CATEGORIES = list(_SUBCOMMANDS.keys()) + ["help", "clear", "home", "exit", "quit"]
@@ -404,7 +401,6 @@ def shell(ctx):
     url = f"http://localhost:{port}"
     click.echo()
     click.secho(f"  Runtime:   {url}", fg=theme.ACCENT)
-    click.secho(f"  Dashboard: {url}", fg=theme.TEXT_DIM)
     if os.environ.get("ENABLE_DOCS") == "true":
         click.secho(f"  API docs:  {url}/docs", fg=theme.TEXT_DIM)
     click.secho(f"  Logs:      ~/.glyphh/runtime.log", fg=theme.TEXT_DIM)
@@ -527,9 +523,6 @@ def _print_help():
             click.secho(f"    {cat} {sub_str}", fg=theme.MUTED)
         click.echo()
 
-    click.secho("  ui", fg=theme.ACCENT)
-    click.secho("    ui                      Open the web dashboard in your browser", fg=theme.MUTED)
-    click.echo()
     click.secho("  general", fg=theme.ACCENT)
     click.secho("    clear, home             Clear screen and show banner", fg=theme.MUTED)
     click.secho("    !<command>              Run a shell command (e.g. !python3 script.py)", fg=theme.MUTED)

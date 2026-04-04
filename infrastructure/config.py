@@ -142,9 +142,8 @@ class Settings(BaseSettings):
             return "pgvector"
         return "sqlite"  # safe fallback
     
-    # JWT Authentication — shared secret with Platform for web UI sessions.
-    # Database tokens are the primary auth for CLI/API. Platform JWTs are
-    # accepted for browser-based dashboard sessions (POST /auth/login on Platform).
+    # JWT Authentication — shared secret with Platform.
+    # Database tokens are the primary auth for CLI/API.
     jwt_secret_key: Optional[str] = Field(
         default=None,
         description="Platform JWT secret (HS256). Set to same value as Platform's JWT_SECRET_KEY."
@@ -233,8 +232,6 @@ class Settings(BaseSettings):
     )
     cors_origins_production: List[str] = Field(
         default=[
-            "https://studio.glyphh.com",
-            "https://app.glyphh.com",
             "https://www.glyphh.ai",
             "https://glyphh.ai",
             "https://ada.glyphh.ai",

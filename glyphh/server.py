@@ -215,12 +215,10 @@ from api.routes import (
     org_level_router,
     listeners_router,
     tokens_router,
-    ui_router,
 )
 
 app.include_router(health_router)
 app.include_router(tokens_router)
-app.include_router(ui_router)
 # listeners_router must come before org_scoped_router (more specific prefix)
 app.include_router(listeners_router)
 # org_level_router (/{org_id}/models) before org_scoped_router (/{org_id}/{model_id}/...)
@@ -233,42 +231,3 @@ app.include_router(org_scoped_router)
 from domains.mcp.app import MCPRoutingMiddleware
 
 app.add_middleware(MCPRoutingMiddleware, mcp_app_getter=lambda: getattr(app.state, "mcp_session_managers", None))
-
-
-# ── Web UI ──────────────────────────────────────────────────────────────────
-# Serve the Vite-built React dashboard from public/dist/.
-# Must come after all API routers so /{org_id}/... paths aren't shadowed.
-
-from pathlib import Path
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-
-_DIST_DIR = Path(__file__).resolve().parent / "public" / "dist"
-_PUBLIC_DIR = Path(__file__).resolve().parent / "public"
-
-if _DIST_DIR.is_dir():
-    # SPA: serve index.html for all non-API, non-asset paths
-    @app.get("/", include_in_schema=False)
-    async def serve_ui():
-        return FileResponse(str(_DIST_DIR / "index.html"))
-
-    @app.get("/{path:path}", include_in_schema=False)
-    async def serve_spa(path: str):
-        # Never SPA-fallback API paths — let them 404 naturally
-        if path.startswith("api/"):
-            from fastapi.responses import JSONResponse
-            return JSONResponse({"detail": "Not Found"}, status_code=404)
-        # Serve static asset if it exists, otherwise SPA fallback
-        file = _DIST_DIR / path
-        if file.is_file():
-            return FileResponse(str(file))
-        return FileResponse(str(_DIST_DIR / "index.html"))
-
-    app.mount("/assets", StaticFiles(directory=str(_DIST_DIR / "assets")), name="assets")
-elif _PUBLIC_DIR.is_dir():
-    # Fallback: legacy vanilla UI (dev only)
-    @app.get("/", include_in_schema=False)
-    async def serve_ui_legacy():
-        return FileResponse(str(_PUBLIC_DIR / "index.html"))
-
-    app.mount("/public", StaticFiles(directory=str(_PUBLIC_DIR)), name="public")

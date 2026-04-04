@@ -95,10 +95,10 @@ Documentation = "https://docs.glyphh.ai"
 [tool.setuptools.packages.find]
 # glyphh* — SDK + CLI + server entry point (glyphh/server.py)
 # The remaining packages are the server-side runtime bundled for `glyphh dev`
-include = ["glyphh*", "domains*", "api*", "infrastructure*", "shared*", "scripts*", "web*"]
+include = ["glyphh*", "domains*", "api*", "infrastructure*", "shared*", "scripts*"]
 
 [tool.setuptools.package-data]
-"glyphh" = ["public/dist/**", "public/*.png"]
+"glyphh" = []
 "glyphh.docker" = ["docker-compose.yml", "init.sql"]
 "glyphh.intent" = ["data/*.json", "data/*.jsonl", "data/packs/*.json"]
 "glyphh.state" = ["data/*.json", "data/packs/*.json"]
