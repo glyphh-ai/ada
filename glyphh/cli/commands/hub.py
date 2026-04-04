@@ -445,7 +445,7 @@ def _install_model(model: dict):
             click.echo()
 
     except ImportError:
-        click.secho("  Runtime not installed. Run: pip install glyphh[runtime]", fg=theme.ERROR)
+        click.secho("  Runtime not installed. Run: pip install glyphh", fg=theme.ERROR)
     except Exception as e:
         click.secho(f"  Deploy failed: {e}", fg=theme.ERROR)
     finally:
