@@ -25,6 +25,7 @@ from .commands.config import handle_config
 from .commands.docker import handle_docker
 from .commands.hub import handle_hub
 from .commands.license import handle_license
+from .commands.firewall import handle_firewall
 from . import theme
 
 # Try to import readline for history/completion
@@ -48,6 +49,7 @@ COMMAND_HANDLERS = {
     "docker": handle_docker,
     "hub": handle_hub,
     "license": handle_license,
+    "firewall": handle_firewall,
 }
 
 
@@ -146,6 +148,7 @@ _SUBCOMMANDS = {
     "docker": ["init"],
     "hub": ["list", "search", "install"],
     "license": ["show", "activate", "deactivate", "refresh"],
+    "firewall": ["live", "status", "scan"],
 }
 
 _CATEGORIES = list(_SUBCOMMANDS.keys()) + ["help", "clear", "home", "exit", "quit"]
