@@ -18,17 +18,17 @@ def _get_runtime_version() -> str:
 
 def print_banner():
     """Print the welcome banner."""
-    click.echo()
-    stream_text("        _             _     _             _", fg=theme.PRIMARY)
-    stream_text("   __ _| |_   _ _ __ | |__ | |__     __ _(_)", fg=theme.PRIMARY)
-    stream_text("  / _` | | | | | '_ \\| '_ \\| '_ \\   / _` | |", fg=theme.PRIMARY)
-    stream_text(" | (_| | | |_| | |_) | | | | | | | | (_| | |", fg=theme.ACCENT)
-    stream_text("  \\__, |_|\\__, | .__/|_| |_|_| |_|  \\__,_|_|", fg="cyan")
-    stream_text("  |___/   |___/|_|", fg="bright_cyan")
-    click.echo()
-    stream_text("  when your llm can't afford to be wrong", fg="bright_cyan")
     ver = _get_runtime_version()
-    stream_text(f"  version: Ada {ver}", fg=theme.TEXT_DIM)
+    click.echo()
+    stream_text("        _             _     _", fg=theme.PRIMARY)
+    stream_text("   __ _| |_   _ _ __ | |__ | |__", fg=theme.PRIMARY)
+    stream_text("  / _` | | | | | '_ \\| '_ \\| '_ \\", fg=theme.PRIMARY)
+    stream_text(" | (_| | | |_| | |_) | | | | | | |", fg=theme.ACCENT)
+    stream_text("  \\__, |_|\\__, | .__/|_| |_|_| |_|", fg="cyan")
+    logo_line = "  |___/   |___/|_|"
+    version_str = click.style(f"      ada v{ver}", fg=theme.TEXT_DIM)
+    stream_text(logo_line, fg="bright_cyan", nl=False)
+    click.echo(version_str)
     click.echo()
     _print_status()
 
