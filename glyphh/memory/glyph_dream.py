@@ -494,109 +494,95 @@ class GlyphDreamLoop:
     # ── Phase 4b: Weave threads ─────────────────────────────────────
 
     def _weave_threads(self) -> None:
-        """Find cross-thread connections and create bridge threads.
+        """Find cross-thread connections using glyph similarity.
 
-        Scans all threads for shared entities across different tools
-        or topics. When threads from different contexts share entities,
-        that's a connection worth surfacing. Creates synthetic bridge
-        threads that combine facts from connected threads.
+        Compares thread glyphs pairwise. When threads from different
+        contexts (tool/topic) have high glyph similarity, they share
+        structural patterns worth connecting. Creates bridge threads
+        that consolidate related facts.
 
-        Example:
-          cli thread:    "my wife is Brandi" (family, entities=[Brandi])
-          claude thread: "Brandi lives in Colorado" (location, entities=[Brandi])
-          → bridge:      tool=dream, topic=family+location, entities=[Brandi]
-                         facts from both threads
+        Uses the same cosine similarity the rest of the system uses —
+        thread glyphs compared at the global cortex level. The dream
+        loop operates on the SAME glyph space as recall.
         """
         if not self._thread_store or self._thread_store.count < 2:
             return
 
-        threads = self._thread_store.all_threads()
+        # Only compare non-dream threads (bridges are outputs, not inputs)
+        threads = [
+            t for t in self._thread_store.all_threads()
+            if t.tool != "dream" and t.glyph is not None
+        ]
         if len(threads) < 2:
             return
 
-        # Build entity → threads map (exclude dream bridges — they're outputs, not inputs)
-        entity_threads: dict[str, list] = {}
-        for t in threads:
-            if t.tool == "dream":
-                continue
-            for entity in t.entities:
-                key = entity.lower()
-                if key not in entity_threads:
-                    entity_threads[key] = []
-                entity_threads[key].append(t)
+        # Pairwise glyph similarity — find structurally related threads
+        for i in range(len(threads)):
+            for j in range(i + 1, len(threads)):
+                if not self._running:
+                    return
 
-        # Find entities that appear in threads with different tools or topics
-        for entity, sharing_threads in entity_threads.items():
-            if len(sharing_threads) < 2:
-                continue
-            if not self._running:
-                return
+                t_a, t_b = threads[i], threads[j]
 
-            # Group by (tool, topic) to find cross-context connections
-            contexts: dict[tuple[str, str], list] = {}
-            for t in sharing_threads:
-                ctx_key = (t.tool, t.topic)
-                if ctx_key not in contexts:
-                    contexts[ctx_key] = []
-                contexts[ctx_key].append(t)
+                # Skip already-woven pairs
+                pair_key = tuple(sorted([t_a.thread_id, t_b.thread_id]))
+                if pair_key in self._woven_pairs:
+                    continue
 
-            if len(contexts) < 2:
-                # All threads for this entity are in the same context — skip
-                continue
+                # Same tool + same topic = same context, skip
+                if t_a.tool == t_b.tool and t_a.topic == t_b.topic:
+                    continue
 
-            # Cross-context entity overlap found — connect the threads
-            context_list = list(contexts.values())
-            for i in range(len(context_list)):
-                for j in range(i + 1, len(context_list)):
-                    if not self._running:
-                        return
+                # Content vector similarity — strongest signal for matching.
+                # Global cortex dilutes across layers; content vector is
+                # pure word-level similarity (same primary signal as recall).
+                vec_a = t_a.glyph.metadata.get("_content_vector")
+                vec_b = t_b.glyph.metadata.get("_content_vector")
+                if vec_a is None or vec_b is None:
+                    continue
 
-                    for t_a in context_list[i]:
-                        for t_b in context_list[j]:
-                            pair_key = tuple(sorted([t_a.thread_id, t_b.thread_id]))
-                            if pair_key in self._woven_pairs:
-                                continue
-                            self._woven_pairs.add(pair_key)
+                sim = float(cosine_similarity(vec_a, vec_b))
 
-                            # Link threads bidirectionally
-                            if t_b.thread_id not in t_a.related_threads:
-                                t_a.related_threads.append(t_b.thread_id)
-                            if t_a.thread_id not in t_b.related_threads:
-                                t_b.related_threads.append(t_a.thread_id)
+                # Threshold: moderate content similarity = worth connecting
+                if sim < 0.10:
+                    continue
 
-                            # Surface insight
-                            self._surface(Insight(
-                                kind=InsightKind.CONNECTION,
-                                summary=(
-                                    f"'{entity}' connects [{t_a.tool}] {t_a.topic} "
-                                    f"↔ [{t_b.tool}] {t_b.topic}"
-                                ),
-                                atoms=[entity, t_a.tool, t_a.topic, t_b.tool, t_b.topic],
-                                confidence=0.7,
-                            ))
+                self._woven_pairs.add(pair_key)
 
-                            # Create bridge thread if enough combined facts
-                            self._maybe_create_bridge(entity, t_a, t_b)
+                # Link threads bidirectionally
+                if t_b.thread_id not in t_a.related_threads:
+                    t_a.related_threads.append(t_b.thread_id)
+                if t_a.thread_id not in t_b.related_threads:
+                    t_b.related_threads.append(t_a.thread_id)
 
-    def _maybe_create_bridge(self, entity: str, t_a, t_b) -> None:
-        """Create a synthetic bridge thread combining facts from two related threads.
+                # Surface insight with the actual similarity score
+                self._surface(Insight(
+                    kind=InsightKind.CONNECTION,
+                    summary=(
+                        f"[{t_a.tool}] {t_a.topic} ↔ "
+                        f"[{t_b.tool}] {t_b.topic} "
+                        f"(sim={sim:.3f})"
+                    ),
+                    atoms=[t_a.tool, t_a.topic, t_b.tool, t_b.topic],
+                    confidence=sim,
+                ))
+
+                # Create bridge thread if similarity is strong enough
+                if sim >= 0.15 and t_a.facts and t_b.facts:
+                    self._create_bridge(t_a, t_b, sim)
+
+    def _create_bridge(self, t_a, t_b, similarity: float) -> None:
+        """Create a bridge thread consolidating facts from related threads.
 
         Bridge threads are tool="dream" — Ada dreamed the connection.
-        Only created when both threads have facts worth combining.
+        The bridge glyph is encoded from the combined content, so it
+        participates in future recall and dream cycles naturally.
         """
-        if not t_a.facts or not t_b.facts:
-            return
-
         from domains.brain.context_thread import ContextThread
 
-        # Merge entities from both threads (deduplicated)
         merged_entities = list(dict.fromkeys(t_a.entities + t_b.entities))
-
-        # Combine topics
         topics = sorted(set(filter(None, [t_a.topic, t_b.topic])))
         bridge_topic = "+".join(topics) if topics else "general"
-
-        # Combine facts (deduplicated, limited)
         merged_facts = list(dict.fromkeys(t_a.facts + t_b.facts))[:20]
 
         bridge = ContextThread(
@@ -604,16 +590,20 @@ class GlyphDreamLoop:
             topic=bridge_topic,
             entities=merged_entities,
             facts=merged_facts,
-            summary=f"Dream connection: {entity} across {t_a.tool}/{t_a.topic} ↔ {t_b.tool}/{t_b.topic}",
+            summary=(
+                f"Dream: [{t_a.tool}] {t_a.topic} ↔ "
+                f"[{t_b.tool}] {t_b.topic} (sim={similarity:.3f})"
+            ),
             related_threads=[t_a.thread_id, t_b.thread_id],
-            active=False,  # bridge threads are not active conversations
+            active=False,
         )
 
+        # store.add() encodes the bridge glyph automatically
         self._thread_store.add(bridge)
 
         logger.info(
-            "Dream wove bridge thread: %s (%d facts, %d entities)",
-            bridge_topic, len(merged_facts), len(merged_entities),
+            "Dream wove bridge: %s (%d facts, sim=%.3f)",
+            bridge_topic, len(merged_facts), similarity,
         )
 
     # ── Phase 5: Connect ─────────────────────────────────────────────

@@ -82,9 +82,12 @@ class Brain:
         from domains.brain.derivative import UserDerivative
         self._derivative = UserDerivative(self._cognitive.thought_space)
 
-        # Context threads — structured memory indexed by tool, topic, entity
+        # Context threads — glyphs with conversation context
+        # Uses the same encoder as thought space for consistent similarity
         from domains.brain.context_thread import ThreadStore
-        self._thread_store = ThreadStore()
+        self._thread_store = ThreadStore(
+            encoder=self._cognitive.thought_space.encoder,
+        )
 
         # Seed Ada's identity
         self._seed_memories()

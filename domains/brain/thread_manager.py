@@ -3,11 +3,10 @@ ThreadManager — manages context threads during conversation.
 
 Decides when to create a new thread vs extend an existing one.
 Infers topics from entities and facts. Closes threads when the
-topic shifts.
+topic shifts. Encodes threads as glyphs after each update.
 
 The manager sits between the extractor (which pulls structure from
-language) and the thread store (which indexes for recall). It makes
-the judgment calls about what belongs together.
+language) and the thread store (which does glyph-based recall).
 """
 
 from __future__ import annotations
@@ -43,12 +42,7 @@ _TOPIC_SIGNALS = {
 
 
 def infer_topic(text: str, entities: list[str], facts: list[str]) -> str:
-    """Infer a topic label from the content.
-
-    Checks all available text (input, entities, facts) against
-    topic signal words. Returns the best match or "general".
-    """
-    # Combine all text for matching
+    """Infer a topic label from the content."""
     combined = " ".join([text] + entities + facts).lower()
 
     best_topic = ""
@@ -67,22 +61,16 @@ class ThreadManager:
     """Manages context threads for a session.
 
     Usage:
-        manager = ThreadManager(store, tool="claude-code", session_id="abc")
+        manager = ThreadManager(store, tool="claude-code")
 
-        # On each interaction:
         thread = manager.process(
             input_text="my wife is Brandi",
             facts=["my wife is Brandi"],
             entities=["Brandi"],
-            question=None,
-            emotion=None,
         )
 
-        # Recall:
-        threads = manager.recall_for_query(
-            query_text="who is my wife?",
-            query_entities=["wife"],
-        )
+        results = manager.recall_for_query("who is my wife?")
+        # → [(thread, 0.72), ...]
     """
 
     def __init__(
@@ -112,25 +100,21 @@ class ThreadManager:
         question: str | None = None,
         emotion: str | None = None,
     ) -> ContextThread:
-        """Process an interaction — add to existing thread or create a new one.
+        """Process an interaction — add to existing thread or create new.
 
-        Returns the thread this interaction was added to.
+        After adding facts, re-encodes the thread glyph so the
+        encoding reflects the updated content.
         """
-        # Infer topic from the interaction
         topic = infer_topic(input_text, entities, facts)
-
-        # Should we extend the active thread or start a new one?
         thread = self._resolve_thread(topic, entities)
 
-        # Add facts and entities
         for fact in facts:
             thread.add_fact(fact, entities)
 
-        # If it's a question, add as context (not a fact)
         if question:
             thread.add_fact(f"[Q] {question}")
 
-        # Update the store indexes (entities may have changed)
+        # Re-encode the glyph (add_fact marks it stale)
         self._store.reindex(thread)
 
         self._active_thread = thread
@@ -143,50 +127,46 @@ class ThreadManager:
         query_topic: str = "",
         tool_filter: str = "",
     ) -> list[ContextThread]:
-        """Find threads relevant to a query.
+        """Find threads relevant to a query using glyph similarity.
 
-        Uses structured lookup: entity → topic → tool.
-        Falls back to the active thread if no specific match.
+        The query is encoded as a glyph and compared against all
+        thread glyphs using three-signal cosine similarity.
         """
-        # Infer topic from query if not given
-        if not query_topic:
-            query_topic = infer_topic(query_text, query_entities or [], [])
-
-        # Also extract implicit entities from the query
-        # "who is my wife?" → implicit entity "wife"
+        # Build the query text with any implicit entities
         implicit = _extract_implicit_entities(query_text)
         all_entities = list(set((query_entities or []) + implicit))
 
-        # Structured recall
-        threads = self._store.recall(
-            entities=all_entities if all_entities else None,
-            topic=query_topic if query_topic != "general" else "",
+        # Enrich the query with entities for better encoding
+        enriched = query_text
+        if all_entities:
+            enriched = query_text + " " + " ".join(all_entities)
+
+        results = self._store.recall(
+            query=enriched,
             tool=tool_filter,
             limit=5,
         )
 
-        return threads
+        return [thread for thread, score in results]
 
-    def collect_facts(self, threads: list[ContextThread]) -> list[tuple[str, str, float]]:
-        """Collect facts from threads in recall format.
+    def collect_facts(
+        self, threads: list[ContextThread],
+    ) -> list[tuple[str, str, float]]:
+        """Collect facts from threads in pipeline format.
 
-        Returns (content, speaker, confidence) tuples compatible
-        with the existing pipeline.
+        Returns (content, speaker, confidence) tuples.
+        Confidence comes from thread recency.
         """
         facts = []
         seen = set()
         for thread in threads:
-            # Thread relevance based on recency
             age_hours = (time.time() - thread.updated_at) / 3600
             base_confidence = 0.9 if age_hours < 1 else 0.7 if age_hours < 24 else 0.5
 
             for fact in thread.facts:
-                if fact in seen:
+                if fact in seen or fact.startswith("[Q] "):
                     continue
                 seen.add(fact)
-                # Skip question markers
-                if fact.startswith("[Q] "):
-                    continue
                 facts.append((fact, "incoming", base_confidence))
 
         return facts
@@ -197,35 +177,32 @@ class ThreadManager:
         """Decide whether to extend the active thread or create a new one.
 
         Rules:
-        1. If there's an active thread with overlapping entities → extend it
-        2. If there's an active thread with the same topic and it's recent → extend it
-        3. If the active thread is stale (>5min) → close it, start new
-        4. Otherwise → start a new thread
+        1. Active + overlapping entities → extend
+        2. Active + same topic + recent → extend
+        3. Stale (>5min) → close, start new
+        4. Different context → start new
         """
         if self._active_thread and self._active_thread.active:
             thread = self._active_thread
 
-            # Check if stale
             age = time.time() - thread.updated_at
             if age > THREAD_TIMEOUT_S:
                 thread.close()
                 return self._create_thread(topic, entities)
 
-            # Check entity overlap — strong signal of same context
             if entities:
                 for e in entities:
-                    if thread.matches_entity(e):
-                        # Update topic if it became more specific
+                    if any(
+                        existing.lower() == e.lower()
+                        for existing in thread.entities
+                    ):
                         if topic != "general" and thread.topic == "general":
                             thread.topic = topic
-                            self._store.reindex(thread)
                         return thread
 
-            # Same topic — probably continuing the same context
             if topic != "general" and thread.matches_topic(topic):
                 return thread
 
-            # Different topic, no entity overlap → new thread
             thread.close()
 
         return self._create_thread(topic, entities)
@@ -251,12 +228,10 @@ def _extract_implicit_entities(text: str) -> list[str]:
 
     "who is my wife?" → ["wife"]
     "tell me about Brandi" → ["Brandi"]
-    "what are my kids names?" → ["kids", "children"]
     """
     text_lower = text.lower()
     implicit = []
 
-    # Relationship words that imply entities
     _RELATIONSHIP_WORDS = [
         "wife", "husband", "spouse", "partner",
         "son", "daughter", "child", "children", "kids",
@@ -269,7 +244,6 @@ def _extract_implicit_entities(text: str) -> list[str]:
         if word in text_lower:
             implicit.append(word)
 
-    # Also grab capitalized words (proper nouns)
     for word in text.split():
         cleaned = word.strip("?.,!\"'")
         if cleaned and cleaned[0].isupper() and cleaned.lower() not in (

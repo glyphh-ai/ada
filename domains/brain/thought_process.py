@@ -231,9 +231,10 @@ class ThoughtProcess:
         extraction,
         tool: str,
     ) -> tuple[list[tuple], float]:
-        """Thread-based recall — structured entity/topic lookup.
+        """Thread-based recall — glyph similarity search.
 
-        Primary recall path. No cosine similarity needed.
+        Primary recall path. Same three-signal cosine similarity
+        as thought space, but at the thread level.
         Returns (facts, confidence) tuples.
         """
         if not self._thread_store or self._thread_store.count == 0:

@@ -99,10 +99,11 @@ def handle_memory(func: str | None, args: str = ""):
             except Exception as e:
                 click.secho(f"  Warning: could not clear database: {e}", fg=theme.WARNING)
 
-        # Clear thread store in memory
+        # Clear thread store in memory (preserve encoder reference)
         if brain is not None and hasattr(brain, '_thread_store'):
             from domains.brain.context_thread import ThreadStore
-            brain._thread_store = ThreadStore()
+            encoder = brain._thread_store.encoder
+            brain._thread_store = ThreadStore(encoder=encoder)
 
         path = os.path.expanduser("~/.glyphh/memory")
         if os.path.exists(path):
@@ -191,22 +192,18 @@ def handle_recall(func: str | None, args: str = ""):
         click.echo()
         return
 
-    # Search: try threads first, then HDC fallback
-    from domains.brain.thread_manager import ThreadManager, _extract_implicit_entities
-
-    entities = _extract_implicit_entities(query)
-    thread_results = store.recall(entities=entities if entities else None, limit=5)
+    # Search: glyph similarity on threads, then HDC fallback
+    thread_results = store.recall(query=query, limit=5)
 
     click.echo()
     click.secho(f"  recall: \"{query}\"", fg=theme.ACCENT, bold=True)
-    if entities:
-        click.secho(f"  entities: {', '.join(entities)}", fg=theme.TEXT_DIM)
     click.echo()
 
     if thread_results:
         click.secho("  ── threads ──", fg=theme.ACCENT)
-        for t in thread_results:
-            click.secho(f"  [{t.tool}] {t.topic}  ({len(t.facts)} facts)", fg="green")
+        for t, score in thread_results:
+            color = "green" if score >= 0.3 else "yellow" if score >= 0.15 else theme.TEXT_DIM
+            click.secho(f"  {score:.3f}  [{t.tool}] {t.topic}  ({len(t.facts)} facts)", fg=color)
             for fact in t.facts:
                 if fact.startswith("[Q] "):
                     click.secho(f"    ? {fact[4:]}", fg=theme.TEXT_DIM)
