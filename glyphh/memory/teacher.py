@@ -27,7 +27,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import TYPE_CHECKING
 
 from dataclasses import dataclass, field as dc_field
 
@@ -47,9 +46,6 @@ class LearnResult:
     @property
     def total(self) -> int:
         return self.atoms_created + self.pairs_created + self.compositions_created + self.facts_created
-
-if TYPE_CHECKING:
-    from glyphh.llm.engine import LLMEngine
 
 logger = logging.getLogger(__name__)
 

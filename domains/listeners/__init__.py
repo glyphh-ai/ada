@@ -1,9 +1,9 @@
 """
 Listeners Domain.
 
-Handles real-time glyph ingestion via WebSocket and HTTP batch endpoints.
+Handles async glyph ingestion via HTTP batch endpoints.
 """
 
-from domains.listeners.service import BatchResult, ConnectionInfo, ListenerService
+from domains.listeners.async_service import AsyncListenerService
 
-__all__ = ["ListenerService", "ConnectionInfo", "BatchResult"]
+__all__ = ["AsyncListenerService"]

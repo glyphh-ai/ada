@@ -104,8 +104,6 @@ from .cognitive import CognitiveLoop, DomainConfig, IdeaSpace, StepResult
 # Linguistics — layered HDC language engine (character → morphology → POS → syntax → attention)
 from .linguistics import LinguisticIntentParser
 
-# LLM — local language model inference (Ada's voice)
-from .llm import LLMEngine
 
 # Memory — Ada's thought glyph system + legacy types
 from .memory import (
@@ -230,8 +228,7 @@ __all__ = [
     "StepResult",
     # Linguistics Engine (layered HDC NLP)
     "LinguisticIntentParser",
-    # LLM Engine (Ada's voice)
-    "LLMEngine",
+
     # Memory — Thought Glyph system
     "PrimitiveSpace",
     "ThoughtGlyphEncoder",
