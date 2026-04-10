@@ -178,21 +178,6 @@ class RuntimeStatusResponse(BaseModel):
     storage_backend: str
 
 
-class ModelInfoResponse(BaseModel):
-    """Information about a deployed model"""
-    org_id: str
-    model_id: str
-    name: Optional[str] = None
-    version: Optional[str] = None
-    deployed_at: Optional[datetime] = None
-    status: str = "Active"
-
-
-class ModelsListResponse(BaseModel):
-    """List of deployed models"""
-    models: List[ModelInfoResponse]
-
-
 class TokenInfoResponse(BaseModel):
     """Information about a token"""
     id: str
@@ -238,25 +223,6 @@ class ErrorResponse(BaseModel):
 # Model Configuration Schemas
 # ============================================================================
 
-class SimilarityWeightsUpdate(BaseModel):
-    """Similarity weights for edge types"""
-    similarity: Optional[float] = Field(None, ge=0, le=1)
-    contrast: Optional[float] = Field(None, ge=0, le=1)
-    analogy: Optional[float] = Field(None, ge=0, le=1)
-    composition: Optional[float] = Field(None, ge=0, le=1)
-    precedes: Optional[float] = Field(None, ge=0, le=1)
-    follows: Optional[float] = Field(None, ge=0, le=1)
-    causes: Optional[float] = Field(None, ge=0, le=1)
-    prevents: Optional[float] = Field(None, ge=0, le=1)
-
-
-class ModelConfigUpdate(BaseModel):
-    """Request to update model configuration (no re-encode needed)"""
-    similarity_weights: Optional[SimilarityWeightsUpdate] = None
-    beam_width: Optional[int] = Field(None, ge=1, le=50)
-    max_tree_depth: Optional[int] = Field(None, ge=1, le=20)
-
-
 class ModelConfigResponse(BaseModel):
     """Current model configuration"""
     org_id: str
@@ -267,41 +233,6 @@ class ModelConfigResponse(BaseModel):
     resource_quotas: Dict[str, Any]
     resource_usage: Dict[str, Any]
     updated_at: datetime
-
-
-class ReEncodeRequest(BaseModel):
-    """Request to re-encode all glyphs"""
-    regenerate_edges: bool = Field(default=True, description="Regenerate edges after re-encoding")
-    background: bool = Field(default=True, description="Run as background job for large models")
-
-
-class ReEncodeResponse(BaseModel):
-    """Response from re-encode operation"""
-    status: str  # started, completed
-    job_id: Optional[str] = None  # If background=True
-    glyphs_processed: Optional[int] = None
-    edges_regenerated: Optional[int] = None
-    duration_ms: Optional[float] = None
-
-
-class ReEncodeStatusResponse(BaseModel):
-    """Status of a re-encode job"""
-    job_id: str
-    status: str  # pending, running, completed, failed
-    progress: float = Field(..., ge=0, le=1)
-    glyphs_total: int
-    glyphs_processed: int
-    started_at: datetime
-    completed_at: Optional[datetime] = None
-    error: Optional[str] = None
-
-
-class ClearDataResponse(BaseModel):
-    """Response from clear data operation"""
-    org_id: str
-    model_id: str
-    glyphs_deleted: int
-    edges_deleted: int
 
 
 # ============================================================================
