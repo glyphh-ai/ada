@@ -150,7 +150,6 @@ class Brain:
         facts = [
             f"The user's name is {name}.",
             f"You are {name}.",
-            f"Your name is {name}.",
             f"I am talking to {name}.",
         ]
         if email:
