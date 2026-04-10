@@ -306,6 +306,14 @@ class ThoughtProcess:
     async def _formulate_response(self, thought: Thought, input_text: str) -> str:
         """Formulate a natural response using Haiku."""
 
+        # ── Non-recall cognitive states ───────────────────────
+        # STORE/FEEL/CONTRADICT have their own response paths.
+        # Don't recall facts back at the user for a statement.
+        if thought.cognitive_state == "STORE":
+            return "Got it."
+        if thought.cognitive_state == "FEEL":
+            return "I hear you."
+
         # If a capability returned a result, use it directly
         if thought.action_success and thought.action_result:
             # Capability gave us structured data — have Haiku make it natural
