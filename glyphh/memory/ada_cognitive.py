@@ -123,12 +123,20 @@ class AdaCognitive:
 
     # ── Core API ──────────────────────────────────────────────────────────
 
-    def absorb(self, text: str, speaker: str = "incoming") -> None:
-        """Absorb input sentence by sentence as thought glyphs."""
+    def absorb(self, text: str, speaker: str = "incoming") -> "StoredThought | None":
+        """Absorb input sentence by sentence as thought glyphs.
+
+        Returns the last StoredThought created (or None if all were
+        duplicates / too short).
+        """
+        last = None
         for sentence in _split_sentences(text):
             if len(sentence) < 2:
                 continue
-            self._space.absorb(sentence, speaker=speaker)
+            result = self._space.absorb(sentence, speaker=speaker)
+            if result is not None:
+                last = result
+        return last
 
     def process(self, text: str) -> CognitiveResult:
         """Route + absorb + recall + gate + build prompt.

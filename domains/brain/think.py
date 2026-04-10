@@ -138,8 +138,21 @@ class Brain:
         if space.count > 0:
             return  # Already has memories, don't re-seed
         for text, speaker in self._SEED_MEMORIES:
-            self._cognitive.absorb(text, speaker=speaker)
+            stored = self._cognitive.absorb(text, speaker=speaker)
+            if stored:
+                self._persist_queue.append(stored)
         logger.info(f"Seeded {len(self._SEED_MEMORIES)} identity memories")
+
+    def seed_user_identity(self, name: str, email: str | None = None) -> None:
+        """Seed the authenticated user's identity into thought space."""
+        facts = [f"The user's name is {name}."]
+        if email:
+            facts.append(f"The user's email is {email}.")
+        facts.append(f"I am talking to {name}.")
+        for text in facts:
+            stored = self._cognitive.absorb(text, speaker="ada")
+            if stored:
+                self._persist_queue.append(stored)
 
     # ── Core API ─────────────────────────────────────────────────────────
 

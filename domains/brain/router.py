@@ -100,8 +100,8 @@ class BrainRouter:
         if result.gate == "DONE" and result.capability:
             return result
 
-        # ASK — use LLM to disambiguate
-        if llm and llm.available:
+        # ASK — use LLM to disambiguate only if HDC got close
+        if llm and llm.available and result.confidence >= 0.3:
             cap_names = list(self._state.capabilities.keys())
             if cap_names:
                 chosen = await llm.classify(query, cap_names)

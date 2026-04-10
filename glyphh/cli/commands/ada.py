@@ -1,5 +1,5 @@
 """
-CLI ada subcommand — dream control and memory reset.
+CLI dream and memory commands.
 
 The brain handles all conversation via the MCP think tool.
 These commands provide direct access to dream loop and memory management.
@@ -12,59 +12,50 @@ import click
 
 from .. import theme
 
-from glyphh.memory.ada_cognitive import AdaCognitive
 from glyphh.memory.glyph_dream import InsightKind
 
 
-# ── Ada singleton ─────────────────────────────────────────────────────────
-
-_MEMORY_DIR = os.path.expanduser("~/.glyphh/memory")
-_ada: AdaCognitive | None = None
-
-
-def _get_ada() -> AdaCognitive:
-    global _ada
-    if _ada is None:
-        _ada = AdaCognitive()
-    return _ada
+def _get_brain():
+    """Get the live brain from the running server."""
+    from glyphh.server import brain
+    return brain
 
 
-# ── Commands ──────────────────────────────────────────────────────────────
-
-def _do_reset() -> None:
-    """Clear all of Ada's memory."""
-    global _ada
-    if _ada is not None:
-        _ada.reset()
-        _ada = None
-    path = os.path.expanduser("~/.glyphh/memory")
-    if os.path.exists(path):
-        shutil.rmtree(path)
-    click.secho("  Memory cleared.", fg=theme.ACCENT)
+def _get_cognitive():
+    """Get the live AdaCognitive from the running brain."""
+    b = _get_brain()
+    if b is None:
+        return None
+    return b.cognitive
 
 
-def _do_dream(text: str) -> None:
-    """Control background reasoning."""
-    ada = _get_ada()
-    dream = ada._ensure_dream()
-    cmd = text.strip().lower() if text else ""
+# ── Dream commands ───────────────────────────────────────────────────────
 
-    if cmd in ("start", "on", ""):
-        if dream.is_running:
-            click.secho("  Already thinking.", fg=theme.TEXT_DIM)
+def handle_dream(func: str | None, args: str = ""):
+    """Route dream subcommands from the interactive shell."""
+    cmd = func.strip().lower() if func else "status"
+    cognitive = _get_cognitive()
+
+    if cognitive is None:
+        click.secho("  Brain not running.", fg=theme.ERROR)
+        return
+
+    if cmd in ("start", "on"):
+        if cognitive.is_dreaming:
+            click.secho("  Already dreaming.", fg=theme.TEXT_DIM)
         else:
-            ada.start_dreaming()
-            click.secho("  background reasoning started", fg=theme.ACCENT)
+            cognitive.start_dreaming()
+            click.secho("  Background reasoning started.", fg=theme.ACCENT)
 
     elif cmd in ("stop", "off"):
-        ada.stop_dreaming()
-        click.secho("  background reasoning stopped", fg=theme.ACCENT)
+        cognitive.stop_dreaming()
+        click.secho("  Background reasoning stopped.", fg=theme.ACCENT)
 
     elif cmd in ("status", "stats"):
-        stats = ada.dream_stats()
-        space = ada.thought_space
+        stats = cognitive.dream_stats()
+        space = cognitive.thought_space
         click.echo()
-        click.secho(f"  running:    {'yes' if ada.is_dreaming else 'no'}", fg=theme.TEXT)
+        click.secho(f"  running:    {'yes' if cognitive.is_dreaming else 'no'}", fg=theme.TEXT)
         click.secho(f"  localized:  {stats.get('localized_cycles', 0)} cycles (REM)", fg=theme.TEXT)
         click.secho(f"  deep:       {stats.get('deep_cycles', 0)} cycles (slow-wave)", fg=theme.TEXT)
         click.secho(f"  chains:     {stats.get('total_chains', 0)}", fg=theme.TEXT)
@@ -74,15 +65,48 @@ def _do_dream(text: str) -> None:
         click.secho(f"  primitives: {space.primitives.count} words -> {len(space.primitives.all_roles())} roles", fg=theme.TEXT)
 
     elif cmd in ("insights", "thoughts"):
-        insights = ada.drain_insights()
+        insights = cognitive.drain_insights()
         if not insights:
             click.secho("  No new insights.", fg=theme.TEXT_DIM)
         else:
             _show_insights(insights)
 
     else:
-        click.secho("  dream [start|stop|status|insights]", fg=theme.TEXT_DIM)
+        click.secho("  dream [status|start|stop|insights]", fg=theme.TEXT_DIM)
 
+
+# ── Memory commands ──────────────────────────────────────────────────────
+
+def handle_memory(func: str | None, args: str = ""):
+    """Route memory subcommands from the interactive shell."""
+    cmd = func.strip().lower() if func else ""
+
+    if cmd == "reset":
+        cognitive = _get_cognitive()
+        if cognitive is not None:
+            cognitive.reset()
+
+        # Clear SQLite ada_thoughts table
+        brain = _get_brain()
+        if brain is not None and hasattr(brain, '_session_factory'):
+            import asyncio
+            from glyphh.memory.thought_persistence import clear_all_thoughts
+            try:
+                loop = asyncio.get_event_loop()
+                loop.run_until_complete(clear_all_thoughts(brain._session_factory))
+            except RuntimeError:
+                # Already in async context — schedule it
+                asyncio.ensure_future(clear_all_thoughts(brain._session_factory))
+
+        path = os.path.expanduser("~/.glyphh/memory")
+        if os.path.exists(path):
+            shutil.rmtree(path)
+        click.secho("  Memory cleared.", fg=theme.ACCENT)
+    else:
+        click.secho("  memory reset              Clear all memory", fg=theme.TEXT_DIM)
+
+
+# ── Insight display ──────────────────────────────────────────────────────
 
 _INSIGHT_ICONS = {
     InsightKind.CONNECTION: ("!", theme.ACCENT),
@@ -103,45 +127,5 @@ def _show_insights(insights, max_show: int = 5) -> None:
         click.secho(f"  {icon} {insight.summary}", fg=color)
     remaining = len(insights) - max_show
     if remaining > 0:
-        click.secho(f"  ... and {remaining} more (type 'ada dream insights')", fg=theme.TEXT_DIM)
+        click.secho(f"  ... and {remaining} more (type 'dream insights')", fg=theme.TEXT_DIM)
     click.echo()
-
-
-# ── CLI command (glyphh ada) ──────────────────────────────────────────────
-
-@click.command("ada")
-@click.argument("action", required=False)
-@click.argument("text", required=False, nargs=-1)
-def ada_command(action, text):
-    """Ada brain commands — dream control and memory reset."""
-    if action and action.lower() in ("reset", "dream"):
-        args = " ".join(text) if text else ""
-        if action.lower() == "reset":
-            _do_reset()
-        else:
-            _do_dream(args)
-        return
-
-    click.secho("  ada dream [status|start|stop|insights]", fg=theme.MUTED)
-    click.secho("  ada reset", fg=theme.MUTED)
-
-
-# ── Handler for interactive shell ─────────────────────────────────────────
-
-def handle_ada(func: str | None, args: str = ""):
-    """Route ada subcommands from the interactive shell."""
-    full = " ".join(p for p in [func, args] if p).strip()
-
-    if full:
-        parts = full.split(None, 1)
-        cmd = parts[0].lower()
-        cmd_args = parts[1] if len(parts) > 1 else ""
-        if cmd == "reset":
-            _do_reset()
-            return
-        if cmd == "dream":
-            _do_dream(cmd_args)
-            return
-
-    click.secho("  ada dream [status|start|stop|insights]", fg=theme.MUTED)
-    click.secho("  ada reset", fg=theme.MUTED)

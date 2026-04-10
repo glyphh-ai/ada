@@ -133,6 +133,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Initialize the think pipeline ──────────────────────────────────
     from domains.brain.think import Brain
 
+    global brain
     brain = Brain(
         brain_state=brain_state,
         model_manager=model_manager,
@@ -148,6 +149,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info(f"Restored {loaded} memories from database")
     else:
         logger.info(f"No persisted memories — using {brain.cognitive.thought_space.count} seed memories")
+
+    # ── Seed user identity from auth ──────────────────────────────────
+    try:
+        from glyphh.cli.auth import get_user
+        user = get_user()
+        if user:
+            name = user.get("first_name", user.get("email", ""))
+            email = user.get("email")
+            if name:
+                brain.seed_user_identity(name, email)
+                logger.info(f"Seeded user identity: {name}")
+    except Exception:
+        pass  # server may run without CLI auth context
 
     logger.info("Think pipeline online")
 

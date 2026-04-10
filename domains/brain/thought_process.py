@@ -27,7 +27,7 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 MAX_CYCLES = 3
-CONFIDENCE_THRESHOLD = 0.35
+CONFIDENCE_THRESHOLD = 0.5
 
 
 @dataclass
@@ -145,7 +145,7 @@ class ThoughtProcess:
             thought.facts = facts
 
             # Gate: if gradient converged with strong matches, DONE
-            if grad_result.converged and facts and facts[0][2] >= 0.35:
+            if grad_result.converged and facts and facts[0][2] >= CONFIDENCE_THRESHOLD:
                 thought.memory_gate = "DONE"
             else:
                 thought.memory_gate = "ASK"
@@ -343,8 +343,8 @@ class ThoughtProcess:
             # LLM offline — return top fact directly
             return thought.facts[0][0]
 
-        if thought.facts and thought.facts[0][2] > 0.3:
-            # Partial match — some facts but not fully converged
+        if thought.facts and thought.facts[0][2] >= CONFIDENCE_THRESHOLD:
+            # Partial match above confidence threshold — LLM can synthesize
             if self._llm.available:
                 parts = [f"User said: \"{input_text}\""]
                 parts.append("\nPossibly relevant memories (not fully confirmed):")
@@ -358,5 +358,5 @@ class ThoughtProcess:
                 if response:
                     return response
 
-        # No facts, no convergence — honest "I don't know"
+        # No facts, low confidence, or no convergence — honest "I don't know"
         return "I don't have information about that in my memory."

@@ -190,6 +190,19 @@ async def archive_thought(
         await session.commit()
 
 
+async def clear_all_thoughts(session_factory: Any) -> int:
+    """Delete all thoughts from SQLite. Called by 'memory reset'."""
+    from domains.models.db_models import AdaThought
+    from sqlalchemy import delete as sa_delete
+
+    async with session_factory() as session:
+        result = await session.execute(sa_delete(AdaThought))
+        await session.commit()
+        count = result.rowcount
+        logger.info(f"Cleared {count} thoughts from database")
+        return count
+
+
 async def flush_all_strengths(
     session_factory: Any,
     space: ThoughtGlyphSpace,

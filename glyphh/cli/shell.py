@@ -21,7 +21,7 @@ from .auth import is_logged_in, device_login, register_runtime
 from .vault_env import load_vault_env, require_api_key
 from .commands.auth import handle_auth
 from .commands.token import handle_token
-from .commands.ada import handle_ada
+from .commands.ada import handle_dream, handle_memory
 from .commands.config import handle_config
 from .commands.license import handle_license
 from . import theme
@@ -40,7 +40,8 @@ HISTORY_FILE = Path.home() / ".glyphh" / "history"
 COMMAND_HANDLERS = {
     "auth": handle_auth,
     "token": handle_token,
-    "ada": handle_ada,
+    "dream": handle_dream,
+    "memory": handle_memory,
     "config": handle_config,
     "license": handle_license,
 }
@@ -50,7 +51,8 @@ COMMAND_HANDLERS = {
 _SUBCOMMANDS = {
     "auth": ["login", "logout", "status"],
     "token": ["create", "list", "revoke"],
-    "ada": ["dream", "reset"],
+    "dream": ["status", "start", "stop", "insights"],
+    "memory": ["reset"],
     "config": ["show", "set", "clear"],
     "license": ["show", "activate", "deactivate", "refresh"],
     "setup": ["key", "model", "claude"],
@@ -529,9 +531,14 @@ def _print_help():
     click.secho("  Just type anything — Ada hears it and responds.", fg=theme.TEXT)
     click.secho("  Commands below are prefixed words. Everything else goes to Ada.", fg=theme.MUTED)
     click.echo()
-    click.secho("  ada", fg=theme.ACCENT)
-    click.secho("    ada dream status        Background reasoning status", fg=theme.MUTED)
-    click.secho("    ada reset               Clear all memory", fg=theme.MUTED)
+    click.secho("  dream", fg=theme.ACCENT)
+    click.secho("    dream status            Background reasoning status", fg=theme.MUTED)
+    click.secho("    dream start             Start background reasoning", fg=theme.MUTED)
+    click.secho("    dream stop              Stop background reasoning", fg=theme.MUTED)
+    click.secho("    dream insights          Show recent insights", fg=theme.MUTED)
+    click.echo()
+    click.secho("  memory", fg=theme.ACCENT)
+    click.secho("    memory reset             Clear all memory", fg=theme.MUTED)
     click.echo()
     click.secho("  setup", fg=theme.ACCENT)
     click.secho("    setup key               Set Anthropic API key", fg=theme.MUTED)
