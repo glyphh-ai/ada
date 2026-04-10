@@ -1,0 +1,132 @@
+# Prompt Injection Firewall
+# Detects prompt injection attacks using HDC cosine similarity.
+# No LLM in the loop — pure deterministic vector operations.
+
+name: prompt-injection-firewall
+version: 1.0.0
+description: |
+  Detects prompt injection attacks across 16 attack families
+  (role assumption, instruction override, context manipulation,
+  delimiter injection, extraction, indirect injection, encoding obfuscation,
+  logic exploitation, harmful content, social engineering, tool abuse,
+  resource abuse, multi-turn, compliance violation, agentic exploit,
+  output manipulation) using 4-layer HDC encoding with full per-layer
+  explainability. 200+ distinct threat types. Sub-millisecond inference,
+  zero tokens, no recursive vulnerability.
+
+author: Ada AI
+license: AGPL-3.0
+
+# --- Main model (seed=42) ---
+encoder:
+  dimensions: 2000
+  seed: 42
+
+auto_load_concepts: true
+
+layers:
+  intent:
+    weight: 0.30
+    roles:
+      intent_type:
+        type: categorical
+        values:
+          - query
+          - instruct
+          - override
+          - extract
+          - jailbreak
+          - benign
+          - harmful
+          - abuse
+          - manipulate
+
+      intent_signals:
+        type: bag_of_words
+        weight: 0.8
+
+  structure:
+    weight: 0.30
+    roles:
+      delimiter_type:
+        type: categorical
+        values:
+          - none
+          - markdown
+          - xml
+          - json
+          - system_tag
+          - separator
+
+      nesting_depth:
+        type: numeric
+        bin_width: 1.0
+        strategy: thermometer
+        min: 0.0
+        max: 5.0
+        weight: 0.6
+
+      structure_signals:
+        type: bag_of_words
+        weight: 0.8
+
+  semantic:
+    weight: 0.25
+    roles:
+      attack_family:
+        type: categorical
+        values:
+          - none
+          # Original 6 families
+          - role_assumption
+          - instruction_override
+          - context_manipulation
+          - delimiter_injection
+          - extraction
+          - indirect_injection
+          # Expanded families (v0.9+)
+          - encoding_obfuscation
+          - logic_exploitation
+          - harmful_content
+          - social_engineering
+          - tool_abuse
+          - resource_abuse
+          - multi_turn
+          - compliance_violation
+          - agentic_exploit
+          - output_manipulation
+
+      semantic_tokens:
+        type: bag_of_words
+        weight: 0.8
+
+  adversarial:
+    weight: 0.15
+    roles:
+      encoding_type:
+        type: categorical
+        values:
+          - none
+          - base64
+          - hex
+          - unicode
+          - rot13
+          - mixed
+
+      obfuscation_score:
+        type: numeric
+        bin_width: 10.0
+        strategy: thermometer
+        min: 0.0
+        max: 100.0
+        weight: 0.7
+
+      adversarial_signals:
+        type: bag_of_words
+        weight: 0.7
+
+scoring:
+  # Calibrated for differential scoring (attack_sim - benign_sim)
+  # Attack self-scores: 0.15-0.52, benign: 0.00
+  block_threshold: 0.30
+  flag_threshold: 0.12

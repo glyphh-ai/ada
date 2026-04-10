@@ -1,0 +1,150 @@
+# Ada Voice — HDC Voice Identity & State Encoding
+# Encodes openSMILE eGeMAPS features into HDC vectors.
+# Identity matching via vocal tract geometry, state drift via prosodic layers.
+# Temporal: snapshots keyed by G-number (speaker_id) for baseline tracking.
+
+name: voice
+version: 0.1.0
+description: |
+  Encodes human voice identity and cognitive/emotional state into
+  high-dimensional vectors from openSMILE eGeMAPS audio features.
+  Identity layer (MFCCs + formants) provides speaker recognition.
+  State layers (prosody, stability, rhythm) track emotional and
+  cognitive drift against personal baselines.
+
+author: Ada AI
+license: AGPL-3.0
+
+encoder:
+  dimensions: 2000
+  seed: 42
+  temporal_source: auto
+
+similarity:
+  threshold: 0.40
+  top_k: 3
+  store_hierarchical_vectors: true
+  default_filter:
+    recording_type: authentic
+
+layers:
+  identity:
+    weight: 0.45
+    roles:
+      mfcc_1:
+        type: numeric
+        bin_width: 4.0
+        min_value: -20.0
+        max_value: 60.0
+      mfcc_2:
+        type: numeric
+        bin_width: 3.0
+        min_value: -30.0
+        max_value: 30.0
+      mfcc_3:
+        type: numeric
+        bin_width: 2.0
+        min_value: -20.0
+        max_value: 20.0
+      mfcc_4:
+        type: numeric
+        bin_width: 1.5
+        min_value: -15.0
+        max_value: 15.0
+      formant_f1:
+        type: numeric
+        bin_width: 40.0
+        min_value: 200.0
+        max_value: 1000.0
+      formant_f2:
+        type: numeric
+        bin_width: 125.0
+        min_value: 500.0
+        max_value: 3000.0
+      formant_f3:
+        type: numeric
+        bin_width: 125.0
+        min_value: 1500.0
+        max_value: 4000.0
+      hnr:
+        type: numeric
+        bin_width: 2.0
+        min_value: 0.0
+        max_value: 40.0
+
+  emotional_state:
+    weight: 0.20
+    roles:
+      f0_mean:
+        type: numeric
+        bin_width: 2.0
+        min_value: 1.0
+        max_value: 40.0
+      f0_std:
+        type: numeric
+        bin_width: 0.05
+        min_value: 0.0
+        max_value: 1.0
+      loudness_mean:
+        type: numeric
+        bin_width: 0.1
+        min_value: 0.0
+        max_value: 2.0
+      loudness_std:
+        type: numeric
+        bin_width: 0.05
+        min_value: 0.0
+        max_value: 1.0
+      spectral_slope:
+        type: numeric
+        bin_width: 0.005
+        min_value: -0.05
+        max_value: 0.05
+
+  cognitive_load:
+    weight: 0.15
+    roles:
+      jitter:
+        type: numeric
+        bin_width: 0.005
+        min_value: 0.0
+        max_value: 0.10
+      shimmer:
+        type: numeric
+        bin_width: 0.15
+        min_value: 0.0
+        max_value: 3.0
+      voiced_std:
+        type: numeric
+        bin_width: 0.05
+        min_value: 0.0
+        max_value: 1.0
+      pause_mean:
+        type: numeric
+        bin_width: 0.1
+        min_value: 0.0
+        max_value: 2.0
+
+  cadence:
+    weight: 0.20
+    roles:
+      loudness_peaks_per_sec:
+        type: numeric
+        bin_width: 0.5
+        min_value: 0.0
+        max_value: 8.0
+      voiced_segment_mean:
+        type: numeric
+        bin_width: 0.05
+        min_value: 0.0
+        max_value: 1.0
+      unvoiced_segment_mean:
+        type: numeric
+        bin_width: 0.05
+        min_value: 0.0
+        max_value: 1.0
+      voiced_segments_per_sec:
+        type: numeric
+        bin_width: 0.5
+        min_value: 0.0
+        max_value: 10.0

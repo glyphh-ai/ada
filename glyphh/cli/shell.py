@@ -3,6 +3,9 @@ Interactive REPL shell for Glyphh CLI.
 
 After login, starts the runtime server in a daemon thread (dies when
 the shell exits — no PID files, no background daemon, no state files).
+
+Default mode: free text goes to Ada's brain via the /mcp think tool.
+Commands (auth, model, token, etc.) are still available as prefixed words.
 """
 
 import os
@@ -15,6 +18,7 @@ from pathlib import Path
 
 from .banner import print_banner
 from .auth import is_logged_in, device_login, register_runtime
+from .vault_env import load_vault_env, require_api_key
 from .commands.auth import handle_auth
 from .commands.model import handle_model
 from .commands.token import handle_token
@@ -26,6 +30,7 @@ from .commands.docker import handle_docker
 from .commands.hub import handle_hub
 from .commands.license import handle_license
 from . import theme
+from .spinner import GridSpinner
 
 # Try to import readline for history/completion
 try:
@@ -146,6 +151,7 @@ _SUBCOMMANDS = {
     "docker": ["init"],
     "hub": ["list", "search", "install"],
     "license": ["show", "activate", "deactivate", "refresh"],
+    "setup": ["key", "model", "claude"],
 }
 
 _CATEGORIES = list(_SUBCOMMANDS.keys()) + ["help", "clear", "home", "exit", "quit"]
@@ -230,7 +236,7 @@ def save_history():
 
 def get_prompt() -> str:
     """Get the shell prompt."""
-    return click.style("glyphh", fg=theme.PRIMARY) + click.style("> ", fg=theme.TEXT)
+    return click.style("ada", fg=theme.PRIMARY) + click.style("> ", fg=theme.TEXT)
 
 
 # ── Embedded runtime server ─────────────────────────────────────────────────
@@ -396,6 +402,102 @@ def _provision_runtime_token(port: int) -> str | None:
         return None
 
 
+# ── Ada brain interface ──────────────────────────────────────────────────────
+
+
+def _think(text: str, port: int) -> None:
+    """Send free text to Ada's brain via the MCP think tool."""
+    import httpx
+    import json
+
+    try:
+        # Call MCP endpoint directly via HTTP POST
+        with GridSpinner("  ada> "):
+            with httpx.Client(timeout=30) as client:
+                res = client.post(
+                    f"http://127.0.0.1:{port}/mcp",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "think",
+                            "arguments": {"input": text},
+                        },
+                    },
+                    headers={"Accept": "application/json", "Content-Type": "application/json"},
+                )
+
+        if res.status_code != 200:
+            click.secho(f"  Error: server returned {res.status_code}", fg=theme.ERROR)
+            return
+
+        body = res.json()
+
+        # MCP response: result.content[0].text contains JSON
+        result = body.get("result", {})
+        content = result.get("content", [])
+        if not content:
+            click.secho("  No response from Ada.", fg=theme.MUTED)
+            return
+
+        response_text = content[0].get("text", "")
+        try:
+            data = json.loads(response_text)
+        except json.JSONDecodeError:
+            data = {"response": response_text}
+
+        response = data.get("response", "")
+        capability = data.get("capability", "")
+        confidence = data.get("confidence", 0)
+        elapsed = data.get("elapsed_ms", 0)
+
+        if data.get("error"):
+            click.secho(f"  Error: {data['error']}", fg=theme.ERROR)
+            return
+
+        # Print response
+        click.echo()
+        click.secho("  ada", fg=theme.ACCENT, bold=True)
+
+        # Word-wrap the response at ~80 cols
+        if response:
+            for line in response.split("\n"):
+                col = 2
+                click.echo("  ", nl=False)
+                words = line.split(" ")
+                for i, word in enumerate(words):
+                    if col + len(word) + 1 > 80 and col > 2:
+                        click.echo()
+                        click.echo("  ", nl=False)
+                        col = 2
+                    if i > 0 and col > 2:
+                        sys.stdout.write(" ")
+                        col += 1
+                    sys.stdout.write(word)
+                    col += len(word)
+                click.echo()
+        else:
+            click.secho("  (no response)", fg=theme.MUTED)
+
+        # Debug line
+        if capability or confidence:
+            meta_parts = []
+            if capability:
+                meta_parts.append(capability)
+            if confidence:
+                meta_parts.append(f"{confidence:.0%}")
+            if elapsed:
+                meta_parts.append(f"{elapsed:.0f}ms")
+            click.secho(f"  [{' · '.join(meta_parts)}]", fg=theme.TEXT_DIM)
+        click.echo()
+
+    except httpx.ConnectError:
+        click.secho("  Error: cannot reach runtime server", fg=theme.ERROR)
+    except Exception as e:
+        click.secho(f"  Error: {e}", fg=theme.ERROR)
+
+
 # ── Shell entry point ────────────────────────────────────────────────────────
 
 
@@ -425,6 +527,14 @@ def shell(ctx):
     else:
         register_runtime()
 
+    # Load vault secrets (API key, etc.) into os.environ
+    load_vault_env()
+
+    # Require Anthropic API key before starting
+    if not require_api_key():
+        click.secho("  Cannot start without an API key.", fg=theme.MUTED)
+        return
+
     # Start embedded runtime server
     click.secho("  Starting runtime...", fg=theme.MUTED)
     port = _start_embedded_server()
@@ -439,11 +549,21 @@ def shell(ctx):
         click.secho("  Warning: could not provision runtime token — using Platform JWT", fg=theme.WARNING)
 
     url = f"http://localhost:{port}"
+    model = os.environ.get("ADA_MODEL", "claude-haiku-4-5-20251001")
+    has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
     click.echo()
-    click.secho(f"  Runtime:   {url}", fg=theme.ACCENT)
+    click.secho(f"  MCP        {url}/mcp", fg=theme.ACCENT)
+    click.secho(f"  Tool       think(input)", fg=theme.TEXT_DIM)
+    click.secho(f"  LLM        {model}", fg=theme.TEXT_DIM)
+    if has_key:
+        click.echo(click.style("  Key        ", fg=theme.TEXT_DIM) + click.style("●", fg="green") + click.style(" set", fg=theme.TEXT_DIM))
+    else:
+        click.echo(click.style("  Key        ", fg=theme.TEXT_DIM) + click.style("○", fg=theme.WARNING) + click.style(" not set (run setup key)", fg=theme.TEXT_DIM))
     if os.environ.get("ENABLE_DOCS") == "true":
-        click.secho(f"  API docs:  {url}/docs", fg=theme.TEXT_DIM)
-    click.secho(f"  Logs:      ~/.glyphh/runtime.log", fg=theme.TEXT_DIM)
+        click.secho(f"  Docs       {url}/docs", fg=theme.TEXT_DIM)
+    click.secho(f"  Logs       ~/.glyphh/runtime.log", fg=theme.TEXT_DIM)
+    click.echo()
+    click.secho("  Just type. Ada hears everything. Type 'help' for commands.", fg=theme.MUTED)
     click.echo()
 
     try:
@@ -470,6 +590,11 @@ def shell(ctx):
                     subprocess.run(line[1:].strip(), shell=True)
                     continue
 
+                # Handle setup commands
+                if line.lower().startswith("setup"):
+                    _handle_setup(line)
+                    continue
+
                 # Parse <category> <function> [args] format
                 parts = line.split(None, 2)
                 category = parts[0].lower()
@@ -483,8 +608,8 @@ def shell(ctx):
                     if category == "auth" and func == "logout":
                         break
                 else:
-                    click.secho(f"  unknown command: {line}", fg=theme.MUTED)
-                    click.secho("  type 'help' for available commands", fg=theme.TEXT_DIM)
+                    # Not a command — send to Ada's brain
+                    _think(line, port)
 
             except KeyboardInterrupt:
                 click.echo()
@@ -498,8 +623,41 @@ def shell(ctx):
         click.secho("Goodbye!", fg="cyan")
 
 
+def _handle_setup(line: str) -> None:
+    """Handle setup commands (key, model, claude)."""
+    from .vault_env import setup_key, setup_model, setup_claude_code
+
+    parts = line.split()
+    sub = parts[1].lower() if len(parts) > 1 else ""
+
+    if sub == "key":
+        setup_key()
+    elif sub == "model":
+        setup_model()
+    elif sub in ("claude", "claude-code"):
+        setup_claude_code()
+    else:
+        click.echo()
+        click.secho("  setup key          Set Anthropic API key", fg=theme.MUTED)
+        click.secho("  setup model        Change Ada's internal LLM model", fg=theme.MUTED)
+        click.secho("  setup claude       Auto-configure Claude Code", fg=theme.MUTED)
+        click.echo()
+
+
 def _print_help():
     """Print available commands grouped by category."""
+    click.echo()
+    click.secho("  Just type anything — Ada hears it and responds.", fg=theme.TEXT)
+    click.secho("  Commands below are prefixed words. Everything else goes to Ada.", fg=theme.MUTED)
+    click.echo()
+    click.secho("  ada", fg=theme.ACCENT)
+    click.secho("    ada dream status        Background reasoning status", fg=theme.MUTED)
+    click.secho("    ada reset               Clear all memory", fg=theme.MUTED)
+    click.echo()
+    click.secho("  setup", fg=theme.ACCENT)
+    click.secho("    setup key               Set Anthropic API key", fg=theme.MUTED)
+    click.secho("    setup model             Change Ada's internal LLM model", fg=theme.MUTED)
+    click.secho("    setup claude            Auto-configure Claude Code", fg=theme.MUTED)
     click.echo()
     click.secho("  auth", fg=theme.ACCENT)
     click.secho("    auth login              Log in via browser", fg=theme.MUTED)
@@ -510,55 +668,30 @@ def _print_help():
     click.secho("    model list              List deployed models", fg=theme.MUTED)
     click.secho("    model deploy [path]     Deploy model to runtime", fg=theme.MUTED)
     click.secho("    model load <file>       Load data from concepts.json", fg=theme.MUTED)
-    click.secho("    model data              View stored glyphs", fg=theme.MUTED)
-    click.secho("    model count             Show glyph/vector counts", fg=theme.MUTED)
-    click.secho("    model clear             Clear all data (keep model)", fg=theme.MUTED)
-    click.secho("    model re-encode         Re-encode all glyphs", fg=theme.MUTED)
     click.secho("    model status [id]       Check deployed status", fg=theme.MUTED)
     click.secho("    model undeploy [id]     Remove from runtime", fg=theme.MUTED)
-    click.secho("    model init [name]       Scaffold new model", fg=theme.MUTED)
-    click.secho("    model package [path]    Create .glyphh file", fg=theme.MUTED)
     click.echo()
     click.secho("  token", fg=theme.ACCENT)
     click.secho("    token create             Create an API token", fg=theme.MUTED)
     click.secho("    token list               List active tokens", fg=theme.MUTED)
     click.secho("    token revoke <id>        Revoke a token", fg=theme.MUTED)
     click.echo()
-    click.secho("  query", fg=theme.ACCENT)
-    click.secho("    query <model-id> <question>  Query a deployed model", fg=theme.MUTED)
-    click.echo()
-    click.secho("  chat", fg=theme.ACCENT)
-    click.secho("    chat <model-id>          Open interactive chat REPL", fg=theme.MUTED)
-    click.secho("    chat <model-id> <query>  Single query and return", fg=theme.MUTED)
-    click.echo()
-    click.secho("  ada", fg=theme.ACCENT)
-    click.secho("    ada                      Talk to Ada (local LLM)", fg=theme.MUTED)
-    click.secho("    ada <question>           Single query and return", fg=theme.MUTED)
-    click.echo()
     click.secho("  hub", fg=theme.ACCENT)
-    click.secho("    hub                      Browse model registry", fg=theme.MUTED)
-    click.secho("    hub list                 Browse with paginated cards", fg=theme.MUTED)
+    click.secho("    hub list                 Browse model registry", fg=theme.MUTED)
     click.secho("    hub search <query>       Search by name, tag, category", fg=theme.MUTED)
     click.secho("    hub install <id>         Install a model from the registry", fg=theme.MUTED)
-    click.echo()
-    click.secho("  docker", fg=theme.ACCENT)
-    click.secho("    docker init [--force]    Write docker-compose.yml + init.sql", fg=theme.MUTED)
     click.echo()
     click.secho("  license", fg=theme.ACCENT)
     click.secho("    license show             Display current license info", fg=theme.MUTED)
     click.secho("    license activate <jwt>   Activate a license token", fg=theme.MUTED)
-    click.secho("    license deactivate       Remove license (free tier)", fg=theme.MUTED)
-    click.secho("    license refresh          Re-fetch license from Platform", fg=theme.MUTED)
     click.echo()
     click.secho("  config", fg=theme.ACCENT)
     click.secho("    config show              Show current configuration", fg=theme.MUTED)
     click.secho("    config set endpoint <url> Set runtime endpoint", fg=theme.MUTED)
-    click.secho("    config set token <jwt>   Set runtime auth token", fg=theme.MUTED)
-    click.secho("    config clear             Clear all config", fg=theme.MUTED)
     click.echo()
     # Show installed plugin commands
     builtin_categories = {
-        "auth", "model", "token", "query", "chat", "config", "docker", "hub", "license",
+        "auth", "model", "token", "query", "chat", "config", "docker", "hub", "license", "ada",
     }
     plugin_categories = [c for c in _SUBCOMMANDS if c not in builtin_categories]
     if plugin_categories:
@@ -571,13 +704,10 @@ def _print_help():
 
     click.secho("  general", fg=theme.ACCENT)
     click.secho("    clear, home             Clear screen and show banner", fg=theme.MUTED)
-    click.secho("    !<command>              Run a shell command (e.g. !python3 script.py)", fg=theme.MUTED)
+    click.secho("    !<command>              Run a shell command", fg=theme.MUTED)
     click.secho("    exit, quit, q           Exit the shell", fg=theme.MUTED)
-    click.secho("    help                    Show this message", fg=theme.MUTED)
     click.echo()
     click.secho("  background server", fg=theme.ACCENT)
     click.secho("    The shell embeds the runtime — it stops when you quit.", fg=theme.MUTED)
-    click.secho("    To keep it running for MCP and listeners:", fg=theme.MUTED)
-    click.secho("      glyphh serve          Foreground (Ctrl+C to stop)", fg=theme.TEXT_DIM)
-    click.secho("      glyphh serve &        Background (shell job)", fg=theme.TEXT_DIM)
+    click.secho("      glyphh serve          Run standalone (Ctrl+C to stop)", fg=theme.TEXT_DIM)
     click.echo()

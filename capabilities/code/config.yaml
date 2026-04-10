@@ -1,0 +1,25 @@
+# Ada Code — file-level codebase intelligence via HDC encoding
+# Encodes source files using path, symbol, content, and relationship layers.
+# NL queries find files by meaning. No LLM at build or search time.
+
+name: ada-code
+version: 0.1.0
+description: |
+  File-level codebase intelligence. Encodes source files as HDC vectors
+  using path segments, AST-extracted symbols, content identifiers/imports,
+  and inter-file relationships. Hierarchical per-layer vectors enable
+  targeted search (find by path, by symbol, by usage). Sub-millisecond
+  inference, zero tokens.
+
+author: Ada AI
+
+encoder:
+  dimensions: 2000
+  seed: 42
+
+auto_load_concepts: true
+
+similarity:
+  threshold: 0.10
+  top_k: 5
+  store_hierarchical_vectors: true

@@ -1,14 +1,19 @@
 """
-Glyphh Runtime Server — single FastAPI application definition.
+Glyphh Runtime Server — Ada's brain with production infrastructure.
+
+Single FastAPI application combining Ada's cognitive pipeline with
+Glyphh's auth, licensing, metering, and deployment infrastructure.
 
 Importable as ``glyphh.server:app`` for both pip-installed CLI usage and
 Docker/production deployments.  The repo-root ``main.py`` is a thin shim
 that re-exports this app.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import AsyncGenerator, Optional
 
 from fastapi import FastAPI, Request
@@ -36,9 +41,11 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 _start_time = datetime.utcnow()
 
-# Global model manager instance
+# ── Global state ────────────────────────────────────────────────────────────
+
 model_manager: Optional[ModelManager] = None
 resource_manager: Optional[ResourceManager] = None
+brain: Optional[object] = None  # domains.brain.think.Brain — set in lifespan
 
 
 def get_model_manager() -> ModelManager:
@@ -51,15 +58,24 @@ def get_resource_manager() -> ResourceManager:
     return resource_manager
 
 
+def get_brain():
+    """Dependency for getting the brain"""
+    return brain
+
+
+# ── Capabilities directory ──────────────────────────────────────────────────
+
+CAPABILITIES_DIR = Path(__file__).resolve().parent.parent / "capabilities"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan management"""
-    global model_manager, resource_manager
+    """Boot Ada's brain with Glyphh production infrastructure."""
+    global model_manager, resource_manager, brain
 
-    # Startup
-    logger.info("Starting Glyphh Runtime...")
+    logger.info("Waking up...")
 
-    # Validate configuration
+    # ── Configuration ───────────────────────────────────────────────────
     try:
         validate_settings()
         logger.info("Configuration validated")
@@ -67,7 +83,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error(f"Configuration error: {e}")
         raise
 
-    # Load license (determines tier and limits)
+    # ── Licensing & metering ────────────────────────────────────────────
     license_info = load_license()
     app.state.license = license_info
     set_current_license(license_info)
@@ -76,7 +92,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         f"ops={license_info.format_limit()}/mo, runtimes={license_info.max_runtimes}"
     )
 
-    # Show current month's usage
     from glyphh.metering import get_meter
     meter = get_meter()
     usage = meter.get_usage(license_info.org_id)
@@ -92,53 +107,120 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     f"Approaching monthly limit ({usage:,}/{license_info.max_encodings_per_month:,})"
                 )
 
+    # ── Database ────────────────────────────────────────────────────────
     await init_db()
-    logger.info("Database initialized")
+    logger.info("Memory banks online")
 
-    # Initialize model manager
+    # ── Model & resource managers ───────────────────────────────────────
     model_manager = ModelManager(async_session_maker)
-    logger.info("Model manager initialized")
-
-    # Initialize resource manager
     resource_manager = ResourceManager(async_session_maker)
-    logger.info("Resource manager initialized")
 
-    # Initialize MCP session managers
+    # ── Load innate capabilities ────────────────────────────────────────
+    from domains.brain.loader import CapabilityLoader, register_capabilities_in_db
+
+    brain_state = CapabilityLoader.boot(CAPABILITIES_DIR)
+    app.state.brain_state = brain_state
+
+    # Register capabilities in DB (loads exemplars, creates encoders)
+    await register_capabilities_in_db(brain_state, model_manager)
+
+    # ── Initialize Ada's LLM ───────────────────────────────────────────
+    from domains.brain.llm import AdaLLM
+
+    llm = AdaLLM()
+    app.state.llm = llm
+
+    # ── Initialize the think pipeline ──────────────────────────────────
+    from domains.brain.think import Brain
+
+    brain = Brain(
+        brain_state=brain_state,
+        model_manager=model_manager,
+        llm=llm,
+        session_factory=async_session_maker,
+    )
+    app.state.brain = brain
+
+    # ── Load persistent memories ───────────────────────────────────────
+    from glyphh.memory.thought_persistence import load_thoughts
+    loaded = await load_thoughts(async_session_maker, brain.cognitive.thought_space)
+    if loaded:
+        logger.info(f"Restored {loaded} memories from database")
+    else:
+        logger.info(f"No persisted memories — using {brain.cognitive.thought_space.count} seed memories")
+
+    logger.info("Think pipeline online")
+
+    # ── Initialize MCP ─────────────────────────────────────────────────
     from domains.auth.service import AuthService
-    from domains.query.service import QueryService
     from domains.mcp.app import create_mcp_session_managers
 
-    query_service = QueryService(model_manager, async_session_maker)
     auth_service = AuthService()
-    json_manager, sse_manager = create_mcp_session_managers(query_service, auth_service)
+    json_manager, sse_manager = create_mcp_session_managers(brain, auth_service)
     app.state.mcp_session_managers = (json_manager, sse_manager)
-    logger.info("MCP Streamable HTTP server initialized (JSON + SSE)")
+    logger.info("MCP endpoint online at /mcp")
 
-    # Resume any incomplete staged exemplar encoding from a previous run
+    # ── Resume any incomplete encoding from previous boot ──────────────
     try:
         await model_manager.resume_staged_encoding()
     except Exception as e:
-        logger.warning(f"Staged encoding resume failed: {e}")
+        logger.warning(f"Staged encoding resume: {e}")
 
-    # Start both MCP session manager lifecycles
+    # ── Wait for ALL encoding to finish before accepting requests ──────
+    if model_manager._encoding_in_progress:
+        logger.info(
+            f"Waiting for exemplar encoding to finish: "
+            f"{[k[1] for k in model_manager._encoding_in_progress]}"
+        )
+        while model_manager._encoding_in_progress:
+            await asyncio.sleep(1.0)
+        logger.info("All exemplars encoded")
+
+    # ── Start dream loop ───────────────────────────────────────────────
+    brain.start_dreaming()
+    logger.info("Dream loop active")
+
+    # ── Start background persistence worker ────────────────────────────
+    async def _persist_worker():
+        """Flush thought queue to SQLite every 2 seconds."""
+        while True:
+            try:
+                saved = await brain.flush_persist_queue()
+                if saved:
+                    logger.debug(f"Persisted {saved} thoughts")
+            except Exception:
+                pass
+            await asyncio.sleep(2.0)
+
+    persist_task = asyncio.create_task(_persist_worker())
+
+    logger.info("Ada is awake.")
+
+    # Run MCP session managers
     async with json_manager.run():
         async with sse_manager.run():
             yield
 
-    # Graceful shutdown
-    logger.info("Shutting down Glyphh Runtime...")
+    # ── Shutdown ────────────────────────────────────────────────────────
+    logger.info("Going to sleep...")
+    persist_task.cancel()
+    await brain.flush_persist_queue()
+    brain.stop_dreaming()
+
+    # Flush memory strengths to DB
+    from glyphh.memory.thought_persistence import flush_all_strengths
+    await flush_all_strengths(async_session_maker, brain.cognitive.thought_space)
+
     meter.flush()
-    logger.info("Draining connections...")
     await close_db()
-    logger.info("Database connections closed")
+    logger.info("Ada is asleep.")
     logging.shutdown()
-    logger.info("Shutdown complete")
 
 
 # Create FastAPI application
 app = FastAPI(
     title="Glyphh Runtime",
-    description="Execution environment for directory-based models",
+    description="Ada's cognitive brain with production infrastructure",
     version="2.6.2",
     docs_url="/docs" if settings.enable_docs else None,
     redoc_url="/redoc" if settings.enable_docs else None,
@@ -246,8 +328,8 @@ app.include_router(org_level_router)
 app.include_router(org_scoped_router)
 
 
-# MCP routing middleware — wraps the ASGI app to intercept /{org_id}/{model_id}/mcp
-# requests and forward them to the MCP SDK's Streamable HTTP handler.
+# MCP routing middleware — intercepts /mcp requests and forwards to the
+# MCP SDK's Streamable HTTP handler. Single endpoint, no org/model.
 from domains.mcp.app import MCPRoutingMiddleware
 
 app.add_middleware(MCPRoutingMiddleware, mcp_app_getter=lambda: getattr(app.state, "mcp_session_managers", None))

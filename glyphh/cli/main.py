@@ -5,7 +5,14 @@ The interactive shell is the primary interface — run `glyphh` to start.
 `glyphh serve` is the only standalone subcommand (used by Docker/production).
 """
 
+from pathlib import Path
+
 import click
+
+# Load .env early so GLYPHH_PLATFORM_URL is available before auth runs
+from dotenv import load_dotenv
+load_dotenv(Path(".env"))
+
 from .commands.serve import serve_command
 from .commands.ada import ada_command
 

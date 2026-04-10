@@ -1,0 +1,15 @@
+model_id: cognitive-router
+name: Cognitive Router
+description: Routes natural language requests to Ada's cognitive capabilities using HDC similarity. Classifies intent (question, command, analysis, identification, protection) and domain (security, voice, memory, general) to determine which brain region handles each request.
+version: 0.1.0
+author: Ada AI
+license: MIT
+icon: "\U0001F9E0"
+category: routing
+public: false
+tags:
+  - routing
+  - cognitive
+  - intent
+  - classification
+  - brain

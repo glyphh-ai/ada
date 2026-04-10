@@ -1,0 +1,20 @@
+model_id: firewall
+name: Prompt Injection Firewall
+description: Detects 200+ prompt injection threat types across 16 attack families deterministically in microseconds using HDC cosine similarity. 4-layer analysis (intent, structure, semantic, adversarial) with full explainability. No LLM in the loop — pure vector operations.
+version: 1.0.0
+author: Ada AI
+license: AGPL-3.0
+icon: "\U0001F6E1"
+category: security
+public: true
+tags:
+  - prompt-injection
+  - firewall
+  - security
+  - guardrails
+  - safety
+  - adversarial
+  - detection
+  - social-engineering
+  - harmful-content
+  - agentic-security

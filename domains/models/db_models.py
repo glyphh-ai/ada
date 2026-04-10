@@ -365,3 +365,35 @@ class Token(Base):
         return f"<Token(id={self.id}, org_id={self.org_id}, status={self.status})>"
 
 
+class AdaThought(Base):
+    """
+    Ada's persistent thought memory.
+
+    Each thought is a natural language statement with its HDC glyph encoding,
+    Hebbian strength, and access tracking. Archived thoughts remain in the DB
+    but are excluded from active recall.
+    """
+    __tablename__ = "ada_thoughts"
+
+    thought_id = Column(String(36), primary_key=True)
+    content = Column(Text, nullable=False)
+    speaker = Column(String(50), nullable=False, default="incoming")
+    glyph_data = Column(Text, nullable=False)  # JSON-serialized glyph layers
+    content_vector = Column(Text, nullable=True)  # JSON array for content similarity
+    strength = Column(Float, default=1.0, nullable=False)
+    access_count = Column(Integer, default=0, nullable=False)
+    created_at = Column(Float, nullable=False)
+    last_accessed = Column(Float, nullable=False)
+    extra_data = Column(JSONType, default=dict)
+    archived = Column(Integer, default=0, nullable=False)  # 1 = cold storage
+
+    __table_args__ = (
+        Index("idx_thought_strength", strength.desc()),
+        Index("idx_thought_accessed", last_accessed.desc()),
+        Index("idx_thought_archived", archived),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AdaThought({self.thought_id}, strength={self.strength:.2f}, '{self.content[:30]}')>"
+
+

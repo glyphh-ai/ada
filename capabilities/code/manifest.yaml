@@ -1,0 +1,14 @@
+model_id: code
+name: Ada Code
+description: File-level codebase intelligence. Encodes source files as HDC vectors using path, identifier, and import signals. NL queries find files by meaning, not grep. No LLM at build or search time.
+version: 0.1.0
+author: Ada AI
+icon: "\U0001F50D"
+category: search
+public: true
+tags:
+  - code-search
+  - codebase-intelligence
+  - file-index
+  - developer-tools
+  - mcp

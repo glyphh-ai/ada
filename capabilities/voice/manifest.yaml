@@ -1,0 +1,15 @@
+model_id: voice
+name: Ada Voice
+description: Encodes human voice identity and cognitive/emotional state into HDC vectors from audio features (openSMILE eGeMAPS). Identity matching, liveness detection, and baseline drift tracking.
+version: 0.12.0
+author: Ada AI
+license: AGPL-3.0
+icon: 🎙️
+category: identity
+public: true
+tags:
+  - voice
+  - identity
+  - liveness
+  - emotion
+  - biometrics

@@ -24,7 +24,7 @@ from . import theme
 GLYPHH_DIR = Path.home() / ".glyphh"
 CONFIG_FILE = GLYPHH_DIR / "config.json"
 
-PLATFORM_URL = "https://api.glyphh.ai/api/v1"
+PLATFORM_URL = os.environ.get("GLYPHH_PLATFORM_URL", "https://api.glyphh.ai/api/v1")
 
 
 def _load_config() -> dict:
@@ -111,10 +111,7 @@ def _try_refresh(config: dict) -> str | None:
 
 
 def get_api_url() -> str:
-    """Return the platform API URL (production, unless internal override)."""
-    override = os.environ.get("_GLYPHH_INTERNAL_DEV_OVERRIDE")
-    if override:
-        return override
+    """Return the platform API URL (env override, or production default)."""
     return PLATFORM_URL
 
 

@@ -45,6 +45,7 @@ dependencies = [
     "email-validator>=2.0.0",
     "psutil>=5.9.0",
     "mcp>=1.26.0",
+    "anthropic>=0.40.0",
 ]
 
 [project.optional-dependencies]
@@ -92,7 +93,7 @@ Documentation = "https://docs.glyphh.ai"
 [tool.setuptools.packages.find]
 # glyphh* — SDK + CLI + server entry point (glyphh/server.py)
 # The remaining packages are the server-side runtime bundled for `glyphh dev`
-include = ["glyphh*", "domains*", "api*", "infrastructure*", "shared*", "scripts*"]
+include = ["glyphh*", "domains*", "api*", "infrastructure*", "shared*", "scripts*", "capabilities*"]
 
 [tool.setuptools.package-data]
 "glyphh" = []
@@ -100,3 +101,4 @@ include = ["glyphh*", "domains*", "api*", "infrastructure*", "shared*", "scripts
 "glyphh.intent" = ["data/*.json", "data/*.jsonl", "data/packs/*.json"]
 "glyphh.state" = ["data/*.json", "data/packs/*.json"]
 "glyphh.memory" = ["lessons/*.jsonl"]
+"capabilities" = ["**/*.json", "**/*.jsonl", "**/*.yaml"]

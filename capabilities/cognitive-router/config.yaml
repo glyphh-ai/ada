@@ -1,0 +1,87 @@
+# Cognitive Router
+# Routes requests to the right brain capability using HDC similarity.
+# Two layers: cognitive intent + domain classification.
+
+name: cognitive-router
+version: 0.1.0
+description: |
+  Classifies natural language into cognitive intent and capability domain.
+  Intent: what the user wants to DO (analyze, detect, identify, remember, etc.)
+  Domain: which brain region handles it (security, voice, memory, general)
+  Returns DONE with the target capability, or ASK when ambiguous.
+
+author: Ada AI
+license: MIT
+
+encoder:
+  dimensions: 2000
+  seed: 42
+
+auto_load_concepts: true
+
+similarity:
+  default_filter:
+    min_similarity: 0.30
+    top_k: 5
+  confidence_threshold: 0.45
+  ask_threshold: 0.30
+
+layers:
+  intent:
+    weight: 0.40
+    roles:
+      cognitive_action:
+        type: categorical
+        values:
+          - detect
+          - analyze
+          - identify
+          - protect
+          - scan
+          - check
+          - verify
+          - remember
+          - recall
+          - forget
+          - learn
+          - listen
+          - recognize
+          - watch
+          - observe
+          - route
+          - classify
+          - none
+
+      intent_signals:
+        type: bag_of_words
+        weight: 0.7
+
+  domain:
+    weight: 0.35
+    roles:
+      capability_domain:
+        type: categorical
+        values:
+          - security
+          - voice
+          - identity
+          - memory
+          - vision
+          - routing
+          - general
+          - none
+
+      domain_signals:
+        type: bag_of_words
+        weight: 0.7
+
+  semantic:
+    weight: 0.25
+    roles:
+      description:
+        type: bag_of_words
+        weight: 1.0
+
+      keywords:
+        type: bag_of_words
+        weight: 0.8
