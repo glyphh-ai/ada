@@ -82,6 +82,10 @@ class Brain:
         from domains.brain.derivative import UserDerivative
         self._derivative = UserDerivative(self._cognitive.thought_space)
 
+        # Context threads — structured memory indexed by tool, topic, entity
+        from domains.brain.context_thread import ThreadStore
+        self._thread_store = ThreadStore()
+
         # Seed Ada's identity
         self._seed_memories()
 
@@ -164,13 +168,8 @@ class Brain:
 
     # ── Core API ─────────────────────────────────────────────────────────
 
-    async def think(self, input_text: str) -> ThinkResult:
-        """Process a natural language request through Ada's brain.
-
-        Uses the cognitive thought process — a loop that perceives,
-        guards, recalls, reasons, acts, evaluates, and responds.
-        Can retry up to 3 cycles if confidence is low.
-        """
+    async def think(self, input_text: str, tool: str = "unknown") -> ThinkResult:
+        """Process a natural language request through Ada's brain."""
         start = time.monotonic()
 
         # Lazy init
@@ -188,6 +187,7 @@ class Brain:
                 session_factory=self._session_factory,
                 firewall_fn=self._run_firewall,
                 derivative=self._derivative,
+                thread_store=self._thread_store,
             )
 
         # Check for capability build requests first (skill, not thought)
@@ -204,7 +204,7 @@ class Brain:
             )
 
         # Run the cognitive thought process
-        result = await self._thought_process.think(input_text)
+        result = await self._thought_process.think(input_text, tool=tool)
 
         # Queue thoughts for background persistence (never blocks think)
         # Only persist extracted facts — questions are queries, not knowledge.
@@ -566,6 +566,11 @@ class Brain:
     def derivative(self):
         """The UserDerivative instance."""
         return self._derivative
+
+    @property
+    def thread_store(self):
+        """The ThreadStore instance."""
+        return self._thread_store
 
     # ── Status ───────────────────────────────────────────────────────────
 

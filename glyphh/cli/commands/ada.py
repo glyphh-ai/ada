@@ -86,17 +86,23 @@ def handle_memory(func: str | None, args: str = ""):
         if cognitive is not None:
             cognitive.reset()
 
-        # Clear SQLite ada_thoughts table
         brain = _get_brain()
         if brain is not None and hasattr(brain, '_session_factory'):
             import asyncio
             from glyphh.memory.thought_persistence import clear_all_thoughts
+            from domains.brain.thread_persistence import clear_all_threads
             try:
                 loop = asyncio.new_event_loop()
                 loop.run_until_complete(clear_all_thoughts(brain._session_factory))
+                loop.run_until_complete(clear_all_threads(brain._session_factory))
                 loop.close()
             except Exception as e:
                 click.secho(f"  Warning: could not clear database: {e}", fg=theme.WARNING)
+
+        # Clear thread store in memory
+        if brain is not None and hasattr(brain, '_thread_store'):
+            from domains.brain.context_thread import ThreadStore
+            brain._thread_store = ThreadStore()
 
         path = os.path.expanduser("~/.glyphh/memory")
         if os.path.exists(path):
@@ -135,6 +141,102 @@ def handle_derivative(func: str | None, args: str = ""):
 
     else:
         click.secho("  derivative                Show user derivative stats", fg=theme.TEXT_DIM)
+
+
+# ── Recall commands ─────────────────────────────────────────────────────
+
+def handle_recall(func: str | None, args: str = ""):
+    """Query context threads and thought space."""
+    brain = _get_brain()
+    if brain is None:
+        click.secho("  Brain not running.", fg=theme.ERROR)
+        return
+
+    # Combine func and args as the query text
+    query = ""
+    if func:
+        query = func
+        if args:
+            query += " " + args
+    query = query.strip()
+
+    store = brain.thread_store
+
+    if not query:
+        # No query — show all threads, then thought count
+        threads = store.all_threads()
+        click.echo()
+        if threads:
+            click.secho(f"  {len(threads)} context threads:", fg=theme.ACCENT, bold=True)
+            click.echo()
+            for t in threads:
+                status = "●" if t.active else "○"
+                age = _format_age(t.updated_at)
+                entities_str = ", ".join(t.entities[:5]) if t.entities else "-"
+                click.secho(f"  {status} [{t.tool}] {t.topic}", fg=theme.ACCENT)
+                click.secho(f"    entities: {entities_str}", fg=theme.TEXT)
+                click.secho(f"    facts:    {len(t.facts)}  turns: {t.turn_count}  {age}", fg=theme.TEXT_DIM)
+                for fact in t.facts[:3]:
+                    click.secho(f"      · {fact}", fg=theme.TEXT)
+                if len(t.facts) > 3:
+                    click.secho(f"      ... and {len(t.facts) - 3} more", fg=theme.TEXT_DIM)
+                click.echo()
+        else:
+            click.secho("  No context threads yet.", fg=theme.TEXT_DIM)
+            click.echo()
+
+        # Also show thought space count
+        space = brain.cognitive.thought_space
+        click.secho(f"  {space.count} thoughts in HDC space", fg=theme.TEXT_DIM)
+        click.echo()
+        return
+
+    # Search: try threads first, then HDC fallback
+    from domains.brain.thread_manager import ThreadManager, _extract_implicit_entities
+
+    entities = _extract_implicit_entities(query)
+    thread_results = store.recall(entities=entities if entities else None, limit=5)
+
+    click.echo()
+    click.secho(f"  recall: \"{query}\"", fg=theme.ACCENT, bold=True)
+    if entities:
+        click.secho(f"  entities: {', '.join(entities)}", fg=theme.TEXT_DIM)
+    click.echo()
+
+    if thread_results:
+        click.secho("  ── threads ──", fg=theme.ACCENT)
+        for t in thread_results:
+            click.secho(f"  [{t.tool}] {t.topic}  ({len(t.facts)} facts)", fg="green")
+            for fact in t.facts:
+                if fact.startswith("[Q] "):
+                    click.secho(f"    ? {fact[4:]}", fg=theme.TEXT_DIM)
+                else:
+                    click.secho(f"    · {fact}", fg=theme.TEXT)
+        click.echo()
+
+    # Also show HDC results for comparison
+    space = brain.cognitive.thought_space
+    results = space.recall(query, top_k=5)
+    if results:
+        click.secho("  ── HDC similarity ──", fg=theme.TEXT_DIM)
+        for r in results[:5]:
+            sim = r.global_similarity
+            color = "green" if sim >= 0.5 else "yellow" if sim >= 0.3 else theme.TEXT_DIM
+            click.secho(f"  {sim:.3f}  {r.thought.content}", fg=color)
+        click.echo()
+
+
+def _format_age(timestamp: float) -> str:
+    """Format a timestamp as a human-readable age."""
+    import time
+    age_s = time.time() - timestamp
+    if age_s < 60:
+        return "just now"
+    if age_s < 3600:
+        return f"{int(age_s / 60)}m ago"
+    if age_s < 86400:
+        return f"{int(age_s / 3600)}h ago"
+    return f"{int(age_s / 86400)}d ago"
 
 
 # ── Insight display ──────────────────────────────────────────────────────

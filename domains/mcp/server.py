@@ -49,6 +49,10 @@ def create_mcp_server(brain: Any, auth_service: AuthService) -> Server:
                             "type": "string",
                             "description": "Natural language input to process",
                         },
+                        "tool": {
+                            "type": "string",
+                            "description": "Which tool is calling (e.g. claude-code, claude-desktop, gemini). Used to tag memory threads.",
+                        },
                     },
                     "required": ["input"],
                 },
@@ -67,6 +71,7 @@ def create_mcp_server(brain: Any, auth_service: AuthService) -> Server:
             )
 
         input_text = (arguments or {}).get("input", "")
+        tool_name = (arguments or {}).get("tool", "unknown")
         if not input_text:
             return CallToolResult(
                 content=[TextContent(
@@ -103,16 +108,15 @@ def create_mcp_server(brain: Any, auth_service: AuthService) -> Server:
 
         try:
             start = datetime.utcnow()
-            result = await brain.think(input_text)
+            result = await brain.think(input_text, tool=tool_name)
             elapsed = (datetime.utcnow() - start).total_seconds() * 1000
 
             response = {
                 "response": result.response,
                 "capability": result.capability,
                 "confidence": round(result.confidence, 3),
-                "cognitive_state": result.cognitive_state,
                 "gate": result.gate,
-                "llm_fallback": result.llm_fallback,
+                "llm_assisted": result.llm_assisted,
                 "elapsed_ms": round(result.elapsed_ms, 1),
             }
 

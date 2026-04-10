@@ -397,3 +397,41 @@ class AdaThought(Base):
         return f"<AdaThought({self.thought_id}, strength={self.strength:.2f}, '{self.content[:30]}')>"
 
 
+class AdaThread(Base):
+    """
+    Ada's context threads — structured memory organized by topic,
+    entities, and tool.
+
+    Each thread represents a conversation context: what was discussed,
+    who/what was involved, which tool initiated it, and when.
+
+    Recall searches threads by entity and topic — structured lookup,
+    not cosine similarity. The dream loop finds connections between
+    threads using HDC vectors.
+    """
+    __tablename__ = "ada_threads"
+
+    thread_id = Column(String(36), primary_key=True)
+    tool = Column(String(100), nullable=False, default="unknown")
+    session_id = Column(String(100), nullable=False, default="")
+    topic = Column(String(200), nullable=False, default="general")
+    entities = Column(JSONType, default=list)     # ["Brandi", "wife"]
+    facts = Column(JSONType, default=list)        # ["my wife is Brandi"]
+    summary = Column(Text, default="")            # dream-loop generated
+    turn_count = Column(Integer, default=0)
+    created_at = Column(Float, nullable=False)
+    updated_at = Column(Float, nullable=False)
+    related_threads = Column(JSONType, default=list)  # [thread_ids]
+    active = Column(Integer, default=1)           # 1 = open, 0 = closed
+
+    __table_args__ = (
+        Index("idx_thread_tool", tool),
+        Index("idx_thread_topic", topic),
+        Index("idx_thread_updated", updated_at.desc()),
+        Index("idx_thread_active", active),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AdaThread({self.thread_id[:8]}, tool={self.tool}, topic={self.topic})>"
+
+

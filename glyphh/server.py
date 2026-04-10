@@ -150,6 +150,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info(f"No persisted memories — using {brain.cognitive.thought_space.count} seed memories")
 
+    # ── Load persistent threads ───────────────────────────────────────
+    from domains.brain.thread_persistence import load_threads
+    thread_count = await load_threads(async_session_maker, brain.thread_store)
+    if thread_count:
+        logger.info(f"Restored {thread_count} context threads from database")
+
     # ── Seed user identity from auth ──────────────────────────────────
     try:
         from glyphh.cli.auth import get_user
@@ -196,12 +202,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # ── Start background persistence worker ────────────────────────────
     async def _persist_worker():
-        """Flush thought queue to SQLite every 2 seconds."""
+        """Flush thought + thread queues to SQLite every 2 seconds."""
+        from domains.brain.thread_persistence import save_thread
         while True:
             try:
                 saved = await brain.flush_persist_queue()
                 if saved:
                     logger.debug(f"Persisted {saved} thoughts")
+            except Exception:
+                pass
+            # Persist any dirty threads
+            try:
+                for thread in brain.thread_store.all_threads():
+                    await save_thread(async_session_maker, thread)
             except Exception:
                 pass
             await asyncio.sleep(2.0)
@@ -224,6 +237,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Flush memory strengths to DB
     from glyphh.memory.thought_persistence import flush_all_strengths
     await flush_all_strengths(async_session_maker, brain.cognitive.thought_space)
+
+    # Flush all threads to DB
+    from domains.brain.thread_persistence import save_thread
+    for thread in brain.thread_store.all_threads():
+        try:
+            await save_thread(async_session_maker, thread)
+        except Exception:
+            pass
 
     meter.flush()
     await close_db()

@@ -21,7 +21,7 @@ from .auth import is_logged_in, device_login, register_runtime
 from .vault_env import load_vault_env, require_api_key
 from .commands.auth import handle_auth
 from .commands.token import handle_token
-from .commands.ada import handle_dream, handle_memory, handle_derivative
+from .commands.ada import handle_dream, handle_memory, handle_derivative, handle_recall
 from .commands.config import handle_config
 from .commands.license import handle_license
 from . import theme
@@ -43,6 +43,7 @@ COMMAND_HANDLERS = {
     "dream": handle_dream,
     "memory": handle_memory,
     "derivative": handle_derivative,
+    "recall": handle_recall,
     "config": handle_config,
     "license": handle_license,
 }
@@ -55,6 +56,7 @@ _SUBCOMMANDS = {
     "dream": ["status", "start", "stop", "insights"],
     "memory": ["reset"],
     "derivative": ["status"],
+    "recall": [],
     "config": ["show", "set", "clear"],
     "license": ["show", "activate", "deactivate", "refresh"],
     "setup": ["key", "model", "claude"],
@@ -305,7 +307,7 @@ def _think(text: str, port: int) -> None:
                         "method": "tools/call",
                         "params": {
                             "name": "think",
-                            "arguments": {"input": text},
+                            "arguments": {"input": text, "tool": "cli"},
                         },
                     },
                     headers={"Accept": "application/json", "Content-Type": "application/json"},
@@ -544,6 +546,10 @@ def _print_help():
     click.echo()
     click.secho("  derivative", fg=theme.ACCENT)
     click.secho("    derivative               Show user derivative stats", fg=theme.MUTED)
+    click.echo()
+    click.secho("  recall", fg=theme.ACCENT)
+    click.secho("    recall                   Show all thoughts in memory", fg=theme.MUTED)
+    click.secho("    recall <query>           Search thought space by similarity", fg=theme.MUTED)
     click.echo()
     click.secho("  setup", fg=theme.ACCENT)
     click.secho("    setup key               Set Anthropic API key", fg=theme.MUTED)

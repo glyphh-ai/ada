@@ -50,11 +50,15 @@ class StoredThought:
     glyph: Glyph
     strength: float = 1.0
     created_at: float = field(default_factory=time.time)
+    last_accessed: float = field(default_factory=time.time)
+    access_count: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def reinforce(self, amount: float = 0.1) -> None:
         """Hebbian strengthening with diminishing returns."""
         self.strength = min(3.0, self.strength + amount / (1.0 + 0.1 * self.strength))
+        self.last_accessed = time.time()
+        self.access_count += 1
 
     def decay(self, factor: float = 0.95) -> None:
         """Weaken unused thought."""

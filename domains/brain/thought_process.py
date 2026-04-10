@@ -69,6 +69,7 @@ class ThoughtProcess:
         session_factory, # async_session_maker
         firewall_fn,     # async callable(str) -> Optional[str]
         derivative=None, # UserDerivative (optional)
+        thread_store=None,  # ThreadStore (optional)
     ):
         self._cognitive = cognitive
         self._router = router
@@ -77,6 +78,10 @@ class ThoughtProcess:
         self._session_factory = session_factory
         self._firewall = firewall_fn
         self._derivative = derivative
+        self._thread_store = thread_store
+
+        # Thread managers per tool (lazy init)
+        self._thread_managers: dict[str, Any] = {}
 
         # Gradient pattern library — learns search shortcuts
         from domains.brain.gradient_patterns import GradientPatternLibrary
@@ -86,7 +91,7 @@ class ThoughtProcess:
         from domains.brain.extractor import Extractor
         self._extractor = Extractor()
 
-    async def think(self, input_text: str) -> ThoughtResult:
+    async def think(self, input_text: str, tool: str = "unknown") -> ThoughtResult:
         """Run the full thought process."""
         start = time.monotonic()
 
@@ -105,17 +110,37 @@ class ThoughtProcess:
         # ── 2. EXTRACT ──────────────────────────────────────────
         extraction = await self._extractor.extract(input_text, llm=self._llm)
 
-        # ── 3. STORE ────────────────────────────────────────────
-        # Absorb new facts into thought space. Questions are not facts.
+        # ── 3. STORE (threads) ──────────────────────────────────
+        # Store facts into a context thread tagged by tool + topic.
+        # Also absorb into thought space for HDC fallback.
+        thread = None
+        if self._thread_store and extraction.has_facts:
+            manager = self._get_thread_manager(tool)
+            thread = manager.process(
+                input_text=input_text,
+                facts=extraction.facts,
+                entities=extraction.entities,
+                question=extraction.question,
+                emotion=extraction.emotion,
+            )
         if extraction.has_facts:
             for fact in extraction.facts:
                 self._cognitive.absorb(fact)
 
         # ── 4. RECALL ───────────────────────────────────────────
-        # Search thought space for relevant memories.
-        # Use the question if we have one, otherwise the full input.
+        # Primary: thread-based structured recall (entity + topic)
+        # Fallback: HDC cosine similarity on thought space
         search_text = extraction.question or input_text
-        facts, confidence = self._recall(search_text)
+        facts, confidence = self._recall_threads(
+            search_text, extraction, tool,
+        )
+
+        # If thread recall found nothing, fall back to HDC
+        if not facts or confidence < CONFIDENCE_THRESHOLD:
+            hdc_facts, hdc_confidence = self._recall_hdc(search_text)
+            if hdc_confidence > confidence:
+                facts = hdc_facts
+                confidence = hdc_confidence
 
         # Also try capability routing
         capability = None
@@ -138,7 +163,6 @@ class ThoughtProcess:
         )
 
         # ── 6. ABSORB ───────────────────────────────────────────
-        # Store Ada's response for future context
         if response:
             self._cognitive.absorb(response, speaker="ada")
 
@@ -146,8 +170,18 @@ class ThoughtProcess:
         if response and confidence >= CONFIDENCE_THRESHOLD:
             self._record_pattern(input_text, response)
 
+        # If this was a question, also record it in the active thread
+        if self._thread_store and extraction.has_question and not thread:
+            manager = self._get_thread_manager(tool)
+            manager.process(
+                input_text=input_text,
+                facts=[],
+                entities=extraction.entities,
+                question=extraction.question,
+                emotion=extraction.emotion,
+            )
+
         # ── 7. LEARN ────────────────────────────────────────────
-        # Feed interaction to user derivative
         if self._derivative:
             self._derivative.observe(
                 input_text=input_text,
@@ -177,13 +211,54 @@ class ThoughtProcess:
             is_correction=extraction.is_correction,
         )
 
+    def _get_thread_manager(self, tool: str):
+        """Get or create a ThreadManager for a tool."""
+        if tool not in self._thread_managers:
+            from domains.brain.thread_manager import ThreadManager
+            self._thread_managers[tool] = ThreadManager(
+                store=self._thread_store,
+                tool=tool,
+            )
+        return self._thread_managers[tool]
+
     # ── Recall ──────────────────────────────────────────────────
 
-    def _recall(self, search_text: str) -> tuple[list[tuple], float]:
-        """Search thought space via cognitive gradient.
+    # ── Recall — thread-based (primary) ──────────────────────────
 
-        Returns (facts, confidence) where facts are
-        (content, speaker, similarity) tuples.
+    def _recall_threads(
+        self,
+        search_text: str,
+        extraction,
+        tool: str,
+    ) -> tuple[list[tuple], float]:
+        """Thread-based recall — structured entity/topic lookup.
+
+        Primary recall path. No cosine similarity needed.
+        Returns (facts, confidence) tuples.
+        """
+        if not self._thread_store or self._thread_store.count == 0:
+            return [], 0.0
+
+        manager = self._get_thread_manager(tool)
+        threads = manager.recall_for_query(
+            query_text=search_text,
+            query_entities=extraction.entities if extraction else None,
+        )
+
+        if not threads:
+            return [], 0.0
+
+        facts = manager.collect_facts(threads)
+        confidence = min(1.0, facts[0][2]) if facts else 0.0
+
+        return facts, confidence
+
+    # ── Recall — HDC fallback ──────────────────────────────────
+
+    def _recall_hdc(self, search_text: str) -> tuple[list[tuple], float]:
+        """HDC cosine similarity fallback for when threads don't match.
+
+        Uses CognitiveGradient search through the thought space.
         """
         from domains.brain.cognitive_gradient import CognitiveGradient
 
@@ -194,10 +269,9 @@ class ThoughtProcess:
         result = gradient.search(search_text, top_k=5)
         facts = result.facts
 
-        # Confidence from recall quality
         confidence = 0.0
         if facts:
-            confidence = min(1.0, facts[0][2])  # top similarity
+            confidence = min(1.0, facts[0][2])
 
         return facts, confidence
 
@@ -223,11 +297,8 @@ class ThoughtProcess:
                 input_text, capability, capability_result
             )
 
-        # ── Hallucination gate: question + no grounded facts = block LLM
+        # ── Hallucination gate: question + low confidence = block LLM
         if extraction.has_question and confidence < CONFIDENCE_THRESHOLD:
-            if facts:
-                # Low confidence but some facts — return the best raw fact
-                return facts[0][0]
             return "I don't have information about that in my memory."
 
         # ── LLM response grounded by facts and context
@@ -242,8 +313,6 @@ class ThoughtProcess:
         # ── Offline fallbacks
         if extraction.is_greeting:
             return "Hello."
-        if extraction.has_question and facts:
-            return facts[0][0]
         if extraction.has_question:
             return "I don't have information about that in my memory."
         return "Got it."
