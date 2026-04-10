@@ -21,7 +21,7 @@ from .auth import is_logged_in, device_login, register_runtime
 from .vault_env import load_vault_env, require_api_key
 from .commands.auth import handle_auth
 from .commands.token import handle_token
-from .commands.ada import handle_dream, handle_memory
+from .commands.ada import handle_dream, handle_memory, handle_derivative
 from .commands.config import handle_config
 from .commands.license import handle_license
 from . import theme
@@ -42,6 +42,7 @@ COMMAND_HANDLERS = {
     "token": handle_token,
     "dream": handle_dream,
     "memory": handle_memory,
+    "derivative": handle_derivative,
     "config": handle_config,
     "license": handle_license,
 }
@@ -53,6 +54,7 @@ _SUBCOMMANDS = {
     "token": ["create", "list", "revoke"],
     "dream": ["status", "start", "stop", "insights"],
     "memory": ["reset"],
+    "derivative": ["status"],
     "config": ["show", "set", "clear"],
     "license": ["show", "activate", "deactivate", "refresh"],
     "setup": ["key", "model", "claude"],
@@ -539,6 +541,9 @@ def _print_help():
     click.echo()
     click.secho("  memory", fg=theme.ACCENT)
     click.secho("    memory reset             Clear all memory", fg=theme.MUTED)
+    click.echo()
+    click.secho("  derivative", fg=theme.ACCENT)
+    click.secho("    derivative               Show user derivative stats", fg=theme.MUTED)
     click.echo()
     click.secho("  setup", fg=theme.ACCENT)
     click.secho("    setup key               Set Anthropic API key", fg=theme.MUTED)

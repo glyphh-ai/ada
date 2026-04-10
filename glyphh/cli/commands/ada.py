@@ -92,11 +92,11 @@ def handle_memory(func: str | None, args: str = ""):
             import asyncio
             from glyphh.memory.thought_persistence import clear_all_thoughts
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.new_event_loop()
                 loop.run_until_complete(clear_all_thoughts(brain._session_factory))
-            except RuntimeError:
-                # Already in async context — schedule it
-                asyncio.ensure_future(clear_all_thoughts(brain._session_factory))
+                loop.close()
+            except Exception as e:
+                click.secho(f"  Warning: could not clear database: {e}", fg=theme.WARNING)
 
         path = os.path.expanduser("~/.glyphh/memory")
         if os.path.exists(path):
@@ -104,6 +104,37 @@ def handle_memory(func: str | None, args: str = ""):
         click.secho("  Memory cleared.", fg=theme.ACCENT)
     else:
         click.secho("  memory reset              Clear all memory", fg=theme.TEXT_DIM)
+
+
+# ── Derivative commands ──────────────────────────────────────────────────
+
+def handle_derivative(func: str | None, args: str = ""):
+    """Route derivative subcommands from the interactive shell."""
+    brain = _get_brain()
+    if brain is None:
+        click.secho("  Brain not running.", fg=theme.ERROR)
+        return
+
+    deriv = brain.derivative
+    cmd = func.strip().lower() if func else "status"
+
+    if cmd in ("status", "show"):
+        stats = deriv.stats()
+        click.echo()
+        click.secho(f"  signals:   {stats['total_signals']}", fg=theme.TEXT)
+        click.secho(f"  strong:    {stats['strong_signals']}", fg=theme.TEXT)
+        dims = stats.get("dimensions", {})
+        if dims:
+            for dim, count in dims.items():
+                click.secho(f"  {dim:12s} {count} patterns", fg=theme.TEXT_DIM)
+        style = deriv.style_summary()
+        if style:
+            click.echo()
+            click.secho(f"  style:     {style}", fg=theme.ACCENT)
+        click.echo()
+
+    else:
+        click.secho("  derivative                Show user derivative stats", fg=theme.TEXT_DIM)
 
 
 # ── Insight display ──────────────────────────────────────────────────────

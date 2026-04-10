@@ -2,14 +2,13 @@
 The think pipeline — Ada's core cognitive loop.
 
 Every request flows through here:
-  0. FIREWALL — always runs first, blocks threats before anything else
-  1. CLASSIFY — CognitiveGlyph: what IS this input?
-  2. ROUTE    — Cognitive router (HDC): which capability? DONE or ASK?
-  3. DISAMBIGUATE — if ASK, internal LLM skill helps decide
-  4. EXECUTE  — run the capability's query pipeline
-  5. ABSORB   — store the interaction in memory
-  6. OBSERVE  — log for dream loop pattern mining
-  7. RETURN   — structured response
+  0. GUARD    — firewall blocks threats before anything else
+  1. EXTRACT  — rule-based + LLM extraction of facts, questions, entities
+  2. STORE    — absorb extracted facts into thought space
+  3. RECALL   — CognitiveGradient search for relevant memories
+  4. RESPOND  — LLM response grounded by recalled facts
+  5. ABSORB   — store response for dream loop
+  6. LEARN    — UserDerivative observes interaction patterns
 """
 
 from __future__ import annotations
@@ -35,24 +34,24 @@ class ThinkResult:
     response: str
     capability: Optional[str] = None
     confidence: float = 0.0
-    cognitive_state: Optional[str] = None
     gate: str = "ASK"  # DONE or ASK
     facts: list[tuple] = field(default_factory=list)
-    llm_fallback: bool = False
+    llm_assisted: bool = False
     elapsed_ms: float = 0.0
-    firewall_pass: bool = True  # False if blocked by firewall
+    firewall_pass: bool = True
+    # Extraction results
+    extracted_question: Optional[str] = None
+    extracted_facts: list[str] = field(default_factory=list)
+    extracted_emotion: Optional[str] = None
+    is_greeting: bool = False
+    is_correction: bool = False
 
 
 class Brain:
     """Ada's brain — the central think pipeline.
 
-    Pipeline order:
-    1. Firewall (always, mandatory — security layer)
-    2. Cognitive classification
-    3. Cognitive router (HDC with DONE/ASK gate)
-    4. LLM disambiguation skill (when ASK)
-    5. Capability execution
-    6. Memory absorption
+    Pipeline: guard → extract → store → recall → respond → absorb → learn.
+    Sub-agents removed. Extraction-first, not classification-first.
     """
 
     def __init__(
@@ -78,6 +77,10 @@ class Brain:
 
         # Wire firewall into LLM — every prompt is checked before reaching Haiku
         self._llm.set_firewall(self._run_firewall)
+
+        # User derivative — learns who the user is from interactions
+        from domains.brain.derivative import UserDerivative
+        self._derivative = UserDerivative(self._cognitive.thought_space)
 
         # Seed Ada's identity
         self._seed_memories()
@@ -184,6 +187,7 @@ class Brain:
                 model_manager=self._model_manager,
                 session_factory=self._session_factory,
                 firewall_fn=self._run_firewall,
+                derivative=self._derivative,
             )
 
         # Check for capability build requests first (skill, not thought)
@@ -203,7 +207,10 @@ class Brain:
         result = await self._thought_process.think(input_text)
 
         # Queue thoughts for background persistence (never blocks think)
-        self._queue_persist(input_text, "incoming")
+        # Only persist extracted facts — questions are queries, not knowledge.
+        if result.extracted_facts:
+            for fact in result.extracted_facts:
+                self._queue_persist(fact, "incoming")
         if result.response:
             self._queue_persist(result.response, "ada")
 
@@ -218,12 +225,16 @@ class Brain:
             response=result.response,
             capability=result.capability,
             confidence=result.confidence,
-            cognitive_state=result.cognitive_state,
             gate=result.gate,
             facts=result.facts,
-            llm_fallback=result.llm_assisted,
+            llm_assisted=result.llm_assisted,
             firewall_pass=result.firewall_pass,
             elapsed_ms=elapsed,
+            extracted_question=result.extracted_question,
+            extracted_facts=result.extracted_facts,
+            extracted_emotion=result.extracted_emotion,
+            is_greeting=result.is_greeting,
+            is_correction=result.is_correction,
         )
 
     # ── Firewall — mandatory security layer ──────────────────────────────
@@ -548,6 +559,13 @@ class Brain:
             "Be direct and natural. Never list facts — just answer."
         )
         return "\n".join(parts)
+
+    # ── User derivative ──────────────────────────────────────────────────
+
+    @property
+    def derivative(self):
+        """The UserDerivative instance."""
+        return self._derivative
 
     # ── Status ───────────────────────────────────────────────────────────
 
