@@ -311,21 +311,11 @@ def _is_allowed_origin(origin: str) -> bool:
 
 
 # Import and include routers
-from api.routes import (
-    health_router,
-    org_scoped_router,
-    org_level_router,
-    listeners_router,
-    tokens_router,
-)
+from api.routes.health import router as health_router
+from api.routes.tokens import router as tokens_router
 
 app.include_router(health_router)
 app.include_router(tokens_router)
-# listeners_router must come before org_scoped_router (more specific prefix)
-app.include_router(listeners_router)
-# org_level_router (/{org_id}/models) before org_scoped_router (/{org_id}/{model_id}/...)
-app.include_router(org_level_router)
-app.include_router(org_scoped_router)
 
 
 # MCP routing middleware — intercepts /mcp requests and forwards to the

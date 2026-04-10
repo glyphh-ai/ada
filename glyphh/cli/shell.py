@@ -5,7 +5,7 @@ After login, starts the runtime server in a daemon thread (dies when
 the shell exits — no PID files, no background daemon, no state files).
 
 Default mode: free text goes to Ada's brain via the /mcp think tool.
-Commands (auth, model, token, etc.) are still available as prefixed words.
+Commands (auth, token, setup, etc.) are still available as prefixed words.
 """
 
 import os
@@ -20,14 +20,9 @@ from .banner import print_banner
 from .auth import is_logged_in, device_login, register_runtime
 from .vault_env import load_vault_env, require_api_key
 from .commands.auth import handle_auth
-from .commands.model import handle_model
 from .commands.token import handle_token
-from .commands.query import handle_query
-from .commands.chat import handle_chat
 from .commands.ada import handle_ada
 from .commands.config import handle_config
-from .commands.docker import handle_docker
-from .commands.hub import handle_hub
 from .commands.license import handle_license
 from . import theme
 from .spinner import GridSpinner
@@ -44,112 +39,19 @@ HISTORY_FILE = Path.home() / ".glyphh" / "history"
 # Command routing table: category -> handler
 COMMAND_HANDLERS = {
     "auth": handle_auth,
-    "model": handle_model,
     "token": handle_token,
-    "query": handle_query,
-    "chat": handle_chat,
     "ada": handle_ada,
     "config": handle_config,
-    "docker": handle_docker,
-    "hub": handle_hub,
     "license": handle_license,
 }
 
 
-def _discover_plugins():
-    """Discover installed model plugins via entry points.
-
-    Plugins register under the 'glyphh.plugins' group:
-        [project.entry-points."glyphh.plugins"]
-        code = "glyphh_code.plugin:register"
-
-    Each register() function returns a dict:
-        {"handler": callable, "subcommands": ["init", "compile", "status"]}
-    """
-    try:
-        from importlib.metadata import entry_points
-        eps = entry_points()
-        # Python 3.12+ returns a SelectableGroups, older returns dict
-        if hasattr(eps, "select"):
-            plugin_eps = eps.select(group="glyphh.plugins")
-        else:
-            plugin_eps = eps.get("glyphh.plugins", [])
-
-        for ep in plugin_eps:
-            try:
-                register_fn = ep.load()
-                plugin = register_fn()
-                handler = plugin.get("handler")
-                subcommands = plugin.get("subcommands", [])
-                if handler:
-                    COMMAND_HANDLERS[ep.name] = handler
-                    _SUBCOMMANDS[ep.name] = subcommands
-            except Exception:
-                pass  # Skip broken plugins silently
-    except Exception:
-        pass
-
-
-# Discover plugins on import
-_discover_plugins()
-
-
-import glob as _glob
-import os as _os
-
-# Cache deployed model IDs for tab completion (refreshed periodically)
-_deployed_ids_cache: list[str] = []
-_deployed_ids_ts: float = 0
-
-
-def _get_deployed_model_ids() -> list[str]:
-    """Return cached list of deployed model IDs for tab completion."""
-    import time
-    global _deployed_ids_cache, _deployed_ids_ts
-    now = time.time()
-    if now - _deployed_ids_ts < 10:  # cache for 10s
-        return _deployed_ids_cache
-    try:
-        from .config import resolve_runtime_url, resolve_runtime_token
-        from .auth import resolve_org_id
-        import httpx
-        runtime_url = resolve_runtime_url()
-        token = resolve_runtime_token()
-        org_id = resolve_org_id(runtime_url)
-        if not org_id:
-            return _deployed_ids_cache
-        headers = {}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        with httpx.Client(timeout=2) as client:
-            res = client.get(f"{runtime_url}/{org_id}/models", headers=headers)
-        if res.status_code == 200:
-            _deployed_ids_cache = [m["model_id"] for m in res.json().get("models", [])]
-            _deployed_ids_ts = now
-    except Exception:
-        pass
-    return _deployed_ids_cache
-
-# Commands that take file/directory path arguments
-_FILE_ARG_COMMANDS = {
-    ("model", "load"),
-    ("model", "deploy"),
-    ("model", "package"),
-    ("model", "init"),
-}
-
 # Subcommands per category
 _SUBCOMMANDS = {
     "auth": ["login", "logout", "status"],
-    "model": ["list", "deploy", "load", "data", "count", "clear",
-              "re-encode", "status", "undeploy", "init", "package", "test"],
     "token": ["create", "list", "revoke"],
-    "query": [],
-    "chat": [],
-    "ada": [],
+    "ada": ["dream", "reset"],
     "config": ["show", "set", "clear"],
-    "docker": ["init"],
-    "hub": ["list", "search", "install"],
     "license": ["show", "activate", "deactivate", "refresh"],
     "setup": ["key", "model", "claude"],
 }
@@ -158,42 +60,19 @@ _CATEGORIES = list(_SUBCOMMANDS.keys()) + ["help", "clear", "home", "exit", "qui
 
 
 def _completer(text, state):
-    """Tab completer: commands for first two words, file paths for arguments."""
+    """Tab completer: commands and subcommands."""
     line = readline.get_line_buffer()
     parts = line.split()
-    # Number of complete words (if line ends with space, cursor is on next word)
     n_complete = len(parts) if line.endswith(" ") else max(0, len(parts) - 1)
 
     if n_complete == 0:
-        # Completing first word — category
         options = [c + " " for c in _CATEGORIES if c.startswith(text)]
     elif n_complete == 1:
-        # Completing second word — subcommand (+ deployed model IDs for "model")
         cat = parts[0].lower()
         subs = list(_SUBCOMMANDS.get(cat, []))
-        if cat == "model":
-            subs.extend(_get_deployed_model_ids())
-        elif cat in ("chat", "query"):
-            subs.extend(_get_deployed_model_ids())
         options = [s + " " for s in subs if s.startswith(text)]
     else:
-        # Third word+ — file path completion
-        prefix = text
-        if prefix.startswith("~"):
-            prefix = _os.path.expanduser(prefix)
-        if _os.path.isdir(prefix) and not prefix.endswith(_os.sep):
-            prefix += _os.sep
-        matches = _glob.glob(prefix + "*")
         options = []
-        for m in matches:
-            display = m
-            if text.startswith("~"):
-                home = _os.path.expanduser("~")
-                if display.startswith(home):
-                    display = "~" + display[len(home):]
-            if _os.path.isdir(m):
-                display += _os.sep
-            options.append(display)
 
     try:
         return options[state]
@@ -361,10 +240,10 @@ def _provision_runtime_token(port: int) -> str | None:
             try:
                 with httpx.Client(timeout=5) as client:
                     res = client.get(
-                        f"http://127.0.0.1:{port}/{org_id}/models",
+                        f"http://127.0.0.1:{port}/health",
                         headers={"Authorization": f"Bearer {existing}"},
                     )
-                    if res.status_code != 401:
+                    if res.status_code == 200:
                         return existing
             except Exception:
                 pass
@@ -664,22 +543,10 @@ def _print_help():
     click.secho("    auth logout             Log out and clear session", fg=theme.MUTED)
     click.secho("    auth status             Show auth status", fg=theme.MUTED)
     click.echo()
-    click.secho("  model", fg=theme.ACCENT)
-    click.secho("    model list              List deployed models", fg=theme.MUTED)
-    click.secho("    model deploy [path]     Deploy model to runtime", fg=theme.MUTED)
-    click.secho("    model load <file>       Load data from concepts.json", fg=theme.MUTED)
-    click.secho("    model status [id]       Check deployed status", fg=theme.MUTED)
-    click.secho("    model undeploy [id]     Remove from runtime", fg=theme.MUTED)
-    click.echo()
     click.secho("  token", fg=theme.ACCENT)
     click.secho("    token create             Create an API token", fg=theme.MUTED)
     click.secho("    token list               List active tokens", fg=theme.MUTED)
     click.secho("    token revoke <id>        Revoke a token", fg=theme.MUTED)
-    click.echo()
-    click.secho("  hub", fg=theme.ACCENT)
-    click.secho("    hub list                 Browse model registry", fg=theme.MUTED)
-    click.secho("    hub search <query>       Search by name, tag, category", fg=theme.MUTED)
-    click.secho("    hub install <id>         Install a model from the registry", fg=theme.MUTED)
     click.echo()
     click.secho("  license", fg=theme.ACCENT)
     click.secho("    license show             Display current license info", fg=theme.MUTED)
@@ -687,27 +554,13 @@ def _print_help():
     click.echo()
     click.secho("  config", fg=theme.ACCENT)
     click.secho("    config show              Show current configuration", fg=theme.MUTED)
-    click.secho("    config set endpoint <url> Set runtime endpoint", fg=theme.MUTED)
     click.echo()
-    # Show installed plugin commands
-    builtin_categories = {
-        "auth", "model", "token", "query", "chat", "config", "docker", "hub", "license", "ada",
-    }
-    plugin_categories = [c for c in _SUBCOMMANDS if c not in builtin_categories]
-    if plugin_categories:
-        click.secho("  plugins", fg=theme.ACCENT)
-        for cat in sorted(plugin_categories):
-            subs = _SUBCOMMANDS.get(cat, [])
-            sub_str = ", ".join(subs) if subs else "<command>"
-            click.secho(f"    {cat} {sub_str}", fg=theme.MUTED)
-        click.echo()
-
     click.secho("  general", fg=theme.ACCENT)
     click.secho("    clear, home             Clear screen and show banner", fg=theme.MUTED)
     click.secho("    !<command>              Run a shell command", fg=theme.MUTED)
     click.secho("    exit, quit, q           Exit the shell", fg=theme.MUTED)
     click.echo()
-    click.secho("  background server", fg=theme.ACCENT)
+    click.secho("  server", fg=theme.ACCENT)
     click.secho("    The shell embeds the runtime — it stops when you quit.", fg=theme.MUTED)
     click.secho("      glyphh serve          Run standalone (Ctrl+C to stop)", fg=theme.TEXT_DIM)
     click.echo()
