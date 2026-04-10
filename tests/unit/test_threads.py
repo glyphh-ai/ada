@@ -2,7 +2,7 @@
 Tests for context threads — Ada's structured memory.
 
 Covers: thread creation, entity/topic indexing, structured recall,
-thread manager topic inference, thread lifecycle.
+thread manager topic inference, thread lifecycle, dream weaving.
 """
 
 import pytest
@@ -12,6 +12,7 @@ from domains.brain.context_thread import ContextThread, ThreadStore
 from domains.brain.thread_manager import (
     ThreadManager, infer_topic, _extract_implicit_entities,
 )
+from glyphh.memory.glyph_dream import GlyphDreamLoop, InsightKind
 
 
 # ── ContextThread ──────��─────────────────────────────────────────
@@ -275,3 +276,148 @@ class TestThreadManager:
         # Ask about a child
         threads = mgr.recall_for_query("tell me about James")
         assert len(threads) > 0
+
+
+# ── Dream Weaving ──────────────────────────────────────────────────
+
+class TestDreamWeaving:
+    """Test the dream loop's thread weaving phase."""
+
+    def _make_dream(self):
+        """Create a minimal GlyphDreamLoop for testing weave logic."""
+        from glyphh.memory.thought_space import ThoughtGlyphSpace
+        from glyphh.memory.glyph_cognitive import GlyphCognitiveLoop
+        space = ThoughtGlyphSpace()
+        loop = GlyphCognitiveLoop(space)
+        dream = GlyphDreamLoop(loop)
+        dream._running = True  # pretend we're running
+        return dream
+
+    def test_weave_cross_tool(self):
+        """Threads sharing entity across tools get linked."""
+        store = ThreadStore()
+        t1 = ContextThread(
+            tool="cli", topic="family",
+            entities=["Brandi"], facts=["my wife is Brandi"],
+        )
+        t2 = ContextThread(
+            tool="claude-code", topic="family",
+            entities=["Brandi"], facts=["Brandi likes hiking"],
+        )
+        store.add(t1)
+        store.add(t2)
+
+        dream = self._make_dream()
+        dream.set_thread_store(store)
+        dream._weave_threads()
+
+        # Threads should be linked
+        assert t2.thread_id in t1.related_threads
+        assert t1.thread_id in t2.related_threads
+
+        # Bridge thread created
+        assert store.count == 3
+        bridge_threads = store.find_by_tool("dream")
+        assert len(bridge_threads) == 1
+        bridge = bridge_threads[0]
+        assert "Brandi" in bridge.entities
+        assert "my wife is Brandi" in bridge.facts
+        assert "Brandi likes hiking" in bridge.facts
+
+    def test_weave_cross_topic(self):
+        """Threads sharing entity across topics get linked."""
+        store = ThreadStore()
+        t1 = ContextThread(
+            tool="cli", topic="family",
+            entities=["Brandi"], facts=["my wife is Brandi"],
+        )
+        t2 = ContextThread(
+            tool="cli", topic="location",
+            entities=["Brandi"], facts=["Brandi lives in Colorado"],
+        )
+        store.add(t1)
+        store.add(t2)
+
+        dream = self._make_dream()
+        dream.set_thread_store(store)
+        dream._weave_threads()
+
+        # Threads linked
+        assert t2.thread_id in t1.related_threads
+
+        # Bridge topic combines both
+        bridge_threads = store.find_by_tool("dream")
+        assert len(bridge_threads) == 1
+        assert bridge_threads[0].topic == "family+location"
+
+    def test_weave_no_link_same_context(self):
+        """Threads in the same tool+topic don't get bridge threads."""
+        store = ThreadStore()
+        t1 = ContextThread(
+            tool="cli", topic="family",
+            entities=["Brandi"], facts=["my wife is Brandi"],
+        )
+        t2 = ContextThread(
+            tool="cli", topic="family",
+            entities=["Brandi"], facts=["Brandi has two sons"],
+        )
+        store.add(t1)
+        store.add(t2)
+
+        dream = self._make_dream()
+        dream.set_thread_store(store)
+        dream._weave_threads()
+
+        # Same context — no bridge
+        assert store.count == 2
+
+    def test_weave_idempotent(self):
+        """Running weave twice doesn't duplicate bridges."""
+        store = ThreadStore()
+        t1 = ContextThread(
+            tool="cli", topic="family",
+            entities=["Brandi"], facts=["my wife is Brandi"],
+        )
+        t2 = ContextThread(
+            tool="gemini", topic="family",
+            entities=["Brandi"], facts=["Brandi loves cooking"],
+        )
+        store.add(t1)
+        store.add(t2)
+
+        dream = self._make_dream()
+        dream.set_thread_store(store)
+        dream._weave_threads()
+        dream._weave_threads()  # second run
+
+        # Only one bridge, not two
+        bridge_threads = store.find_by_tool("dream")
+        assert len(bridge_threads) == 1
+
+    def test_weave_surfaces_insight(self):
+        """Weaving surfaces a CONNECTION insight."""
+        store = ThreadStore()
+        t1 = ContextThread(
+            tool="cli", topic="family",
+            entities=["Brandi"], facts=["my wife is Brandi"],
+        )
+        t2 = ContextThread(
+            tool="claude-code", topic="location",
+            entities=["Brandi"], facts=["Brandi lives in Colorado"],
+        )
+        store.add(t1)
+        store.add(t2)
+
+        dream = self._make_dream()
+        dream.set_thread_store(store)
+        dream._weave_threads()
+
+        insights = dream.drain_insights()
+        assert len(insights) >= 1
+        assert any(i.kind == InsightKind.CONNECTION for i in insights)
+        assert any("brandi" in i.summary.lower() for i in insights)
+
+    def test_weave_no_store(self):
+        """Weave does nothing without a thread store."""
+        dream = self._make_dream()
+        dream._weave_threads()  # should not crash

@@ -147,6 +147,10 @@ class GlyphDreamLoop:
         # CognitiveGlyph — optional, wired in by CLI
         self._cognitive: CognitiveGlyph | None = None
 
+        # ThreadStore — optional, wired in by Brain
+        self._thread_store = None  # domains.brain.context_thread.ThreadStore
+        self._woven_pairs: set[tuple[str, str]] = set()  # already-linked (tid, tid) pairs
+
         # Stats
         self._localized_cycles = 0
         self._deep_cycles = 0
@@ -206,11 +210,16 @@ class GlyphDreamLoop:
             "thoughts": self._space.count,
             "pathways": len(self._loop.library),
             "crystallization_candidates": len(self._crystallization_candidates),
+            "woven_pairs": len(self._woven_pairs),
         }
 
     def set_cognitive(self, cognitive: CognitiveGlyph) -> None:
         """Wire in the CognitiveGlyph for idle→dream transitions."""
         self._cognitive = cognitive
+
+    def set_thread_store(self, thread_store) -> None:
+        """Wire in the ThreadStore for cross-thread dreaming."""
+        self._thread_store = thread_store
 
     def notify_absorb(self) -> None:
         """Called when a new thought is absorbed — signals conversation activity."""
@@ -434,12 +443,16 @@ class GlyphDreamLoop:
             time.sleep(deep_wait)
 
     def _deep_cycle(self) -> None:
-        """One deep cycle: Survey → Connect → Generate → Crystallize → Prune."""
+        """One deep cycle: Survey → Weave → Connect → Generate → Crystallize → Prune."""
 
         # Phase 4: Survey — broadly sample from memory
         working_set = self._survey()
         if len(working_set) < 3:
             return
+
+        # Phase 4b: Weave — find cross-thread connections
+        with self._lock:
+            self._weave_threads()
 
         # Phase 5: Connect — find structural similarities across distant thoughts
         with self._lock:
@@ -477,6 +490,131 @@ class GlyphDreamLoop:
                 thoughts.append(t)
 
         return thoughts
+
+    # ── Phase 4b: Weave threads ─────────────────────────────────────
+
+    def _weave_threads(self) -> None:
+        """Find cross-thread connections and create bridge threads.
+
+        Scans all threads for shared entities across different tools
+        or topics. When threads from different contexts share entities,
+        that's a connection worth surfacing. Creates synthetic bridge
+        threads that combine facts from connected threads.
+
+        Example:
+          cli thread:    "my wife is Brandi" (family, entities=[Brandi])
+          claude thread: "Brandi lives in Colorado" (location, entities=[Brandi])
+          → bridge:      tool=dream, topic=family+location, entities=[Brandi]
+                         facts from both threads
+        """
+        if not self._thread_store or self._thread_store.count < 2:
+            return
+
+        threads = self._thread_store.all_threads()
+        if len(threads) < 2:
+            return
+
+        # Build entity → threads map (exclude dream bridges — they're outputs, not inputs)
+        entity_threads: dict[str, list] = {}
+        for t in threads:
+            if t.tool == "dream":
+                continue
+            for entity in t.entities:
+                key = entity.lower()
+                if key not in entity_threads:
+                    entity_threads[key] = []
+                entity_threads[key].append(t)
+
+        # Find entities that appear in threads with different tools or topics
+        for entity, sharing_threads in entity_threads.items():
+            if len(sharing_threads) < 2:
+                continue
+            if not self._running:
+                return
+
+            # Group by (tool, topic) to find cross-context connections
+            contexts: dict[tuple[str, str], list] = {}
+            for t in sharing_threads:
+                ctx_key = (t.tool, t.topic)
+                if ctx_key not in contexts:
+                    contexts[ctx_key] = []
+                contexts[ctx_key].append(t)
+
+            if len(contexts) < 2:
+                # All threads for this entity are in the same context — skip
+                continue
+
+            # Cross-context entity overlap found — connect the threads
+            context_list = list(contexts.values())
+            for i in range(len(context_list)):
+                for j in range(i + 1, len(context_list)):
+                    if not self._running:
+                        return
+
+                    for t_a in context_list[i]:
+                        for t_b in context_list[j]:
+                            pair_key = tuple(sorted([t_a.thread_id, t_b.thread_id]))
+                            if pair_key in self._woven_pairs:
+                                continue
+                            self._woven_pairs.add(pair_key)
+
+                            # Link threads bidirectionally
+                            if t_b.thread_id not in t_a.related_threads:
+                                t_a.related_threads.append(t_b.thread_id)
+                            if t_a.thread_id not in t_b.related_threads:
+                                t_b.related_threads.append(t_a.thread_id)
+
+                            # Surface insight
+                            self._surface(Insight(
+                                kind=InsightKind.CONNECTION,
+                                summary=(
+                                    f"'{entity}' connects [{t_a.tool}] {t_a.topic} "
+                                    f"↔ [{t_b.tool}] {t_b.topic}"
+                                ),
+                                atoms=[entity, t_a.tool, t_a.topic, t_b.tool, t_b.topic],
+                                confidence=0.7,
+                            ))
+
+                            # Create bridge thread if enough combined facts
+                            self._maybe_create_bridge(entity, t_a, t_b)
+
+    def _maybe_create_bridge(self, entity: str, t_a, t_b) -> None:
+        """Create a synthetic bridge thread combining facts from two related threads.
+
+        Bridge threads are tool="dream" — Ada dreamed the connection.
+        Only created when both threads have facts worth combining.
+        """
+        if not t_a.facts or not t_b.facts:
+            return
+
+        from domains.brain.context_thread import ContextThread
+
+        # Merge entities from both threads (deduplicated)
+        merged_entities = list(dict.fromkeys(t_a.entities + t_b.entities))
+
+        # Combine topics
+        topics = sorted(set(filter(None, [t_a.topic, t_b.topic])))
+        bridge_topic = "+".join(topics) if topics else "general"
+
+        # Combine facts (deduplicated, limited)
+        merged_facts = list(dict.fromkeys(t_a.facts + t_b.facts))[:20]
+
+        bridge = ContextThread(
+            tool="dream",
+            topic=bridge_topic,
+            entities=merged_entities,
+            facts=merged_facts,
+            summary=f"Dream connection: {entity} across {t_a.tool}/{t_a.topic} ↔ {t_b.tool}/{t_b.topic}",
+            related_threads=[t_a.thread_id, t_b.thread_id],
+            active=False,  # bridge threads are not active conversations
+        )
+
+        self._thread_store.add(bridge)
+
+        logger.info(
+            "Dream wove bridge thread: %s (%d facts, %d entities)",
+            bridge_topic, len(merged_facts), len(merged_entities),
+        )
 
     # ── Phase 5: Connect ─────────────────────────────────────────────
 

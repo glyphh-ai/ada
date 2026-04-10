@@ -348,6 +348,10 @@ class Brain:
 
     def start_dreaming(self) -> None:
         self._cognitive.start_dreaming()
+        # Wire thread store into the dream loop for cross-thread weaving
+        dream = self._cognitive._dream
+        if dream is not None:
+            dream.set_thread_store(self._thread_store)
 
     def stop_dreaming(self) -> None:
         self._cognitive.stop_dreaming()
