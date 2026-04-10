@@ -322,12 +322,19 @@ class ThoughtProcess:
             return thought.action_result
 
         # ── Hallucination gate ─────────────────────────────────
-        # The LLM ONLY gets facts that survived the cognitive gradient.
-        # If the gradient didn't converge, Ada says "I don't know"
-        # instead of letting the LLM guess.
+        # If overall confidence is below threshold, the LLM is cut out
+        # entirely. Ada returns facts raw or says "I don't know."
+        # This prevents the LLM from confabulating plausible-sounding
+        # responses from weakly-matched or wrong facts.
 
+        if thought.confidence < CONFIDENCE_THRESHOLD:
+            # Low confidence — no LLM, just facts or "I don't know"
+            if thought.memory_gate == "DONE" and thought.facts:
+                return thought.facts[0][0]
+            return "I don't have information about that in my memory."
+
+        # High confidence + gradient converged — LLM synthesizes from grounded facts
         if thought.memory_gate == "DONE" and thought.facts:
-            # Gradient converged — we have grounded facts. LLM synthesizes.
             if self._llm.available:
                 parts = [f"User said: \"{input_text}\""]
                 parts.append("\nFacts (from your memory — these are TRUE, use them):")
@@ -340,11 +347,10 @@ class ThoughtProcess:
                 response = await self._llm.ask("\n".join(parts))
                 if response:
                     return response
-            # LLM offline — return top fact directly
             return thought.facts[0][0]
 
+        # High confidence but gradient didn't converge — partial match
         if thought.facts and thought.facts[0][2] >= CONFIDENCE_THRESHOLD:
-            # Partial match above confidence threshold — LLM can synthesize
             if self._llm.available:
                 parts = [f"User said: \"{input_text}\""]
                 parts.append("\nPossibly relevant memories (not fully confirmed):")
@@ -358,5 +364,5 @@ class ThoughtProcess:
                 if response:
                     return response
 
-        # No facts, low confidence, or no convergence — honest "I don't know"
+        # No facts, no convergence — honest "I don't know"
         return "I don't have information about that in my memory."
