@@ -37,6 +37,7 @@ class Thought:
     # Perception
     input_text: str = ""
     cognitive_state: str = ""  # RECALL, STORE, FEEL, CONTRADICT, etc.
+    cognitive_state_obj: Any = None  # Full CognitiveState for sub-agent routing
     # Guard
     firewall_blocked: bool = False
     firewall_result: str = ""
@@ -99,6 +100,10 @@ class ThoughtProcess:
         from domains.brain.gradient_patterns import GradientPatternLibrary
         self._patterns = GradientPatternLibrary()
 
+        # Sub-agents — each cognitive action has its own brain
+        from domains.brain.sub_agents import SubAgentRegistry
+        self._agents = SubAgentRegistry(cognitive.thought_space)
+
     async def think(self, input_text: str) -> ThoughtResult:
         """Run the full thought process."""
         start = time.monotonic()
@@ -112,6 +117,7 @@ class ThoughtProcess:
             # ── 1. PERCEIVE ──────────────────────────────────────
             state = self._cognitive.cognitive.process(input_text)
             thought.cognitive_state = state.action.name if state else "UNKNOWN"
+            thought.cognitive_state_obj = state
 
             # ── 2. GUARD ─────────────────────────────────────────
             if cycle == 0:  # Only firewall on first cycle
@@ -304,19 +310,16 @@ class ThoughtProcess:
     # ── Response formulation ─────────────────────────────────────
 
     async def _formulate_response(self, thought: Thought, input_text: str) -> str:
-        """Formulate a natural response using Haiku."""
+        """Route to the right sub-agent and get a response.
 
-        # ── Non-recall cognitive states ───────────────────────
-        # STORE/FEEL/CONTRADICT have their own response paths.
-        # Don't recall facts back at the user for a statement.
-        if thought.cognitive_state == "STORE":
-            return "Got it."
-        if thought.cognitive_state == "FEEL":
-            return "I hear you."
-
+        If a capability returned structured data, that takes priority.
+        Otherwise, the sub-agent registry handles routing:
+          1. CognitiveGlyph's classification (coarse)
+          2. Sub-agent HDC models refine if ambiguous
+          3. LLM breaks ties if still unclear
+        """
         # If a capability returned a result, use it directly
         if thought.action_success and thought.action_result:
-            # Capability gave us structured data — have Haiku make it natural
             if self._llm.available:
                 prompt = (
                     f"User asked: \"{input_text}\"\n"
@@ -329,48 +332,21 @@ class ThoughtProcess:
                     return response
             return thought.action_result
 
-        # ── Hallucination gate ─────────────────────────────────
-        # If overall confidence is below threshold, the LLM is cut out
-        # entirely. Ada returns facts raw or says "I don't know."
-        # This prevents the LLM from confabulating plausible-sounding
-        # responses from weakly-matched or wrong facts.
-
-        if thought.confidence < CONFIDENCE_THRESHOLD:
-            # Low confidence — no LLM, just facts or "I don't know"
-            if thought.memory_gate == "DONE" and thought.facts:
-                return thought.facts[0][0]
+        # Delegate to sub-agents
+        coarse_state = thought.cognitive_state_obj
+        if coarse_state is None:
             return "I don't have information about that in my memory."
 
-        # High confidence + gradient converged — LLM synthesizes from grounded facts
-        if thought.memory_gate == "DONE" and thought.facts:
-            if self._llm.available:
-                parts = [f"User said: \"{input_text}\""]
-                parts.append("\nFacts (from your memory — these are TRUE, use them):")
-                for content, speaker, sim in thought.facts[:5]:
-                    parts.append(f"  - {content}")
-                parts.append(
-                    "\nRespond using ONLY these facts. 1-2 sentences. "
-                    "Do not add information that isn't in the facts."
-                )
-                response = await self._llm.ask("\n".join(parts))
-                if response:
-                    return response
-            return thought.facts[0][0]
+        response, resolved_action = await self._agents.route_and_respond(
+            input_text=input_text,
+            coarse_state=coarse_state,
+            facts=thought.facts,
+            confidence=thought.confidence,
+            memory_gate=thought.memory_gate,
+            llm=self._llm,
+        )
 
-        # High confidence but gradient didn't converge — partial match
-        if thought.facts and thought.facts[0][2] >= CONFIDENCE_THRESHOLD:
-            if self._llm.available:
-                parts = [f"User said: \"{input_text}\""]
-                parts.append("\nPossibly relevant memories (not fully confirmed):")
-                for content, speaker, sim in thought.facts[:3]:
-                    parts.append(f"  - {content}")
-                parts.append(
-                    "\nRespond as Ada. Use these memories if they seem relevant, "
-                    "but say what you're unsure about. 1-2 sentences."
-                )
-                response = await self._llm.ask("\n".join(parts))
-                if response:
-                    return response
+        # Update thought with resolved action for logging
+        thought.cognitive_state = resolved_action.name
 
-        # No facts, no convergence — honest "I don't know"
-        return "I don't have information about that in my memory."
+        return response

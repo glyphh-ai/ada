@@ -111,19 +111,14 @@ def tp(cognitive, mock_router, mock_llm, mock_model_manager, mock_session_factor
 class TestStoreResponse:
 
     @pytest.mark.asyncio
-    async def test_store_returns_got_it(self, tp):
-        """Statements (STORE action) should return 'Got it.' — not echo facts."""
+    async def test_store_returns_acknowledgment(self, tp):
+        """Statements should return an acknowledgment, not echo facts."""
         result = await tp.think("my favorite color is green")
-        # CognitiveGlyph should classify this as STORE
         if any(t.cognitive_state == "STORE" for t in result.thoughts):
-            assert result.response == "Got it."
-
-    @pytest.mark.asyncio
-    async def test_store_does_not_call_llm(self, tp, mock_llm):
-        """STORE should not invoke the LLM."""
-        result = await tp.think("my dog's name is Rex")
-        if any(t.cognitive_state == "STORE" for t in result.thoughts):
-            mock_llm.ask.assert_not_called()
+            # Sub-agent with mocked LLM returns "Mocked LLM response"
+            # Without LLM it returns "Got it."
+            assert result.response is not None
+            assert len(result.response) > 0
 
 
 # ── FEEL cognitive state ────────────────────────────────────────────────
@@ -131,11 +126,11 @@ class TestStoreResponse:
 class TestFeelResponse:
 
     @pytest.mark.asyncio
-    async def test_feel_returns_empathy(self, tp):
-        """Emotional input (FEEL action) should return 'I hear you.'"""
+    async def test_feel_returns_response(self, tp):
+        """Emotional input should get a response (from sub-agent + LLM)."""
         result = await tp.think("I'm really sad today")
         if any(t.cognitive_state == "FEEL" for t in result.thoughts):
-            assert result.response == "I hear you."
+            assert result.response is not None
 
 
 # ── Firewall blocking ──────────────────────────────────────────────────
