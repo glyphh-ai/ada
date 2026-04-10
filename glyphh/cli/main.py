@@ -14,7 +14,6 @@ from dotenv import load_dotenv
 load_dotenv(Path(".env"))
 
 from .commands.serve import serve_command
-from .commands.ada import ada_command
 
 
 try:
@@ -35,7 +34,6 @@ def cli(ctx):
 
 # Subcommands
 cli.add_command(serve_command)
-cli.add_command(ada_command)
 
 
 if __name__ == "__main__":
