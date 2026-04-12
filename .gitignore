@@ -72,3 +72,5 @@ Thumbs.db
 # Glyphh engine (embedded SDK) — track the package, ignore caches
 glyphh/__pycache__/
 glyphh/**/__pycache__/
+*.db-shm
+*.db-wal
