@@ -173,6 +173,7 @@ class GlyphCognitiveLoop:
         query: str,
         top_k: int = 5,
         speaker: str = "incoming",
+        semantic: bool | None = None,
     ) -> list[GlyphReasoningChain]:
         """Multi-hop glyph reasoning.
 
@@ -186,6 +187,8 @@ class GlyphCognitiveLoop:
             query: Natural language query.
             top_k: Max chains to return.
             speaker: Speaker context.
+            semantic: Override the space's semantic-recall flag (the dream
+                loop passes False to stay HDC-only and skip Qwen3 inference).
 
         Returns:
             List of GlyphReasoningChain sorted by confidence.
@@ -198,7 +201,9 @@ class GlyphCognitiveLoop:
         chains: list[GlyphReasoningChain] = []
 
         # Hop 1: direct recall
-        results = self._space.recall(query, top_k=top_k * 2, speaker=speaker)
+        results = self._space.recall(
+            query, top_k=top_k * 2, speaker=speaker, semantic=semantic,
+        )
         seen_thoughts: set[str] = set()
 
         for result in results:
@@ -237,6 +242,7 @@ class GlyphCognitiveLoop:
                 # Use the recalled thought's content as a secondary query
                 secondary_results = self._space.recall(
                     parent.content, top_k=3, speaker=parent.speaker,
+                    semantic=semantic,
                 )
 
                 for result in secondary_results:

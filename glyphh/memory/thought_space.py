@@ -107,6 +107,35 @@ class ThoughtGlyphSpace:
         self._absorbed_texts: set[str] = set()  # dedup
         self._primitives_version: int = primitives.version  # track for re-encoding
 
+        # Semantic recall signal (local Qwen3 embedding) — graceful if offline.
+        # Blends with the HDC signals to fix lexical-overlap blind spots.
+        import os as _os
+        from glyphh.memory.semantic_encoder import get_semantic_encoder
+        self._semantic = get_semantic_encoder()
+        # Opt-in: default OFF preserves sub-ms deterministic HDC recall and the
+        # existing test baseline. Turn on per-instance or via ADA_USE_SEMANTIC=1.
+        self.use_semantic: bool = _os.environ.get("ADA_USE_SEMANTIC", "0") != "0"
+        # Weight given to the semantic signal in the final blend (0..1).
+        self.semantic_weight: float = float(
+            _os.environ.get("ADA_SEMANTIC_WEIGHT", "0.6")
+        )
+
+        # Slot/type answerability — down-weight facts that don't answer the
+        # question's expected type (color/number/date/...). Routes non-answers
+        # to the ASK/clarify path instead of a confident wrong DONE. Opt-in.
+        self.use_answerability: bool = (
+            _os.environ.get("ADA_USE_ANSWERABILITY", "0") != "0"
+        )
+        self.answerability_penalty: float = float(
+            _os.environ.get("ADA_ANSWERABILITY_PENALTY", "0.5")
+        )
+
+        # Entity expansion — pull in the entity-connected cluster so relational
+        # ("multi-hop") queries surface all the facts an answer needs. Opt-in.
+        self.use_expansion: bool = (
+            _os.environ.get("ADA_USE_EXPANSION", "0") != "0"
+        )
+
     @property
     def primitives(self) -> PrimitiveSpace:
         return self._primitives
@@ -169,8 +198,14 @@ class ThoughtGlyphSpace:
         top_k: int = 5,
         min_similarity: float = 0.01,
         speaker: str = "incoming",
+        semantic: bool | None = None,
+        expand: bool | None = None,
     ) -> list[RecallResult]:
         """Search ALL long-term memory for thoughts matching a query.
+
+        `semantic` / `expand` override the instance flags for THIS call
+        (None = use the instance default). The background dream loop passes
+        False so it stays cheap HDC-only and never runs Qwen3 inference.
 
         Three-signal search (following glyphh-code's layered re-ranking):
           1. Content cosine — pure content word match (primary signal, 0.50)
@@ -202,6 +237,18 @@ class ThoughtGlyphSpace:
         # ── Signal 1: Content vector (primary — like glyphh-code content layer)
         query_content_vec = query_glyph.metadata.get("_content_vector")
         query_activated = set(query_glyph.metadata.get("_activated_attrs", []))
+
+        # ── Signal 4 setup: semantic query embedding (computed once) ──
+        use_semantic = self.use_semantic if semantic is None else semantic
+        query_semantic_vec = None
+        if use_semantic and self._semantic.available:
+            query_semantic_vec = self._semantic.encode(query, is_query=True)
+
+        # ── Answerability setup: expected answer type (computed once) ──
+        query_answer_type = None
+        if self.use_answerability:
+            from glyphh.memory.answerability import expected_type
+            query_answer_type = expected_type(query)
 
         _LAYER_WEIGHTS = {
             "perspective": 0.25,
@@ -292,6 +339,29 @@ class ThoughtGlyphSpace:
                 + structural * w_struct
             )
 
+            # ── Signal 4: semantic embedding (local Qwen3) ──
+            # Blend the HDC combined with sentence-level semantic similarity.
+            # This is what lets paraphrases ("employs" vs "works") survive the
+            # gate. Zero-impact when the model is offline (sem_sim == 0 and the
+            # weight collapses), so HDC-only behavior is preserved.
+            if query_semantic_vec is not None:
+                stored_semantic_vec = self._semantic.encode(stored.content)
+                sem_sim = max(0.0, self._semantic.cosine(
+                    query_semantic_vec, stored_semantic_vec,
+                ))
+                a = self.semantic_weight
+                combined = (1.0 - a) * combined + a * sem_sim
+
+            # ── Answerability down-weight: similar but doesn't answer? ──
+            if query_answer_type is not None:
+                from glyphh.memory.answerability import satisfies
+                if not satisfies(stored.content, query_answer_type):
+                    from glyphh.memory.answerability import CLOSED
+                    p = self.answerability_penalty
+                    if query_answer_type not in CLOSED:
+                        p = p + (1.0 - p) * 0.5  # softer for open classes
+                    combined *= p
+
             if combined >= min_similarity:
                 results.append(RecallResult(
                     thought=stored,
@@ -300,7 +370,59 @@ class ThoughtGlyphSpace:
                 ))
 
         results.sort(key=lambda r: r.global_similarity, reverse=True)
-        return results[:top_k]
+        top = results[:top_k]
+
+        use_expansion = self.use_expansion if expand is None else expand
+
+        # ── Entity expansion (deterministic multi-hop coverage) ──
+        # reason() only yields depth-1 chains, so relational queries ("who are
+        # Jim's grandchildren?") never surface the connected facts. Here we walk
+        # shared proper nouns from the query + top hits (BFS, bounded depth) and
+        # pull in the connected cluster so the chain's pieces are all present
+        # for the responder to reason over. Deterministic, LLM-free.
+        if use_expansion and top:
+            top = self._expand_entities(query, top, results)
+        return top
+
+    def _expand_entities(
+        self,
+        query: str,
+        top: list["RecallResult"],
+        all_results: list["RecallResult"],
+        max_depth: int = 2,
+        budget: int = 6,
+    ) -> list["RecallResult"]:
+        """Augment `top` with entity-connected facts from `all_results`."""
+        from glyphh.memory.answerability import _PROPER_NOUN, _STOPCAPS
+
+        def entities(text: str) -> set[str]:
+            return {
+                m.group(0).lower()
+                for m in _PROPER_NOUN.finditer(text)
+                if m.group(0) not in _STOPCAPS
+            }
+
+        chosen = list(top)
+        have = {id(r.thought) for r in chosen}
+        # Seed from the query and the single strongest hit.
+        frontier = entities(query)
+        if top:
+            frontier |= entities(top[0].thought.content)
+
+        for _ in range(max_depth):
+            if not frontier or len(chosen) - len(top) >= budget:
+                break
+            next_frontier: set[str] = set()
+            for r in all_results:
+                ents = entities(r.thought.content)
+                if ents & frontier:
+                    next_frontier |= ents
+                    if id(r.thought) not in have:
+                        have.add(id(r.thought))
+                        chosen.append(r)  # keep its real (often low) similarity
+            frontier = next_frontier - frontier  # only newly reached entities
+
+        return chosen
 
     def recall_by_layer(
         self,

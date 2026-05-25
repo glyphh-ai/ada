@@ -325,7 +325,7 @@ class GlyphDreamLoop:
                 self._curiosity[tid].explore_count += 1
 
             # Reason from this thought's content
-            chains = self._loop.reason(thought.content, top_k=5)
+            chains = self._loop.reason(thought.content, top_k=5, semantic=False)
             self._total_chains += len(chains)
 
             for chain in chains:
@@ -364,7 +364,7 @@ class GlyphDreamLoop:
             if not self._running:
                 return
 
-            chains = self._loop.reason(thought.content, top_k=5)
+            chains = self._loop.reason(thought.content, top_k=5, semantic=False)
             self._total_chains += len(chains)
 
             contradicted = [c for c in chains if c.contradicted]
@@ -392,7 +392,7 @@ class GlyphDreamLoop:
 
             # Self-reinforce converging pathways (capped)
             for source in source_list:
-                chains = self._loop.reason(source, top_k=3)
+                chains = self._loop.reason(source, top_k=3, semantic=False)
                 self._total_chains += len(chains)
                 for chain in chains:
                     if chain.answer and chain.answer.content == answer:
@@ -859,12 +859,12 @@ class GlyphDreamLoop:
 
         for thought in thoughts:
             # Find thoughts similar to this one
-            results = self._space.recall(thought.content, top_k=3)
+            results = self._space.recall(thought.content, top_k=3, semantic=False, expand=False)
             for r in results:
                 if r.thought.thought_id == thought.thought_id:
                     continue
                 # Find thoughts similar to the recalled thought
-                sub_results = self._space.recall(r.thought.content, top_k=3)
+                sub_results = self._space.recall(r.thought.content, top_k=3, semantic=False, expand=False)
                 for sr in sub_results:
                     if sr.thought.thought_id in (thought.thought_id, r.thought.thought_id):
                         continue

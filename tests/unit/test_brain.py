@@ -33,10 +33,12 @@ def _make_mock_model_manager():
 
 
 def _make_mock_llm():
+    from domains.brain.llm import LLMUsage
     llm = MagicMock()
     llm.available = False
     llm.set_firewall = MagicMock()
     llm.ask = AsyncMock(return_value=None)
+    llm.usage = LLMUsage()  # real counters so per-call token delta is a clean int
     return llm
 
 
@@ -328,3 +330,84 @@ class TestEndToEndRecall:
         # Should be either "Got it." or a short acknowledgment
         # NOT "The user's name is Chris." echoed back
         assert result.response != "The user's name is Chris."
+
+
+# ── Token usage reporting ──────────────────────────────────────────────
+class TestTokenUsage:
+    """Per-call LLM token usage flows into ThinkResult (in/out display)."""
+
+    async def test_no_llm_call_reports_zero(self):
+        brain = _make_brain()
+        result = await brain.think("hello")
+        # Mock LLM never increments usage → clean 0/0 (answered without the LLM)
+        assert result.tokens_in == 0
+        assert result.tokens_out == 0
+        # ...but a deterministic answer estimates the tokens it saved.
+        assert result.tokens_saved > 0
+
+    async def test_delta_excludes_prior_usage(self):
+        brain = _make_brain()
+        llm = brain.llm
+
+        async def fake_ask(*a, **k):
+            llm.usage.input_tokens += 40
+            llm.usage.output_tokens += 12
+            return "ok"
+
+        llm.available = True
+        llm.ask = AsyncMock(side_effect=fake_ask)
+        # Pre-existing cumulative usage from earlier calls must NOT leak in.
+        llm.usage.input_tokens = 1000
+        llm.usage.output_tokens = 1000
+
+        # A statement (not a question) reaches the LLM respond branch.
+        result = await brain.think("I enjoy hiking on weekends.")
+
+        # Per-call tokens = delta only, baseline 1000 excluded.
+        assert result.tokens_in > 0, "LLM should have been called"
+        assert result.tokens_in == llm.usage.input_tokens - 1000
+        assert result.tokens_out == llm.usage.output_tokens - 1000
+        # When the LLM WAS used, nothing was "saved".
+        assert result.tokens_saved == 0
+
+
+# ── Memory reset (must reach the vector store + threads) ───────────────
+class TestMemoryReset:
+    """reset_memory() must wipe everything the live pipeline can recall."""
+
+    async def test_reset_clears_vector_store_and_threads(self):
+        brain = _make_brain()
+        # Teach a fact — lands in the thought space and a context thread.
+        await brain.think("my truck is a ford")
+        had_thoughts = any(
+            "ford" in t.content.lower()
+            for t in brain.cognitive.thought_space._thoughts.values()
+        )
+        assert had_thoughts, "fact should be stored before reset"
+
+        brain.reset_memory()
+
+        # Vector store: no user fact survives (only reseeded Ada identity).
+        leftover = [
+            t.content for t in brain.cognitive.thought_space._thoughts.values()
+            if "ford" in t.content.lower() or "truck" in t.content.lower()
+        ]
+        assert leftover == [], f"vector store still holds: {leftover}"
+        # Threads gone; pipeline rebuilt. Pending writes hold only the
+        # reseeded Ada identity — never the deleted user fact.
+        assert brain.thread_store.count == 0
+        assert brain._thought_process is None
+        assert all(
+            "ford" not in t.content.lower() and "truck" not in t.content.lower()
+            for t in brain._persist_queue
+        ), "deleted fact must not remain queued for persistence"
+        # Ada still knows herself (identity reseeded).
+        assert brain.cognitive.thought_space.count > 0
+
+    async def test_reset_then_recall_is_empty(self):
+        brain = _make_brain()
+        await brain.think("my truck is a ford")
+        brain.reset_memory()
+        # The rebuilt pipeline must not surface the deleted fact.
+        result = await brain.think("what truck do i have?")
+        assert "ford" not in result.response.lower()

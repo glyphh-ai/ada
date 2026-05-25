@@ -64,6 +64,10 @@ _SUBCOMMANDS = {
 
 _CATEGORIES = list(_SUBCOMMANDS.keys()) + ["help", "clear", "home", "exit", "quit"]
 
+# Per-session token meter: actual Claude (Haiku) tokens vs estimated tokens
+# Ada saved by answering deterministically.
+_SESSION = {"claude_in": 0, "claude_out": 0, "saved": 0}
+
 
 def _completer(text, state):
     """Tab completer: commands and subcommands."""
@@ -336,10 +340,18 @@ def _think(text: str, port: int) -> None:
         capability = data.get("capability", "")
         confidence = data.get("confidence", 0)
         elapsed = data.get("elapsed_ms", 0)
+        tokens_in = data.get("tokens_in", 0)
+        tokens_out = data.get("tokens_out", 0)
+        tokens_saved = data.get("tokens_saved", 0)
 
         if data.get("error"):
             click.secho(f"  Error: {data['error']}", fg=theme.ERROR)
             return
+
+        # Accumulate the session token meter (actual Claude vs saved-free).
+        _SESSION["claude_in"] += tokens_in
+        _SESSION["claude_out"] += tokens_out
+        _SESSION["saved"] += tokens_saved
 
         # Print response
         click.echo()
@@ -365,8 +377,10 @@ def _think(text: str, port: int) -> None:
         else:
             click.secho("  (no response)", fg=theme.MUTED)
 
-        # Debug line
-        if capability or confidence:
+        # Debug line: [in/out] [capability · confidence · ms]
+        # The token bracket sits next to the confidence/latency bracket.
+        # in/out = LLM tokens for THIS call; 0/0 = answered without the LLM.
+        if capability or confidence or tokens_in or tokens_out:
             meta_parts = []
             if capability:
                 meta_parts.append(capability)
@@ -374,7 +388,19 @@ def _think(text: str, port: int) -> None:
                 meta_parts.append(f"{confidence:.0%}")
             if elapsed:
                 meta_parts.append(f"{elapsed:.0f}ms")
-            click.secho(f"  [{' · '.join(meta_parts)}]", fg=theme.TEXT_DIM)
+            tok = f"[{tokens_in}/{tokens_out}]"
+            meta = f"[{' · '.join(meta_parts)}]" if meta_parts else ""
+            click.secho(f"  {tok} {meta}".rstrip(), fg=theme.TEXT_DIM)
+
+        # Session footer: cumulative Claude spend vs estimated free (saved).
+        def _fmt(n: int) -> str:
+            return f"{n/1000:.1f}k" if n >= 1000 else str(n)
+        click.secho(
+            f"  session · claude {_fmt(_SESSION['claude_in'])} in / "
+            f"{_fmt(_SESSION['claude_out'])} out · "
+            f"~{_fmt(_SESSION['saved'])} free",
+            fg=theme.TEXT_DIM,
+        )
         click.echo()
 
     except httpx.ConnectError:

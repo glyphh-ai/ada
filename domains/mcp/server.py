@@ -118,6 +118,9 @@ def create_mcp_server(brain: Any, auth_service: AuthService) -> Server:
                 "gate": result.gate,
                 "llm_assisted": result.llm_assisted,
                 "elapsed_ms": round(result.elapsed_ms, 1),
+                "tokens_in": result.tokens_in,
+                "tokens_out": result.tokens_out,
+                "tokens_saved": result.tokens_saved,
             }
 
             logger.info(f"think() completed in {elapsed:.1f}ms")

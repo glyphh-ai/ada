@@ -82,12 +82,35 @@ def handle_memory(func: str | None, args: str = ""):
     cmd = func.strip().lower() if func else ""
 
     if cmd == "reset":
-        cognitive = _get_cognitive()
-        if cognitive is not None:
-            cognitive.reset()
+        # Destructive + irreversible — require an explicit typed confirmation.
+        click.secho(
+            "  This permanently deletes ALL of Ada's memory —", fg=theme.WARNING
+        )
+        click.secho(
+            "  the in-memory vector store AND the database.", fg=theme.WARNING
+        )
+        click.secho("  This cannot be undone.", fg=theme.WARNING)
+        try:
+            confirm = input("  Type 'confirm-delete' to proceed: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            click.secho("\n  Cancelled — memory left intact.", fg=theme.MUTED)
+            return
+        if confirm != "confirm-delete":
+            click.secho("  Cancelled — memory left intact.", fg=theme.MUTED)
+            return
 
         brain = _get_brain()
-        if brain is not None and hasattr(brain, '_session_factory'):
+
+        # In-memory wipe (vector store, threads, derivative, persist queue).
+        if brain is not None and hasattr(brain, "reset_memory"):
+            brain.reset_memory()
+        else:
+            cognitive = _get_cognitive()
+            if cognitive is not None:
+                cognitive.reset()
+
+        # Persisted (database) wipe.
+        if brain is not None and hasattr(brain, "_session_factory"):
             import asyncio
             from glyphh.memory.thought_persistence import clear_all_thoughts
             from domains.brain.thread_persistence import clear_all_threads
@@ -99,16 +122,10 @@ def handle_memory(func: str | None, args: str = ""):
             except Exception as e:
                 click.secho(f"  Warning: could not clear database: {e}", fg=theme.WARNING)
 
-        # Clear thread store in memory (preserve encoder reference)
-        if brain is not None and hasattr(brain, '_thread_store'):
-            from domains.brain.context_thread import ThreadStore
-            encoder = brain._thread_store.encoder
-            brain._thread_store = ThreadStore(encoder=encoder)
-
         path = os.path.expanduser("~/.glyphh/memory")
         if os.path.exists(path):
             shutil.rmtree(path)
-        click.secho("  Memory cleared.", fg=theme.ACCENT)
+        click.secho("  Memory cleared. Ada remembers nothing but herself.", fg=theme.ACCENT)
     else:
         click.secho("  memory reset              Clear all memory", fg=theme.TEXT_DIM)
 

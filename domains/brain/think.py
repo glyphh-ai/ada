@@ -27,6 +27,13 @@ from domains.brain.router import BrainRouter
 
 logger = logging.getLogger(__name__)
 
+# Rough token estimate (~4 chars/token) for the "saved" counterfactual.
+_SYSTEM_PROMPT_EST = 90  # ADA_SYSTEM is a near-constant ~90 tokens
+
+
+def _est_tokens(text: str) -> int:
+    return max(1, len(text) // 4) if text else 0
+
 
 @dataclass
 class ThinkResult:
@@ -39,6 +46,12 @@ class ThinkResult:
     llm_assisted: bool = False
     elapsed_ms: float = 0.0
     firewall_pass: bool = True
+    # LLM token usage for THIS call (sum across all internal LLM calls)
+    tokens_in: int = 0
+    tokens_out: int = 0
+    # Estimated Haiku tokens this call WOULD have cost had it gone to the LLM,
+    # but didn't (Ada answered deterministically). 0 when the LLM was used.
+    tokens_saved: int = 0
     # Extraction results
     extracted_question: Optional[str] = None
     extracted_facts: list[str] = field(default_factory=list)
@@ -68,6 +81,20 @@ class Brain:
 
         # Cognitive infrastructure
         self._cognitive = AdaCognitive()
+        # Live recall uses the local Qwen3 semantic signal + slot/type
+        # answerability gate by default (the runtime accepts the model-load
+        # cost for paraphrase-robust recall). Env can disable for pure-HDC
+        # determinism. Library/test default stays OFF (set in ThoughtGlyphSpace).
+        import os as _os
+        self._cognitive.thought_space.use_semantic = (
+            _os.environ.get("ADA_USE_SEMANTIC", "1") != "0"
+        )
+        self._cognitive.thought_space.use_answerability = (
+            _os.environ.get("ADA_USE_ANSWERABILITY", "1") != "0"
+        )
+        self._cognitive.thought_space.use_expansion = (
+            _os.environ.get("ADA_USE_EXPANSION", "1") != "0"
+        )
         self._router = BrainRouter(brain_state, model_manager)
         self._observations = ObservationLog()
         self._router_ready = False
@@ -175,6 +202,12 @@ class Brain:
         """Process a natural language request through Ada's brain."""
         start = time.monotonic()
 
+        # Snapshot LLM token counters so we can report per-call usage. Ada may
+        # call the LLM zero or several times within one think (extract, respond,
+        # disambiguate); 0/0 means she answered without the LLM at all.
+        tok_in0 = self._llm.usage.input_tokens
+        tok_out0 = self._llm.usage.output_tokens
+
         # Lazy init
         if not self._router_ready:
             self._router.initialize(session_factory=self._session_factory)
@@ -204,6 +237,8 @@ class Brain:
                 confidence=1.0,
                 gate="DONE",
                 elapsed_ms=elapsed,
+                tokens_in=self._llm.usage.input_tokens - tok_in0,
+                tokens_out=self._llm.usage.output_tokens - tok_out0,
             )
 
         # Run the cognitive thought process
@@ -224,6 +259,21 @@ class Brain:
             result.response, result.llm_assisted, elapsed,
         )
 
+        tokens_in = self._llm.usage.input_tokens - tok_in0
+        tokens_out = self._llm.usage.output_tokens - tok_out0
+        # If Ada answered without the LLM, estimate what it would have cost —
+        # the system prompt + facts she'd have sent, plus an answer the length
+        # of the one she produced. That's the "free" work the LLM didn't do.
+        tokens_saved = 0
+        if tokens_in == 0 and tokens_out == 0 and result.response:
+            facts_text = " ".join(f[0] for f in result.facts[:5]) if result.facts else ""
+            tokens_saved = (
+                _SYSTEM_PROMPT_EST
+                + _est_tokens(input_text)
+                + _est_tokens(facts_text)
+                + _est_tokens(result.response)
+            )
+
         return ThinkResult(
             response=result.response,
             capability=result.capability,
@@ -233,12 +283,48 @@ class Brain:
             llm_assisted=result.llm_assisted,
             firewall_pass=result.firewall_pass,
             elapsed_ms=elapsed,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            tokens_saved=tokens_saved,
             extracted_question=result.extracted_question,
             extracted_facts=result.extracted_facts,
             extracted_emotion=result.extracted_emotion,
             is_greeting=result.is_greeting,
             is_correction=result.is_correction,
         )
+
+    # ── Memory reset ──────────────────────────────────────────────────────
+
+    def reset_memory(self) -> None:
+        """Hard reset of ALL in-memory state, then reseed Ada's base identity.
+
+        Clears the vector store in place, drops pending writes, and rebuilds the
+        thread store + derivative. Critically, it nulls the cached thought
+        process so it rebuilds against the fresh references — otherwise stale
+        thread/derivative references keep serving deleted memories.
+
+        The caller is responsible for clearing persisted (database) state.
+        """
+        # Vector store — cleared in place (same object the pipeline references).
+        self._cognitive.reset()
+        # Drop queued writes so deleted thoughts don't get re-persisted.
+        self._persist_queue.clear()
+        # Fresh thread store + derivative.
+        from domains.brain.context_thread import ThreadStore
+        self._thread_store = ThreadStore(
+            encoder=self._cognitive.thought_space.encoder,
+        )
+        from domains.brain.derivative import UserDerivative
+        self._derivative = UserDerivative(self._cognitive.thought_space)
+        # Rebuild the pipeline so it picks up the new thread store + derivative.
+        self._thought_process = None
+        # Reseed Ada's own identity (not the user's) so she still knows herself.
+        self._seed_memories()
+        # cognitive.reset() stopped the dream loop — bring it back if it was on.
+        try:
+            self.start_dreaming()
+        except Exception:
+            pass
 
     # ── Firewall — mandatory security layer ──────────────────────────────
 
