@@ -128,6 +128,16 @@ def get_prompt() -> str:
     return click.style("ada", fg=theme.PRIMARY) + click.style("> ", fg=theme.TEXT)
 
 
+def _dev_no_auth() -> bool:
+    """Dev escape hatch: skip the login + API-key gates in shell().
+
+    Temporary — set GLYPHH_DEV_NO_AUTH=1 to boot straight into the shell
+    without platform login or an Anthropic key. The real auth flow is left
+    intact and runs whenever the flag is unset.
+    """
+    return os.environ.get("GLYPHH_DEV_NO_AUTH", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 # ── Embedded runtime server ─────────────────────────────────────────────────
 
 
@@ -419,30 +429,35 @@ def shell(ctx):
     setup_readline()
     print_banner()
 
+    dev_no_auth = _dev_no_auth()
+    if dev_no_auth:
+        click.secho("  [dev] auth bypassed (GLYPHH_DEV_NO_AUTH set)", fg=theme.WARNING)
+
     # If not logged in, prompt once
-    if not is_logged_in():
-        click.secho("  Press Enter to open the browser and log in, or type 'q' to quit.", fg=theme.MUTED)
-        try:
-            resp = input("  ")
-        except (KeyboardInterrupt, EOFError):
+    if not dev_no_auth:
+        if not is_logged_in():
+            click.secho("  Press Enter to open the browser and log in, or type 'q' to quit.", fg=theme.MUTED)
+            try:
+                resp = input("  ")
+            except (KeyboardInterrupt, EOFError):
+                click.echo()
+                return
+            if resp.strip().lower() in ("q", "quit", "exit"):
+                return
+            success = device_login()
+            if not success:
+                click.echo()
+                click.secho("  Run 'glyphh' again after logging in.", fg=theme.MUTED)
+                return
             click.echo()
-            return
-        if resp.strip().lower() in ("q", "quit", "exit"):
-            return
-        success = device_login()
-        if not success:
-            click.echo()
-            click.secho("  Run 'glyphh' again after logging in.", fg=theme.MUTED)
-            return
-        click.echo()
-    else:
-        register_runtime()
+        else:
+            register_runtime()
 
     # Load vault secrets (API key, etc.) into os.environ
     load_vault_env()
 
     # Require Anthropic API key before starting
-    if not require_api_key():
+    if not dev_no_auth and not require_api_key():
         click.secho("  Cannot start without an API key.", fg=theme.MUTED)
         return
 
