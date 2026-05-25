@@ -200,6 +200,7 @@ class ThoughtGlyphSpace:
         speaker: str = "incoming",
         semantic: bool | None = None,
         expand: bool | None = None,
+        exclude_speakers: set | None = None,
     ) -> list[RecallResult]:
         """Search ALL long-term memory for thoughts matching a query.
 
@@ -260,6 +261,10 @@ class ThoughtGlyphSpace:
 
         results: list[RecallResult] = []
         for stored in self._thoughts.values():
+            # Skip excluded speakers (e.g. agent-memory recall drops Ada's own
+            # seed identity so it returns project decisions, not brain-trivia).
+            if exclude_speakers and getattr(stored, "speaker", None) in exclude_speakers:
+                continue
             # ── Content similarity ──────────────────────────────
             content_sim = 0.0
             stored_content_vec = stored.glyph.metadata.get("_content_vector")

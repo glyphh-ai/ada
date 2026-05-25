@@ -411,3 +411,39 @@ class TestMemoryReset:
         # The rebuilt pipeline must not surface the deleted fact.
         result = await brain.think("what truck do i have?")
         assert "ford" not in result.response.lower()
+
+
+# ── Agent memory: remember / recall (LLM-free, for hooks) ──────────────
+class TestAgentMemory:
+    """remember()/recall() are the hook surface: store decisions, re-ground."""
+
+    def test_remember_stores_without_llm(self):
+        brain = _make_brain()
+        before = brain.llm.usage.input_tokens + brain.llm.usage.output_tokens
+        res = brain.remember("Always branch before committing to main.")
+        after = brain.llm.usage.input_tokens + brain.llm.usage.output_tokens
+        assert res["stored"] is True
+        assert after == before  # no LLM call
+
+    def test_remember_rejects_empty(self):
+        brain = _make_brain()
+        assert brain.remember("   ")["stored"] is False
+
+    def test_recall_returns_stored_decision(self):
+        brain = _make_brain()
+        brain.remember("The database is Postgres with pgvector, not SQLite.")
+        facts = brain.recall("which database do we use?", top_k=5)
+        assert any("postgres" in f["content"].lower() for f in facts)
+        assert all("confidence" in f for f in facts)
+
+    def test_recall_is_llm_free(self):
+        brain = _make_brain()
+        brain.remember("Deploy target is Heroku.")
+        before = brain.llm.usage.input_tokens + brain.llm.usage.output_tokens
+        brain.recall("where do we deploy?")
+        after = brain.llm.usage.input_tokens + brain.llm.usage.output_tokens
+        assert after == before
+
+    def test_recall_empty_query(self):
+        brain = _make_brain()
+        assert brain.recall("") == []

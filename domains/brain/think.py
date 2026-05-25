@@ -326,6 +326,47 @@ class Brain:
         except Exception:
             pass
 
+    # ── Agent memory: store + recall (LLM-free, for harness hooks) ────────
+
+    def remember(self, text: str, speaker: str = "incoming") -> dict:
+        """Store an authoritative fact/decision. No LLM — pure capture.
+
+        This is the write path a Claude Code hook calls (e.g. PreCompact) so a
+        decision survives the context window. Queued for durable persistence.
+        """
+        text = (text or "").strip()
+        if not text:
+            return {"stored": False, "reason": "empty"}
+        stored = self._cognitive.absorb(text, speaker=speaker)
+        if stored is None:
+            return {"stored": False, "reason": "duplicate_or_too_short"}
+        self._persist_queue.append(stored)
+        return {"stored": True, "id": stored.thought_id, "content": stored.content}
+
+    def recall(
+        self, query: str, top_k: int = 5, min_confidence: float = 0.0,
+        exclude_speakers: list | None = None,
+    ) -> list[dict]:
+        """Recall relevant facts/decisions. No LLM — pure retrieval.
+
+        This is the read path a hook calls (e.g. UserPromptSubmit) to re-ground
+        the agent every turn. Returns grounded facts the harness injects into
+        context; the outer agent does the reasoning. Costs zero LLM tokens.
+        """
+        query = (query or "").strip()
+        if not query:
+            return []
+        results = self._cognitive.thought_space.recall(
+            query, top_k=top_k,
+            exclude_speakers=set(exclude_speakers) if exclude_speakers else None,
+        )
+        out = []
+        for r in results:
+            conf = round(float(r.global_similarity), 3)
+            if conf >= min_confidence:
+                out.append({"content": r.thought.content, "confidence": conf})
+        return out
+
     # ── Firewall — mandatory security layer ──────────────────────────────
 
     async def _run_firewall(self, input_text: str) -> Optional[str]:

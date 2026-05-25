@@ -1,0 +1,44 @@
+{
+  "_comment": "Merge this 'hooks' block into your .claude/settings.json to wire Glyphh as the memory spine. Requires the Glyphh runtime running (MCP on :8002). Override endpoint with GLYPHH_MCP_URL.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": ["${CLAUDE_PROJECT_DIR}/hooks/glyphh_sessionstart.py"],
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": ["${CLAUDE_PROJECT_DIR}/hooks/glyphh_userprompt.py"],
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": ["${CLAUDE_PROJECT_DIR}/hooks/glyphh_precompact.py"],
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

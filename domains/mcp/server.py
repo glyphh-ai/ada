@@ -57,18 +57,86 @@ def create_mcp_server(brain: Any, auth_service: AuthService) -> Server:
                     "required": ["input"],
                 },
             ),
+            Tool(
+                name="remember",
+                description=(
+                    "Store a decision/fact/constraint in persistent memory. "
+                    "No LLM call — pure capture. Use from a harness hook (e.g. "
+                    "PreCompact) so a decision survives the context window."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "The decision or fact to remember"},
+                        "speaker": {"type": "string", "description": "Source tag (default 'incoming')"},
+                    },
+                    "required": ["text"],
+                },
+            ),
+            Tool(
+                name="recall",
+                description=(
+                    "Retrieve relevant facts/decisions from memory. No LLM call "
+                    "— pure retrieval, zero tokens. Use from a hook (e.g. "
+                    "UserPromptSubmit) to re-ground the agent every turn. "
+                    "Returns grounded facts for the caller to inject into context."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "What to recall about"},
+                        "top_k": {"type": "integer", "description": "Max facts (default 5)"},
+                        "min_confidence": {"type": "number", "description": "Drop facts below this score (default 0)"},
+                    },
+                    "required": ["query"],
+                },
+            ),
         ]
+
+    def _ok(payload: dict) -> CallToolResult:
+        return CallToolResult(content=[TextContent(
+            type="text", text=json.dumps(payload, ensure_ascii=False),
+        )])
+
+    def _err(msg: str) -> CallToolResult:
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps({"error": msg}))],
+            isError=True,
+        )
 
     @app.call_tool()
     async def call_tool(name: str, arguments: dict) -> CallToolResult:
+        args = arguments or {}
+
+        # ── LLM-free memory tools (for harness hooks) ──
+        if name == "remember":
+            text = (args.get("text") or args.get("input") or "").strip()
+            if not text:
+                return _err("Missing 'text'")
+            try:
+                return _ok(brain.remember(text, speaker=args.get("speaker", "incoming")))
+            except Exception as e:
+                logger.error(f"remember() failed: {e}", exc_info=True)
+                return _err(str(e))
+
+        if name == "recall":
+            query = (args.get("query") or args.get("input") or "").strip()
+            if not query:
+                return _err("Missing 'query'")
+            try:
+                facts = brain.recall(
+                    query,
+                    top_k=int(args.get("top_k", 5)),
+                    min_confidence=float(args.get("min_confidence", 0.0)),
+                    exclude_speakers=args.get("exclude_speakers"),
+                )
+                return _ok({"facts": facts, "count": len(facts)})
+            except Exception as e:
+                logger.error(f"recall() failed: {e}", exc_info=True)
+                return _err(str(e))
+
         if name != "think":
-            return CallToolResult(
-                content=[TextContent(
-                    type="text",
-                    text=json.dumps({"error": f"Unknown tool: {name}"}),
-                )],
-                isError=True,
-            )
+            return _err(f"Unknown tool: {name}")
 
         input_text = (arguments or {}).get("input", "")
         tool_name = (arguments or {}).get("tool", "unknown")
