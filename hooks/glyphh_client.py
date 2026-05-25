@@ -61,3 +61,22 @@ def remember(text: str, speaker: str = "incoming") -> bool:
     """Store a decision/fact. Returns True if stored."""
     res = _call("remember", {"text": text, "speaker": speaker})
     return bool(res and res.get("stored"))
+
+
+def check_action(tool: str, tool_input: dict) -> dict:
+    """Evaluate a pending tool action. Returns {decision, reason?}.
+
+    Fails OPEN (allow) if the runtime is unreachable — a memory service being
+    down must never wedge the agent.
+    """
+    res = _call("check_action", {"tool": tool, "tool_input": tool_input})
+    if not res or "decision" not in res:
+        return {"decision": "allow"}
+    return res
+
+
+def add_guard(pattern: str, reason: str, tool: str = "*",
+              action: str = "deny") -> dict | None:
+    return _call("add_guard", {
+        "pattern": pattern, "reason": reason, "tool": tool, "action": action,
+    })

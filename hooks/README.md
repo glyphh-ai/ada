@@ -10,6 +10,7 @@ window, and get re-injected every turn — deterministically, with zero LLM toke
 |------|-------|-----|
 | `glyphh_sessionstart.py` | SessionStart | load standing decisions at session start/resume |
 | `glyphh_userprompt.py` | UserPromptSubmit | **capture** instruction-like prompts + **re-ground** from memory every turn |
+| `glyphh_pretooluse.py` | PreToolUse | **enforce** — deny a tool action that violates a stored guard |
 | `glyphh_precompact.py` | PreCompact | flush durable instructions from the transcript before the window collapses |
 
 All three call the running Glyphh runtime's MCP endpoint (`remember` / `recall`,
@@ -48,9 +49,25 @@ This is the experiment that a 1M context window and vanilla RAG can't reproduce.
 If the rule survives the `/compact`, the thesis holds: authoritative memory the
 agent can't drift past, regardless of the context window.
 
-## Note on enforcement
+## Enforcement (the teeth)
 
-These hooks **re-inject** memory (raises adherence). For a hard guarantee that the
-agent can't *act* against a stored rule, add a `PreToolUse` hook that recalls
-relevant constraints and returns `permissionDecision: "deny"` when an action
-violates one. That's the difference between "reminded" and "can't get around it".
+`UserPromptSubmit` re-injection *reminds* the agent. `glyphh_pretooluse.py`
+*enforces*: it checks each pending tool call against deterministic guards and
+returns `permissionDecision: "deny"` on a violation, so Claude Code blocks it.
+
+Register a guard via the `add_guard` MCP tool (or `hooks/glyphh_client.add_guard`):
+
+```python
+add_guard(tool="Bash", pattern=r"git push.*\bmain\b",
+          reason="Never push directly to main — branch and open a PR.")
+```
+
+Now any `Bash` tool call whose command matches that regex is **blocked** with the
+reason surfaced to the agent. Deterministic and reproducible — fuzzy recall can
+*surface* a candidate constraint, but the deny itself is a precise match, which
+is what makes it a guarantee rather than a suggestion.
+
+**Honest limits:** a guard only blocks what its pattern matches (a missed
+variant slips through — same as any allow/deny list), and it only governs the
+agent's *tools*. It fails OPEN if the runtime is down (a memory outage must
+never wedge the agent).

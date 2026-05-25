@@ -91,6 +91,41 @@ def create_mcp_server(brain: Any, auth_service: AuthService) -> Server:
                     "required": ["query"],
                 },
             ),
+            Tool(
+                name="add_guard",
+                description=(
+                    "Register a deterministic enforcement rule that BLOCKS a "
+                    "matching tool action. Use to make a decision unbreakable: "
+                    "e.g. tool='Bash', pattern='git push.*\\\\bmain\\\\b'. "
+                    "Wired to a PreToolUse hook → the agent can't get around it."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "pattern": {"type": "string", "description": "Regex matched against the tool input"},
+                        "reason": {"type": "string", "description": "Why it's blocked (shown to the agent)"},
+                        "tool": {"type": "string", "description": "Tool to match (e.g. 'Bash') or '*' (default)"},
+                        "action": {"type": "string", "description": "'deny' (default) or 'warn'"},
+                    },
+                    "required": ["pattern", "reason"],
+                },
+            ),
+            Tool(
+                name="check_action",
+                description=(
+                    "Evaluate a pending tool action against the guards. Returns "
+                    "{decision: allow|deny|warn, reason}. Called by a PreToolUse "
+                    "hook to enforce stored decisions. Deterministic, no LLM."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "tool": {"type": "string", "description": "Tool name of the pending action"},
+                        "tool_input": {"type": "object", "description": "The tool's input arguments"},
+                    },
+                    "required": ["tool", "tool_input"],
+                },
+            ),
         ]
 
     def _ok(payload: dict) -> CallToolResult:
@@ -133,6 +168,31 @@ def create_mcp_server(brain: Any, auth_service: AuthService) -> Server:
                 return _ok({"facts": facts, "count": len(facts)})
             except Exception as e:
                 logger.error(f"recall() failed: {e}", exc_info=True)
+                return _err(str(e))
+
+        if name == "add_guard":
+            pattern = (args.get("pattern") or "").strip()
+            reason = (args.get("reason") or "").strip()
+            if not pattern or not reason:
+                return _err("Missing 'pattern' or 'reason'")
+            try:
+                return _ok(brain.add_guard(
+                    pattern, reason,
+                    tool=args.get("tool", "*"),
+                    action=args.get("action", "deny"),
+                ))
+            except Exception as e:
+                logger.error(f"add_guard() failed: {e}", exc_info=True)
+                return _err(str(e))
+
+        if name == "check_action":
+            tool = (args.get("tool") or "").strip()
+            if not tool:
+                return _err("Missing 'tool'")
+            try:
+                return _ok(brain.check_action(tool, args.get("tool_input") or {}))
+            except Exception as e:
+                logger.error(f"check_action() failed: {e}", exc_info=True)
                 return _err(str(e))
 
         if name != "think":

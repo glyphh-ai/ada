@@ -109,6 +109,10 @@ class Brain:
         from domains.brain.derivative import UserDerivative
         self._derivative = UserDerivative(self._cognitive.thought_space)
 
+        # Enforcement policy — deterministic guards for PreToolUse blocking
+        from domains.brain.policy import PolicyStore
+        self._policy = PolicyStore()
+
         # Context threads — glyphs with conversation context
         # Uses the same encoder as thought space for consistent similarity
         from domains.brain.context_thread import ThreadStore
@@ -342,6 +346,40 @@ class Brain:
             return {"stored": False, "reason": "duplicate_or_too_short"}
         self._persist_queue.append(stored)
         return {"stored": True, "id": stored.thought_id, "content": stored.content}
+
+    # ── Enforcement: deterministic action guards (PreToolUse) ────────────
+
+    def add_guard(self, pattern: str, reason: str, tool: str = "*",
+                  action: str = "deny") -> dict:
+        """Register an enforcement rule that blocks a matching tool action.
+
+        Also remembers a human-readable form so the agent is BOTH reminded
+        (recall) and blocked (this rule) — defense in depth.
+        """
+        rule = self._policy.add(pattern, reason, tool=tool, action=action)
+        self.remember(
+            f"GUARD: {reason} (blocks {tool} matching /{pattern}/)",
+            speaker="incoming",
+        )
+        return {"id": rule.id, "tool": rule.tool, "pattern": rule.pattern,
+                "action": rule.action, "reason": rule.reason}
+
+    def check_action(self, tool: str, tool_input: dict) -> dict:
+        """Evaluate a pending tool action against the guards.
+
+        Returns {"decision": "allow"|"deny"|"warn", "reason": ...}.
+        """
+        hit = self._policy.evaluate(tool, tool_input or {})
+        if hit is None:
+            return {"decision": "allow"}
+        return hit
+
+    def list_guards(self) -> list[dict]:
+        return [
+            {"id": r.id, "tool": r.tool, "pattern": r.pattern,
+             "action": r.action, "reason": r.reason}
+            for r in self._policy.rules()
+        ]
 
     def recall(
         self, query: str, top_k: int = 5, min_confidence: float = 0.0,

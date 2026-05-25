@@ -27,6 +27,19 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": ["${CLAUDE_PROJECT_DIR}/hooks/glyphh_pretooluse.py"],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreCompact": [
       {
         "matcher": "manual|auto",
