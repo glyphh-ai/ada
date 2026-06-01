@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 _platform_jwt_cache: dict[str, tuple["AuthenticatedUser", float]] = {}
 _CACHE_TTL = 300  # 5 minutes
 
-PLATFORM_URL = os.environ.get("GLYPHH_PLATFORM_URL", "https://api.glyphh.ai/api/v1")
+PLATFORM_URL = os.environ.get("GLYPHH_PLATFORM_URL", "https://api.dotyo.dev/api")
 
 
 @dataclass

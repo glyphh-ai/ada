@@ -24,7 +24,7 @@ from . import theme
 GLYPHH_DIR = Path.home() / ".glyphh"
 CONFIG_FILE = GLYPHH_DIR / "config.json"
 
-PLATFORM_URL = os.environ.get("GLYPHH_PLATFORM_URL", "https://api.glyphh.ai/api/v1")
+PLATFORM_URL = os.environ.get("GLYPHH_PLATFORM_URL", "https://api.dotyo.dev/api")
 
 
 def _load_config() -> dict:
@@ -88,15 +88,15 @@ def _try_refresh(config: dict) -> str | None:
     try:
         with httpx.Client(timeout=15) as client:
             res = client.post(
-                f"{api_url}/auth/refresh",
-                json={"refresh_token": refresh_token},
+                f"{api_url}/session/refresh",
+                json={"refreshToken": refresh_token},
             )
         if res.status_code != 200:
             return None
 
         data = res.json()
-        new_access = data.get("access_token")
-        new_refresh = data.get("refresh_token")
+        new_access = data.get("accessToken")
+        new_refresh = data.get("refreshToken")
         if not new_access:
             return None
 
@@ -172,7 +172,7 @@ def device_login() -> bool:
 
         device_code = data["device_code"]
         user_code = data["user_code"]
-        verification_url = data["verification_url"]
+        verification_url = data.get("verification_uri") or data.get("verification_uri_complete")
         interval = data.get("interval", 5)
         expires_in = data.get("expires_in", 600)
 
@@ -199,30 +199,41 @@ def device_login() -> bool:
                     f"{api_url}/auth/device/poll",
                     json={"device_code": device_code},
                 )
+
+                # The server returns 400 with {"error": ...} for expired/invalid
+                # grants; 200 with {"pending": true} while waiting; 200 with
+                # {"ok": true, ...tokens} once the user confirms in the browser.
+                if res.status_code == 400:
+                    err = ""
+                    try:
+                        err = res.json().get("error", "")
+                    except Exception:
+                        pass
+                    if err in ("expired_token", "invalid_grant"):
+                        click.secho("  Code expired. Try again.", fg=theme.ERROR)
+                        return False
+                    # Unknown 400 — surface and stop.
+                    click.secho(f"  Login failed: {err or res.text}", fg=theme.ERROR)
+                    return False
+
                 res.raise_for_status()
                 poll = res.json()
 
-                status = poll.get("status")
-
-                if status == "approved":
-                    save_session(
-                        access_token=poll["access_token"],
-                        refresh_token=poll["refresh_token"],
-                        user=poll.get("user", {}),
-                    )
+                if poll.get("ok"):
                     user = poll.get("user", {})
-                    name = user.get("first_name", user.get("email", ""))
+                    save_session(
+                        access_token=poll["accessToken"],
+                        refresh_token=poll["refreshToken"],
+                        user=user,
+                    )
+                    name = user.get("firstName") or user.get("email", "")
                     click.echo()
                     click.secho(f"  Welcome, {name}!", fg="bright_cyan")
                     click.echo()
                     register_runtime()
                     return True
 
-                if status == "expired":
-                    click.secho("  Code expired. Try again.", fg=theme.ERROR)
-                    return False
-
-                # still pending — keep polling
+                # poll.get("pending") — still waiting; keep polling.
 
         click.secho("  Timed out waiting for approval.", fg=theme.ERROR)
         return False

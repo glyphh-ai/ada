@@ -27,7 +27,7 @@ _public_key = None
 def _fetch_public_key_from_platform() -> Optional[str]:
     """Fetch the Ed25519 public key PEM from the Platform API."""
     platform_url = os.environ.get(
-        "GLYPHH_PLATFORM_URL", "https://api.glyphh.ai/api/v1"
+        "GLYPHH_PLATFORM_URL", "https://api.dotyo.dev/api"
     )
     try:
         import httpx
@@ -253,7 +253,7 @@ def load_license() -> LicenseInfo:
 def _fetch_token_from_platform(runtime_id: str) -> Optional[str]:
     """Fetch signed JWT license from Platform API. Returns token string or None."""
     platform_url = os.environ.get(
-        "GLYPHH_PLATFORM_URL", "https://api.glyphh.ai/api/v1"
+        "GLYPHH_PLATFORM_URL", "https://api.dotyo.dev/api"
     )
     try:
         import httpx
