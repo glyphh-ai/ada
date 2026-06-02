@@ -96,9 +96,43 @@ if _HAS_RUNTIME_DEPS:
         await engine.dispose()
 
 
-    @pytest.fixture
+    @pytest.fixture(scope="session")
     def client() -> Generator[TestClient, None, None]:
-        """Create test client"""
+        """Create test client backed by a freshly-provisioned schema.
+
+        The app's lifespan queries real tables (e.g. ada_thoughts) but does not
+        create them, and CI runs against an empty Postgres. Provision the schema
+        on a throwaway engine/loop before standing up the app, then keep one
+        session-scoped client so every test shares a single event loop — a
+        function-scoped client would hand the module-level engine's pooled
+        connections to a new loop each test ("attached to a different loop").
+        """
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import create_async_engine
+        from infrastructure.database.connection import Base, database_url
+
+        import domains.models.db_models  # noqa: F401 — register ORM tables
+        try:
+            from domains.procedures.models import StoredProcedureModel  # noqa: F401
+        except ImportError:
+            pass
+
+        async def _provision_schema() -> None:
+            eng = create_async_engine(database_url)
+            try:
+                async with eng.begin() as conn:
+                    if eng.dialect.name == "postgresql":
+                        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                    await conn.run_sync(Base.metadata.create_all)
+            finally:
+                await eng.dispose()
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_provision_schema())
+        finally:
+            loop.close()
+
         with TestClient(app) as c:
             yield c
 
