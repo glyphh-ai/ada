@@ -1,115 +1,95 @@
-Glyphh AI Community License
-Version 1.0, January 2026
+Glyphh AI Proprietary License
+Version 1.0, July 2026
 
 Copyright (c) 2026 Glyphh AI LLC. All rights reserved.
 
 Patent Pending - Application No. 63/969,729
 
+NOTICE: This software is the private, confidential, and proprietary property of
+Glyphh AI LLC. It is NOT open source. It is NOT "source available." No portion
+of it is offered to the public under any open source, source-available, or
+community license. Access is restricted to authorized personnel of Glyphh AI LLC
+and its authorized agents.
+
 TERMS AND CONDITIONS
 
 1. DEFINITIONS
 
-"Software" means the Glyphh AI software, including source code, documentation,
-examples, and any associated files provided under this license.
+"Software" means the glyphh-rotor software, including its source code, object
+code, documentation, configuration, models, weights, and any associated files
+contained in this repository.
 
-"You" means the individual or entity exercising rights under this license.
+"Glyphh AI" means Glyphh AI LLC, the sole owner of the Software.
 
-"Commercial Use" means any use of the Software intended for or directed toward
-commercial advantage or monetary compensation.
+"You" means any individual or entity that accesses, possesses, or views the
+Software.
 
-"Competing Product" means any product or service that provides similar
-functionality to Glyphh AI, including but not limited to semantic encoding,
-hyperdimensional computing, or deterministic knowledge retrieval systems.
+2. OWNERSHIP AND CONFIDENTIALITY
 
-2. GRANT OF RIGHTS
+The Software is owned exclusively by Glyphh AI and constitutes its confidential
+and proprietary information and trade secrets. All right, title, and interest in
+and to the Software, including all copyrights, patents, trademarks, trade
+secrets, and other intellectual property rights, are and remain the exclusive
+property of Glyphh AI. The Software is made available only to authorized
+personnel under obligations of confidentiality.
 
-Subject to the terms of this license, Glyphh AI LLC grants you a non-exclusive,
-non-transferable, revocable license to:
+3. NO LICENSE GRANTED
 
-  a) Download, install, and use the Software for development, testing, and
-     evaluation purposes at no cost.
+No license or right, whether express, implied, by estoppel, or otherwise, is
+granted to You by possession of, access to, or viewing of the Software. Without
+the prior written authorization of Glyphh AI, You may NOT:
 
-  b) Use the Software in production environments in accordance with the
-     applicable pricing and licensing terms published at https://glyphh.ai.
-
-  c) View and study the source code for educational purposes.
-
-  d) Create modifications for your own internal use.
-
-3. RESTRICTIONS
-
-You may NOT:
-
-  a) Redistribute, sublicense, sell, lease, or otherwise transfer the Software
-     or any portion thereof to any third party.
-
-  b) Use the Software to create, develop, or contribute to a Competing Product.
-
-  c) Remove, alter, or obscure any copyright, patent, trademark, or other
-     proprietary notices contained in the Software.
-
-  d) Use the Software in any manner that infringes the intellectual property
-     rights of Glyphh AI LLC, including the pending patent.
-
-  e) Reverse engineer, decompile, or disassemble any compiled portions of the
-     Software, except to the extent permitted by applicable law.
-
-  f) Use the name, logo, or trademarks of Glyphh AI LLC without prior written
-     permission.
+  a) use, execute, run, or deploy the Software for any purpose;
+  b) copy, reproduce, or store the Software, except as strictly required for
+     authorized internal development by Glyphh AI personnel;
+  c) modify, adapt, translate, or create derivative works of the Software;
+  d) distribute, publish, disclose, sublicense, sell, lease, rent, or otherwise
+     transfer the Software or any portion thereof to any third party;
+  e) remove, alter, or obscure any copyright, patent, trademark, or other
+     proprietary notice contained in the Software; or
+  f) reverse engineer, decompile, or disassemble any portion of the Software,
+     except to the extent this restriction is prohibited by applicable law.
 
 4. PATENT RIGHTS
 
-This license does not grant you any rights under any patents owned or controlled
-by Glyphh AI LLC. Use of the patented methods embodied in the Software requires
-a separate patent license, which may be obtained through a commercial license
-agreement.
+No patent license is granted under this document. The methods embodied in the
+Software are protected by one or more patents and pending patent applications,
+including U.S. Patent Application No. 63/969,729. Any use of the patented methods
+requires a separate written license from Glyphh AI.
 
-5. PRODUCTION USE
-
-Use of the Software in production environments requires a valid license key
-obtained from Glyphh AI LLC. Free tier limitations apply as published at
-https://glyphh.ai/pricing.
-
-6. DISCLAIMER OF WARRANTY
+5. DISCLAIMER OF WARRANTY
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL
-GLYPHH AI LLC BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER
-IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
 
-7. LIMITATION OF LIABILITY
+6. LIMITATION OF LIABILITY
 
-IN NO EVENT SHALL GLYPHH AI LLC BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+IN NO EVENT SHALL GLYPHH AI LLC BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM,
+OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
-8. TERMINATION
+7. TERMINATION
 
-This license is effective until terminated. Your rights under this license
-will terminate automatically without notice if you fail to comply with any
-of its terms. Upon termination, you must destroy all copies of the Software
-in your possession.
+Any authorization to access the Software terminates automatically and without
+notice upon any breach of these terms or upon revocation by Glyphh AI. Upon
+termination, You must immediately cease all access to the Software and destroy
+all copies in Your possession or control.
 
-9. GOVERNING LAW
+8. GOVERNING LAW
 
-This license shall be governed by and construed in accordance with the laws
-of the State of Delaware, United States, without regard to its conflict of
-law provisions.
+This document shall be governed by and construed in accordance with the laws of
+the State of Delaware, United States, without regard to its conflict of law
+provisions.
 
-10. CONTACT
-
-For licensing inquiries, commercial licenses, or questions about this license:
+9. CONTACT
 
   Email: support@glyphh.ai
-  Web: https://glyphh.ai
+  Web:   https://glyphh.ai
 
 ---
 
-By downloading, installing, or using the Software, you acknowledge that you
-have read, understood, and agree to be bound by the terms of this license.
+Unauthorized access to, use of, reproduction of, or distribution of this
+Software is strictly prohibited and may result in civil liability and criminal
+penalties.
