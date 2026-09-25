@@ -205,15 +205,31 @@ class TestGlyphStorageSerialization:
         
         assert "concept_text" in str(exc_info.value)
     
-    def test_from_json_invalid_embedding_dimension(self):
-        """Test that oversized embedding dimension raises ValidationException."""
+    def test_from_json_invalid_embedding_dimension(self, monkeypatch):
+        """Test that oversized embedding dimension raises ValidationException.
+
+        The resolved limit depends on the storage backend (sqlite has no
+        practical cap), so pin the pgvector limit the check exists for.
+        """
+        from types import SimpleNamespace
+
+        import domains.models.storage as storage_module
+
+        monkeypatch.setattr(
+            storage_module,
+            "settings",
+            SimpleNamespace(
+                resolved_max_vector_dimension=2000,
+                resolved_storage_backend="sqlite",
+            ),
+        )
         storage = GlyphStorage(None)
-        
+
         with pytest.raises(ValidationException) as exc_info:
             storage.from_json({
                 "concept_text": "test",
                 "embedding": [0.1] * 3000,
                 "embedding_format": "array",
             })
-        
+
         assert "exceeds runtime limit" in str(exc_info.value)

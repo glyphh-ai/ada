@@ -11,6 +11,7 @@ cognitive components (AdaCognitive, ThoughtGlyphSpace).
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import glyphh.memory.thought_persistence  # noqa: F401 — binds the submodule so patch() can resolve it
 from glyphh.memory.ada_cognitive import AdaCognitive
 from glyphh.memory.thought_space import StoredThought
 
