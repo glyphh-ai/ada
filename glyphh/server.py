@@ -347,9 +347,11 @@ def _is_allowed_origin(origin: str) -> bool:
 
 # Import and include routers
 from api.routes.health import router as health_router
+from api.routes.strand import router as strand_router
 from api.routes.tokens import router as tokens_router
 
 app.include_router(health_router)
+app.include_router(strand_router)
 app.include_router(tokens_router)
 
 

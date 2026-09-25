@@ -30,6 +30,7 @@ from typing import Any, TYPE_CHECKING
 import numpy as np
 
 from glyphh.state import ConversationState, DeductiveLayer, InductiveLayer
+from glyphh.strand.anticipator import Anticipator
 
 from .domain import DomainConfig
 from .idea import IdeaSpace, Idea
@@ -145,6 +146,10 @@ class CognitiveLoop:
             dimension=dimension, seed=73, decay=0.75,
         )
         self.slot_extractor = SlotExtractor(config=domain_config)
+        # Strand working memory: next-turn anticipation + drift scoring.
+        # The anticipator's predictor learns across loops; begin() only
+        # resets the per-session trajectory.
+        self.anticipator = Anticipator(dimension=dimension)
 
         # Function resolution from config
         self._action_to_func = domain_config.action_to_func if domain_config else {}
@@ -178,6 +183,7 @@ class CognitiveLoop:
         self._loop_id = str(uuid.uuid4())[:8]
         self._turn = 0
         self._recent_actions = []
+        self.anticipator.reset()
 
         # Register available functions
         self._available_funcs = {f["name"]: f for f in functions}
@@ -305,6 +311,23 @@ class CognitiveLoop:
         effects (e.g. cd updates CWD).
         """
         self._update_state(calls)
+
+    def anticipate(self, top_k: int = 3) -> list[tuple[tuple, float]]:
+        """Likely function-sets for the NEXT turn, given this session's strand.
+
+        Use above a confidence threshold to pre-warm tools, prefetch
+        data, or pre-fill slots before the user finishes asking.
+        """
+        return self.anticipator.anticipate(top_k)
+
+    def drift(self) -> float:
+        """Trajectory-anomaly score for this session, in [0, 2].
+
+        Near 0: the session behaves like sessions before it. Rising:
+        continuations keep ranking below what histories like this one
+        learned to expect — hijack / injection / workflow-drift signal.
+        """
+        return self.anticipator.drift()
 
     def step(self, query: str) -> StepResult:
         """Process one turn through the cognitive loop.
@@ -803,6 +826,7 @@ class CognitiveLoop:
         """Record this turn in working memory."""
         self._turn += 1
         self.idea_space.tick()
+        self.anticipator.observe_turn(idea_vec, tuple(functions))
 
         if functions:
             self._recent_actions = (
