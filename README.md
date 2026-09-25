@@ -93,6 +93,39 @@ Ada loads capabilities from `capabilities/` at boot. Each capability is an HDC m
 
 Ada can build new capabilities autonomously: "build a capability for X" triggers the capability builder, which generates exemplars via LLM, encodes them into HDC vectors, and hot-loads the new model.
 
+## Trajectory Intelligence
+
+Alongside the lattice (bundled, order-insensitive glyphs), the runtime carries a second, DNA-shaped view of the same substrate: the **strand** (`glyphh/strand`) — an ordered permute-bind chain of codons where order is structural, complements are exact (`-v`), a template/coding duplex transcribes losslessly, and splice/crossover produces well-formed recombinations. The strand is the genotype (exact, sequential); the bundle is the phenotype (fuzzy, searchable). Production systems use both.
+
+**Measured on real data** (Google Schema-Guided Dialogue, 1.5K dialogues; evals in `tests/eval/`):
+
+- **Next-step prediction** — strand state 0.710 exact-match vs 0.595 for the unordered bundle and 0.653 for last-turn-only: order is real signal (`strand_dialog_eval.py`)
+- **Trajectory anomaly** — spliced "hijacked" sessions (every turn plausible, trajectory wrong) detected at AUC 0.748 by bundle-identity margin; the decayed strand adapts too fast, so each view owns its job (`strand_anomaly_eval.py`)
+- **Prediction horizon** — chained rollout dies at ~3 turns; terminal-outcome AUC is already 0.867 at turn 2 of 16 and 0.967 by turn 12. Detail is short-range, shape is long-range, and the crossover is measured (`strand_horizon_eval.py`)
+- Confidence is honest by construction: kNN outcome frequencies calibrate without a calibration step (94% predicted → 94.7% observed)
+
+**In the loop** — every `CognitiveLoop` turn feeds an `Anticipator` (per-session strand over a cross-session `StrandPredictor`, one-shot Hebbian updates): `loop.anticipate()` returns likely next function-sets for pre-warming and prefetch; `loop.drift()` scores trajectory anomaly (hijack / injection / workflow drift). `begin()` resets the session, never the learning.
+
+**DecisionSpace** (`glyphh/decision`) — the precedent engine: sim across decisions, answered as a fact tree with confidence. Decisions are recorded one-shot as glyphs (attributes + optional ordered events as a strand state); `query()` returns a `FactTree` whose nodes are the matched precedents — each cited with glyph id, hash, situation, facts, and cosine — an outcome distribution weighted by similarity, and a confidence with defined semantics (consensus among sufficient precedent). Below the similarity threshold it declines to answer, citing the nearest case. Validated at 0.889 top-outcome accuracy vs 0.840 baseline, roughly calibrated out of the box (`decision_space_eval.py`).
+
+### HTTP API
+
+Both surfaces ship in `glyphh.server`:
+
+```
+POST /v1/strand/sessions                    open a trajectory session
+POST /v1/strand/sessions/{id}/events        stream events; each response returns
+                                            predicted_next, event_margin, drift
+GET/DELETE /v1/strand/sessions/{id}         summary / close (learning is kept)
+
+POST /v1/decide                             {situation, events?} -> outcome
+                                            distribution + confidence + fact tree
+POST /v1/decide/record                      store a decided case as precedent
+GET  /v1/decide/stats                       precedent pool stats
+```
+
+State is in-memory; persistence and per-tenant isolation are deployment concerns, not yet in the box.
+
 ## MCP Interface
 
 Ada exposes a single MCP tool:
@@ -171,6 +204,8 @@ The brain pipeline test suite covers:
 - **AdaCognitive** — StoredThought returns, sentence splitting, recall gating, dream lifecycle
 - **ThoughtProcess** — STORE/FEEL/RECALL paths, confidence gate, hallucination prevention
 - **Brain** — seed loading, user identity, persistence queue, end-to-end think
+- **Strand** — permute-bind chains, lossless duplex/transcription, splice, k-mer profiles, predictor, loop anticipation/drift
+- **DecisionSpace** — precedent matching, fact-tree citations, insufficient-precedent gate, /v1/decide and /v1/strand routes
 
 ## License
 
