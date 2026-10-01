@@ -38,4 +38,4 @@ Every call is metered on your organization's Glyphh plan.
 
 ## License
 
-Proprietary. Copyright glyphh.ai.
+MIT. See [LICENSE](LICENSE).
