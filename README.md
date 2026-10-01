@@ -10,7 +10,7 @@ Claude Code plugin (the skill and the Ada connection):
 
 ```bash
 claude plugin marketplace add glyphh-ai/ada
-claude plugin install ada@ada
+claude plugin install glyphh@glyphh
 ```
 
 Then run `/mcp` in Claude Code, pick `ada` and choose Authenticate to sign in with your Glyphh account.
@@ -36,7 +36,7 @@ Ask your agent for the work in plain words:
 
 > Use Ada to remember how we fixed this deploy failure, and check it before the next deploy.
 
-In Claude Code you can invoke the skill explicitly with `/ada:ada`.
+In Claude Code you can invoke the skill explicitly with `/glyphh:ada`.
 
 | Skill | Purpose |
 |-------|---------|
