@@ -16,9 +16,9 @@ Glyphh member.
 ## Before acting on a recurring kind of decision
 
 1. `ada_models` to find the model that fits, if you do not know its id.
-2. `ada_query` with the situation. Act on the answer only when it is
-   sufficient, its confidence is high and several records stand behind
-   it. A single record is not consensus.
+2. `ada_query` with the situation. Act on the answer only when `act`
+   is true. A single record is not consensus unless it matches the
+   situation exactly.
 3. `ada_facts` when you need to show why: each close record explained as
    a fact tree, per attribute its score, weight and share.
 
@@ -29,6 +29,19 @@ Glyphh member.
 
 Record only outcomes the user or the world confirmed. Never grade your
 own work as a win.
+
+## How answers are decided
+
+- `act` is true only when confidence is at least 0.7, three or more
+  records stand behind the answer and no recorded failure vetoes it.
+- A record that matches the situation exactly is the answer and acts
+  alone.
+- A query may use another word for a recorded value (`production` for
+  `prod`): cloud models match those through a lexicon built when the
+  record was written. Such a match is never exact, so it still needs
+  three records.
+- When `act` is false, read `reason` and ask the user or fall back. Do
+  not act on `top` anyway.
 
 ## Describing a situation
 
@@ -41,6 +54,7 @@ alike. Use the same keys every time for the same kind of situation.
 
 `ada_check` (how close the nearest win and failure of one outcome are),
 `ada_calibrate` (fit the model's probabilities once it has 10+ wins),
-`ada_records` (browse), and for org admins `ada_create_model`,
+`ada_records` (browse), and for org admins `ada_learn` (which keys
+decide, learned from the wins), `ada_create_model`,
 `ada_update_model`, `ada_delete_model`, `ada_edit_record`,
 `ada_delete_record`, `ada_devices`.

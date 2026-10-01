@@ -44,6 +44,13 @@ In Claude Code you can invoke the skill explicitly with `/ada:ada`.
 |-------|---------|
 | `ada` | Decide when to query Ada, how to describe a situation, and when to record a win or a failure |
 
+## How Ada decides
+
+- `act` is true only when confidence is at least 0.7, three or more records stand behind the answer, and no recorded failure vetoes it.
+- A record that matches the situation exactly is the answer and acts alone.
+- A query can use another word for a recorded value (`production` for `prod`). Cloud models match these through a lexicon built when the record is written; no model runs at query time, and such a match still needs three records to act.
+- `ada_learn` works out which keys decide from a model's own wins, and `ada_calibrate` fits its probabilities.
+
 ## Tools
 
 | Tool | Purpose |
@@ -55,6 +62,7 @@ In Claude Code you can invoke the skill explicitly with `/ada:ada`.
 | `ada_veto` | Record a graded failure: this outcome failed or was rejected |
 | `ada_check` | How close the nearest win and failure of one outcome are |
 | `ada_calibrate` | Fit a model's probabilities to its own records (10+ wins) |
+| `ada_learn` | Learn which keys decide from a model's wins (10+), save them as its weights and calibrate it (org admins) |
 | `ada_records` | Browse a model's records, newest first |
 | `ada_devices` | The registered devices that can hold a local model's records |
 | `ada_create_model`, `ada_update_model`, `ada_delete_model` | Manage models (organization admins) |
