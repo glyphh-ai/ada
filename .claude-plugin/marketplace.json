@@ -8,7 +8,7 @@
     {
       "name": "ada",
       "source": "./plugin",
-      "description": "Ada in Claude Code: typed models your agents build, feed and query, with every answer a fact tree."
+      "description": "Ada over MCP: typed models your agents build, feed and query, with every answer a fact tree."
     }
   ]
 }
