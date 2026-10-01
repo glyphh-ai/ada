@@ -1,64 +1,64 @@
-# Ada
+# Glyphh Ada Agent Skills
 
-Ada is Glyphh's typed language for AI work. You define a model with a
-typed spec (layers, segments and roles, each weighted), stream data into
-it, and ask it anything in that shape. Every answer comes back as a fact
-tree: what matched, how closely, and why, scored at every level of the
-spec. Use it to classify tickets, route work across an agent swarm, keep
-what worked and what failed, or remember anything an agent should reason
-over later.
+Agent skills for building with [Glyphh](https://glyphh.ai) Ada: typed models your agents build, feed and query, with every answer a fact tree.
 
-Ada runs on Glyphh's servers and speaks MCP, so any MCP client can use
-it: Claude Code, Claude Desktop, Cursor, Codex, VS Code, your own agents.
-This repo holds the connection details and a ready-made Claude Code
-plugin.
+Sign in, manage models and create API keys in the [Glyphh app](https://platform.glyphh.ai).
 
-## Connect any MCP client
+## Install
 
-Ada is a streamable HTTP MCP server:
-
-- URL: `https://api.glyphh.ai/mcp`
-- Header: `x-glyphh-api-key: Bearer <your Glyphh API key>`
-
-Get a key in the Glyphh console under API Keys. Most clients take a config
-like this:
-
-```json
-{
-  "mcpServers": {
-    "ada": {
-      "type": "http",
-      "url": "https://api.glyphh.ai/mcp",
-      "headers": { "x-glyphh-api-key": "Bearer sk-..." }
-    }
-  }
-}
-```
-
-## Claude Code plugin
-
-The plugin adds the same connection plus the `ada` skill, which tells
-Claude when to reach for Ada.
-
-```
-/plugin marketplace add glyphh-ai/ada
-/plugin install ada@ada
-```
-
-Set your key in the environment Claude Code starts from:
+Claude Code plugin (the skill and the Ada connection):
 
 ```bash
-export GLYPHH_API_KEY=sk-...
+claude plugin marketplace add glyphh-ai/ada
+claude plugin install ada@ada
 ```
 
-`GLYPHH_URL` points it at another Glyphh server; it defaults to
-`https://api.glyphh.ai`.
+Then run `/mcp` in Claude Code, pick `ada` and choose Authenticate to sign in with your Glyphh account.
+
+Other agents via [skills.sh](https://skills.sh):
+
+```bash
+npx skills add glyphh-ai/ada --skill ada
+```
+
+This installs the skill in the current project; add `-g` to install it globally. Then connect the agent to Ada:
+
+- Sign-in: add `https://api.glyphh.ai/mcp` as a remote MCP server or custom connector and sign in with your Glyphh account.
+- API key (CI, headless): send the header `x-glyphh-api-key: Bearer <key>` to the same URL. In Claude Code:
+
+```bash
+claude mcp add --transport http ada https://api.glyphh.ai/mcp --header "x-glyphh-api-key: Bearer $GLYPHH_API_KEY"
+```
+
+## Use
+
+Ask your agent for the work in plain words:
+
+> Use Ada to remember how we fixed this deploy failure, and check it before the next deploy.
+
+In Claude Code you can invoke the skill explicitly with `/ada:ada`.
+
+| Skill | Purpose |
+|-------|---------|
+| `ada` | Decide when to query Ada, how to describe a situation, and when to record a win or a failure |
 
 ## Tools
 
-The `ada_*` tools: models, query, facts, record, veto, check, calibrate
-and records, plus model and record management for organization admins.
-Every call is metered on your organization's Glyphh plan.
+| Tool | Purpose |
+|------|---------|
+| `ada_models` | List the organization's Ada models, or one model with its record counts |
+| `ada_query` | Ask a model what worked in situations like this one, with confidence |
+| `ada_facts` | Explain the nearest wins and failures as fact trees |
+| `ada_record` | Record a graded win: this outcome worked in this situation |
+| `ada_veto` | Record a graded failure: this outcome failed or was rejected |
+| `ada_check` | How close the nearest win and failure of one outcome are |
+| `ada_calibrate` | Fit a model's probabilities to its own records (10+ wins) |
+| `ada_records` | Browse a model's records, newest first |
+| `ada_devices` | The registered devices that can hold a local model's records |
+| `ada_create_model`, `ada_update_model`, `ada_delete_model` | Manage models (organization admins) |
+| `ada_edit_record`, `ada_delete_record` | Correct or delete a record (organization admins) |
+
+Every call names a `model_id` and is metered on your organization's Glyphh plan.
 
 ## License
 

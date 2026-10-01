@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "ada",
-      "source": "./plugin",
+      "source": "./",
       "description": "Ada over MCP: typed models your agents build, feed and query, with every answer a fact tree."
     }
   ]

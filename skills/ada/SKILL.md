@@ -10,8 +10,8 @@ the same shape comes back as a fact tree: what matched, how closely, and
 why, part by part. Graded experience is one use (what was done in which
 situation, and whether it worked); classification and structured memory
 are others. Ada cites the records it stands on and says when it does not
-know. It runs on Glyphh's servers; these tools reach it with the user's
-Glyphh API key.
+know. It runs on Glyphh's servers; these tools reach it as the signed-in
+Glyphh member.
 
 ## Before acting on a recurring kind of decision
 

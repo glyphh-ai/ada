@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ada": {
+      "type": "http",
+      "url": "${GLYPHH_URL:-https://api.glyphh.ai}/mcp"
+    }
+  }
+}
