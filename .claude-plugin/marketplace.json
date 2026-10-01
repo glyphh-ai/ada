@@ -1,12 +1,12 @@
 {
-  "name": "glyphh",
+  "name": "glyphh-ai",
   "owner": {
     "name": "glyphh.ai"
   },
   "description": "Glyphh's plugins for Claude Code.",
   "plugins": [
     {
-      "name": "glyphh",
+      "name": "ada",
       "source": "./",
       "description": "Ada over MCP: typed models your agents build, feed and query, with every answer a fact tree."
     }
