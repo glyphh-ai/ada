@@ -1,0 +1,9 @@
+{
+  "name": "ada",
+  "description": "Ada in Claude Code: record what worked and what failed, ask what worked in situations like this one, and see why as a fact tree. Runs on Glyphh's hosted Ada, with your Glyphh API key.",
+  "version": "4.0.0",
+  "author": {
+    "name": "glyphh.ai"
+  },
+  "homepage": "https://glyphh.ai"
+}

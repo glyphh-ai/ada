@@ -1,0 +1,14 @@
+{
+  "name": "ada",
+  "owner": {
+    "name": "glyphh.ai"
+  },
+  "description": "Glyphh's plugins for Claude Code.",
+  "plugins": [
+    {
+      "name": "ada",
+      "source": "./plugin",
+      "description": "Ada in Claude Code: graded precedent and typed models from Glyphh, over MCP."
+    }
+  ]
+}

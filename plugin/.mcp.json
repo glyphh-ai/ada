@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "ada": {
+      "type": "http",
+      "url": "${GLYPHH_URL:-https://api.glyphh.ai}/mcp",
+      "headers": {
+        "x-glyphh-api-key": "Bearer ${GLYPHH_API_KEY}"
+      }
+    }
+  }
+}
