@@ -2,6 +2,8 @@
 
 Agent skills for building with [Glyphh](https://glyphh.ai) Ada: typed models your agents build, feed and query, with every answer a fact tree.
 
+Docs: [Ada models](https://glyphh.ai/docs/ada), [Install Ada](https://glyphh.ai/docs/ada-install), [Ada tools and API](https://glyphh.ai/docs/ada-tools).
+
 Sign in, manage models and create API keys in the [Glyphh app](https://platform.glyphh.ai).
 
 ## Install
@@ -58,7 +60,7 @@ In Claude Code you can invoke the skill explicitly with `/glyphh:ada`.
 | `ada_create_model`, `ada_update_model`, `ada_delete_model` | Manage models (organization admins) |
 | `ada_edit_record`, `ada_delete_record` | Correct or delete a record (organization admins) |
 
-Every call names a `model_id` and is metered on your organization's Glyphh plan.
+Every call names a `model_id` and is metered on your organization's Glyphh plan. Arguments, answer fields and the `POST /ada` endpoint are in the [tools reference](https://glyphh.ai/docs/ada-tools).
 
 ## License
 
