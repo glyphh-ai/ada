@@ -1,8 +1,13 @@
 # Ada for Claude Code
 
-Ada is Glyphh's graded precedent: record what worked and what failed,
-ask what worked in situations like this one, and see why as a fact tree.
-This plugin connects Claude Code to Ada on Glyphh's servers over MCP.
+Ada is Glyphh's typed language for AI work. You define a model with a
+typed spec (layers, segments and roles, each weighted), stream data into
+it, and ask it anything in that shape. Every answer comes back as a fact
+tree: what matched, how closely, and why, scored at every level of the
+spec. Use it to classify tickets, route work across an agent swarm, keep
+what worked and what failed, or remember anything an agent should reason
+over later. This plugin connects Claude Code to Ada on Glyphh's servers
+over MCP.
 
 ## Install
 
@@ -25,8 +30,9 @@ export GLYPHH_API_KEY=sk-...
 
 - The `ada_*` tools: query, facts, record, veto, check, calibrate,
   models and records.
-- The `ada` skill, which tells Claude when to consult Ada and when to
-  record an outcome.
+- The `ada` skill, which tells Claude when to reach for Ada: to build a
+  model for recurring work, load what it learns, and query it before
+  deciding.
 
 Every call is metered on your organization's Glyphh plan.
 

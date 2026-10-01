@@ -1,13 +1,15 @@
 ---
 name: ada
-description: Use Ada, Glyphh's graded precedent, through its ada_* tools. Use it before repeating any kind of decision you have made before in this organization (how to run something, how to fix a recurring error, which approach worked), whenever an outcome is known and worth keeping ("that worked", "that failed", "always/never do X when ..."), and whenever the user asks what worked before or why.
+description: Use Ada, Glyphh's typed language for AI work, through its ada_* tools - to build a model for a recurring kind of work, load data into it, and query it for answers explained as fact trees. Use it before repeating a decision this organization has made before (how to run something, how to fix a recurring error, which approach worked), whenever an outcome is known and worth keeping ("that worked", "that failed", "always/never do X when ..."), and whenever structured memory or classification would beat reasoning from scratch.
 ---
 
 # Ada
 
-Ada keeps an organization's graded experience: what was done in which
-situation, and whether it worked. It answers by similarity to recorded
-situations, cites the records it stands on, and says when it does not
+Ada is a typed language for AI work. A model holds typed data; a query in
+the same shape comes back as a fact tree: what matched, how closely, and
+why, part by part. Graded experience is one use (what was done in which
+situation, and whether it worked); classification and structured memory
+are others. Ada cites the records it stands on and says when it does not
 know. It runs on Glyphh's servers; these tools reach it with the user's
 Glyphh API key.
 
