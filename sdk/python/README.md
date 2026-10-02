@@ -2,7 +2,7 @@
 
 Ada for Python. An agent builds an Ada model: its types, its records, its rules. This package is what your software calls to use it. Every answer is typed, the same input always gives the same answer, and no language model is in the path.
 
-Docs: [glyphh.ai/docs/ada](https://glyphh.ai/docs/ada). No dependencies on Python 3.11 and later. Python 3.9 or later.
+Docs: [docs.glyphh.ai/ada](https://docs.glyphh.ai/ada). No dependencies on Python 3.11 and later. Python 3.9 or later.
 
 ```bash
 pip install glyphh-ada
@@ -24,7 +24,7 @@ elif answer["reason"] == "unseen":
     ask_someone(answer["unseen"])  # ["ticket.issue.component=etcd"]
 ```
 
-`act` is the one thing to branch on. When it is false, `reason` says why, and the nearest answer and the records behind it are still there. [When Ada acts](https://glyphh.ai/docs/ada-act) covers every case.
+`act` is the one thing to branch on. When it is false, `reason` says why, and the nearest answer and the records behind it are still there. [When Ada acts](https://docs.glyphh.ai/ada-act) covers every case.
 
 An answer is the JSON the server sent, as a dictionary. The package's `TypedDict`s (`Answer`, `Facts`, `History`, `Trend`, `Prediction`, `Edges`, `GqlResult`) say what is in each, so a type checker knows the keys.
 

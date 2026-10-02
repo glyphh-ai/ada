@@ -2,7 +2,7 @@
 
 Ada for TypeScript and JavaScript. An agent builds an Ada model: its types, its records, its rules. This package is what your software calls to use it. Every answer is typed, the same input always gives the same answer, and no language model is in the path.
 
-Docs: [glyphh.ai/docs/ada](https://glyphh.ai/docs/ada). No dependencies. Node 18 or later, or any runtime with `fetch`.
+Docs: [docs.glyphh.ai/ada](https://docs.glyphh.ai/ada). No dependencies. Node 18 or later, or any runtime with `fetch`.
 
 ```bash
 npm install @glyphh-ai/ada
@@ -25,7 +25,7 @@ if (answer.act) {
 }
 ```
 
-`act` is the one thing to branch on. When it is false, `reason` says why, and the nearest answer and the records behind it are still there. [When Ada acts](https://glyphh.ai/docs/ada-act) covers every case.
+`act` is the one thing to branch on. When it is false, `reason` says why, and the nearest answer and the records behind it are still there. [When Ada acts](https://docs.glyphh.ai/ada-act) covers every case.
 
 ## Record what happened
 

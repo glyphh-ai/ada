@@ -32,7 +32,7 @@
     "graph",
     "decision"
   ],
-  "homepage": "https://glyphh.ai/docs/ada",
+  "homepage": "https://docs.glyphh.ai/ada",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/glyphh-ai/ada.git",

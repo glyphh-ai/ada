@@ -11,7 +11,7 @@ This repository holds the agent skill and Claude Code plugin, and the SDKs:
 | [`sdk/python`](sdk/python) | `glyphh-ada` for Python |
 | [`contract`](contract) | The JSON Schema of every answer, and the request and response pairs both SDKs are tested against |
 
-Docs: [Ada models](https://glyphh.ai/docs/ada), [Install Ada](https://glyphh.ai/docs/ada-install), [Ada tools and API](https://glyphh.ai/docs/ada-tools).
+Docs: [Ada models](https://docs.glyphh.ai/ada), [Install Ada](https://docs.glyphh.ai/ada-install), [Ada tools and API](https://docs.glyphh.ai/ada-tools).
 
 Sign in, manage models and create API keys in the [Glyphh app](https://platform.glyphh.ai).
 
@@ -84,7 +84,7 @@ Each has its own README: [TypeScript](sdk/typescript/README.md), [Python](sdk/py
 ## How Ada decides
 
 - `act` is true only when confidence is at least 0.7, three or more records stand behind the answer and no recorded failure vetoes it, or when the same situation is on record.
-- A situation that carries a key or a value no win has recorded is not acted on. The answer's `reason` is `unseen`, `unseen` lists what was new, and the nearest answer is still returned. [When Ada acts](https://glyphh.ai/docs/ada-act) covers every case.
+- A situation that carries a key or a value no win has recorded is not acted on. The answer's `reason` is `unseen`, `unseen` lists what was new, and the nearest answer is still returned. [When Ada acts](https://docs.glyphh.ai/ada-act) covers every case.
 - Two different values score 0. A typed model says how each role is compared: categories, sets, numbers on a scale, text, booleans, times and relations.
 - `ada_calibrate` fits a model's probabilities, and `ada_learn` works out what decides from a model's own wins: a flat model's key weights, a typed model's role weights.
 
@@ -109,7 +109,7 @@ Each has its own README: [TypeScript](sdk/typescript/README.md), [Python](sdk/py
 | `ada_create_model`, `ada_update_model`, `ada_delete_model` | Manage models and their specs (organization admins) |
 | `ada_edit_record`, `ada_delete_record` | Correct or delete a record (organization admins) |
 
-Every call names a `model_id` and is metered on your organization's Glyphh plan. Arguments, answer fields and the `POST /ada` endpoint are in the [tools reference](https://glyphh.ai/docs/ada-tools).
+Every call names a `model_id` and is metered on your organization's Glyphh plan. Arguments, answer fields and the `POST /ada` endpoint are in the [tools reference](https://docs.glyphh.ai/ada-tools).
 
 ## License
 
