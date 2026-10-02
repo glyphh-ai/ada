@@ -94,7 +94,7 @@ try:
     tickets.query({"ticket": {"issue": {"severity": "high"}}})
 except AdaError as e:
     if e.code == "E_VALIDATION":
-        print(e.message)  # ticket.issue.severity: a numeric role takes a finite number
+        print(e.message)  # situation: ticket.issue.severity: a numeric role takes a finite number
 ```
 
 | Code | Means |

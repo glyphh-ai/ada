@@ -97,7 +97,7 @@ try {
   await tickets.query({ ticket: { issue: { severity: "high" } } });
 } catch (e) {
   if (e instanceof AdaError && e.code === "E_VALIDATION") console.error(e.message);
-  // ticket.issue.severity: a numeric role takes a finite number
+  // situation: ticket.issue.severity: a numeric role takes a finite number
 }
 ```
 
