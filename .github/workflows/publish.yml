@@ -59,6 +59,8 @@ jobs:
         run: |
           npm install
           npm run build
+          v="$(node -p "require('./package.json').version")"
+          if npm view "@glyphh-ai/ada@${v}" version >/dev/null 2>&1; then echo "@glyphh-ai/ada@${v} is already on npm"; exit 0; fi
           npm publish --access public --provenance
 
   pypi:
