@@ -9,6 +9,7 @@ This repository holds the agent skill and Claude Code plugin, and the SDKs:
 | [`skills/ada`](skills/ada/SKILL.md) | The skill: when to query Ada, how to build a model, when to record |
 | [`sdk/typescript`](sdk/typescript) | `@glyphh-ai/ada` for TypeScript and JavaScript |
 | [`sdk/python`](sdk/python) | `glyphh-ada` for Python |
+| [`examples`](examples) | Two worked examples: route support tickets (Python) and customer churn (TypeScript) |
 | [`contract`](contract) | The JSON Schema of every answer, and the request and response pairs both SDKs are tested against |
 
 Docs: [Ada models](https://docs.glyphh.ai/ada), [Install Ada](https://docs.glyphh.ai/ada-install), [Ada tools and API](https://docs.glyphh.ai/ada-tools).

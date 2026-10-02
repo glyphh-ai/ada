@@ -188,6 +188,8 @@ export interface Receipt {
   id: string;
   hash: string;
   author: string;
+  /** In a model with key parts: the thing's key parts as written, what `glyph(...)` and a question take to name it. */
+  parts?: unknown[];
 }
 
 export interface Answer {
@@ -243,6 +245,8 @@ export interface FactTree {
   ts: number;
   hash: string;
   tree: Fact;
+  /** In a model with key parts: the thing's key parts as written, what `glyph(...)` and a question take to name it. */
+  parts?: unknown[];
 }
 
 export interface Facts {
@@ -359,7 +363,7 @@ export interface Edges {
   model_id: string;
   key: string;
   level: string;
-  neural: { target: string; id: string; store: Store; outcome: string | null; score: number }[];
+  neural: { target: string; id: string; store: Store; outcome: string | null; score: number; parts?: unknown[] }[];
   temporal: { from: number; to: number; ts: number; change: number; changes: Change[] }[];
   relations: { out: Relation[]; in: Relation[] };
 }
@@ -384,6 +388,8 @@ export interface FindMatch {
   count: number;
   first: number;
   latest: number;
+  /** In a model with key parts: the thing's key parts as written, what `glyph(...)` and a question take to name it. */
+  parts?: unknown[];
 }
 
 export interface FindResult extends Ran<"find"> {

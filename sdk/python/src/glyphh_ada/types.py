@@ -52,6 +52,8 @@ class Receipt(TypedDict):
     id: str
     hash: str
     author: str
+    #: In a model with key parts: the thing's key parts as written, what glyph(...) and a question take to name it.
+    parts: NotRequired[List[Any]]
 
 
 class Answer(TypedDict):
@@ -104,6 +106,8 @@ class FactTree(TypedDict):
     ts: float
     hash: str
     tree: Fact
+    #: In a model with key parts: the thing's key parts as written, what glyph(...) and a question take to name it.
+    parts: NotRequired[List[Any]]
 
 
 class Facts(TypedDict):

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "glyphh-ada"
-version = "0.1.0"
+version = "0.1.1"
 description = "Ada for Python: typed models your software queries without a language model in the path."
 readme = "README.md"
 license = "MIT"

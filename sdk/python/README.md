@@ -83,6 +83,10 @@ for match in near["matches"]:
 impact = services.gql('FOLLOW glyph("db") IN DEPTH 3')  # everything that depends on db
 ```
 
+## Worked examples
+
+Two programs that go from an empty model to a function your software calls, each with a step-by-step guide: [route support tickets](https://docs.glyphh.ai/ada-guide-tickets) (Python) and [customer churn](https://docs.glyphh.ai/ada-guide-churn) (TypeScript). The source is in [`examples/`](https://github.com/glyphh-ai/ada/tree/main/examples).
+
 ## Errors
 
 A refusal is an `AdaError` with a `code`, a `message`, the HTTP `status`, and `retry_after` when Ada says how long to wait.

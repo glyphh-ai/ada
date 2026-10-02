@@ -1,6 +1,6 @@
 {
   "name": "@glyphh-ai/ada",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Ada for TypeScript and JavaScript: typed models your software queries without a language model in the path.",
   "type": "module",
   "main": "./dist/index.js",

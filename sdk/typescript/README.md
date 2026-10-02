@@ -86,6 +86,10 @@ const impact = await services.gql('FOLLOW glyph("db") IN DEPTH 3'); // everythin
 
 `gql` returns a union. Narrow it on `statement` and the fields are typed.
 
+## Worked examples
+
+Two programs that go from an empty model to a function your software calls, each with a step-by-step guide: [route support tickets](https://docs.glyphh.ai/ada-guide-tickets) (Python) and [customer churn](https://docs.glyphh.ai/ada-guide-churn) (TypeScript). The source is in [`examples/`](https://github.com/glyphh-ai/ada/tree/main/examples).
+
 ## Errors
 
 A refusal is an `AdaError` with a `code`, the HTTP `status`, and `retryAfter` when Ada says how long to wait.

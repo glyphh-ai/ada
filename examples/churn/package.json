@@ -1,0 +1,14 @@
+{
+  "name": "ada-churn-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsc -p . && node out/churn.js"
+  },
+  "dependencies": {
+    "@glyphh-ai/ada": "^0.1.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
