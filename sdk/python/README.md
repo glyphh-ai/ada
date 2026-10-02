@@ -85,7 +85,7 @@ impact = services.gql('FOLLOW glyph("db") IN DEPTH 3')  # everything that depend
 
 ## Errors
 
-A refusal is an `AdaError` with a `code`, a `message` and the HTTP `status`.
+A refusal is an `AdaError` with a `code`, a `message`, the HTTP `status`, and `retry_after` when Ada says how long to wait.
 
 ```python
 from glyphh_ada import AdaError
@@ -104,6 +104,7 @@ except AdaError as e:
 | `E_FORBIDDEN` | For org admins, or above the reader's clearance |
 | `E_FAILED_PRECONDITION` | The model cannot do that as it is |
 | `E_UNAUTHENTICATED`, `E_PAYMENT` | The key, or the organization's plan or budget |
+| `E_RATE_LIMITED` | Too many calls for the plan. `retry_after` says how many seconds to wait |
 | `E_UNREACHABLE` | The request never got an answer |
 
 ## Options
@@ -112,7 +113,7 @@ except AdaError as e:
 Ada(api_key=None, base_url=None, timeout=30.0, headers=None, transport=None)
 ```
 
-`api_key` defaults to `GLYPHH_API_KEY`, `base_url` to `GLYPHH_URL` and then `https://api.glyphh.ai`. `transport` is a function `(url, headers, body, timeout) -> (status, body)`: give your own to use another HTTP library. The client is synchronous; call it from a thread in async code. Create a key on the Virtual Keys page of the [Glyphh console](https://platform.glyphh.ai). Every call is metered on your organization's plan.
+`api_key` defaults to `GLYPHH_API_KEY`, `base_url` to `GLYPHH_URL` and then `https://api.glyphh.ai`. `transport` is a function `(url, headers, body, timeout) -> (status, body)` or `(status, body, response headers)`: give your own to use another HTTP library. The client is synchronous; call it from a thread in async code. Create a key on the Virtual Keys page of the [Glyphh console](https://platform.glyphh.ai). Every call is metered on your organization's plan.
 
 ## License
 

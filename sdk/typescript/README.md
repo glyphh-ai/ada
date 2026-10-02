@@ -88,7 +88,7 @@ const impact = await services.gql('FOLLOW glyph("db") IN DEPTH 3'); // everythin
 
 ## Errors
 
-A refusal is an `AdaError` with a `code` and the HTTP `status`.
+A refusal is an `AdaError` with a `code`, the HTTP `status`, and `retryAfter` when Ada says how long to wait.
 
 ```ts
 import { AdaError } from "@glyphh-ai/ada";
@@ -108,6 +108,7 @@ try {
 | `E_FORBIDDEN` | For org admins, or above the reader's clearance |
 | `E_FAILED_PRECONDITION` | The model cannot do that as it is |
 | `E_UNAUTHENTICATED`, `E_PAYMENT` | The key, or the organization's plan or budget |
+| `E_RATE_LIMITED` | Too many calls for the plan. `retryAfter` says how many seconds to wait |
 | `E_UNREACHABLE` | The request never got an answer |
 
 ## Options

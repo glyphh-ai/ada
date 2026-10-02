@@ -20,32 +20,48 @@ DEFAULT_TIMEOUT = 30.0
 NULL = object()
 
 #: Sends one request: (url, headers, body, timeout seconds) -> (status, body). Give your own to use another HTTP library.
-Transport = Callable[[str, Mapping[str, str], bytes, float], Tuple[int, bytes]]
+#: (url, headers, body, timeout) -> (status, body), or (status, body, response headers).
+Transport = Callable[[str, Mapping[str, str], bytes, float], Tuple[Any, ...]]
+
+#: What a refusal is, by its HTTP status, when the answer names no code of Ada's own:
+#: the gateway in front of Ada (a key it does not know, a rate limit) answers in its own words.
+BY_STATUS = {400: "E_VALIDATION", 401: "E_UNAUTHENTICATED", 402: "E_PAYMENT", 403: "E_FORBIDDEN", 404: "E_NOT_FOUND",
+             409: "E_FAILED_PRECONDITION", 429: "E_RATE_LIMITED"}
 
 
 class AdaError(Exception):
     """Ada refused, or could not be reached. `code` says which kind:
     E_VALIDATION, E_NOT_FOUND, E_FORBIDDEN, E_FAILED_PRECONDITION,
-    E_UNAUTHENTICATED, E_PAYMENT, E_UNREACHABLE and others. `status` is the
-    HTTP status, 0 when there was none."""
+    E_UNAUTHENTICATED, E_PAYMENT, E_RATE_LIMITED, E_UNREACHABLE and others.
+    `status` is the HTTP status, 0 when there was none. `retry_after` is how
+    many seconds to wait before asking again, when Ada said (a rate limit)."""
 
-    def __init__(self, code: str, message: str, status: int = 0) -> None:
+    def __init__(self, code: str, message: str, status: int = 0, retry_after: Optional[float] = None) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.status = status
+        self.retry_after = retry_after
 
     def __repr__(self) -> str:
         return f"AdaError({self.code!r}, {self.message!r}, status={self.status})"
 
 
-def _urllib(url: str, headers: Mapping[str, str], body: bytes, timeout: float) -> Tuple[int, bytes]:
+def _urllib(url: str, headers: Mapping[str, str], body: bytes, timeout: float) -> Tuple[int, bytes, Mapping[str, str]]:
     request = urllib.request.Request(url, data=body, headers=dict(headers), method="POST")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310  # the URL is the caller's Ada endpoint
-            return response.status, response.read()
+            return response.status, response.read(), dict(response.headers.items())
     except urllib.error.HTTPError as e:
-        return e.code, e.read()
+        return e.code, e.read(), dict(e.headers.items()) if e.headers is not None else {}
+
+
+def _seconds(headers: Mapping[str, str]) -> Optional[float]:
+    said = next((v for k, v in headers.items() if k.lower() == "retry-after"), None)
+    try:
+        return float(said) if said is not None else None
+    except ValueError:
+        return None
 
 
 class Ada:
@@ -75,7 +91,8 @@ class Ada:
         body = json.dumps({"op": op, **{k: (None if v is NULL else v) for k, v in args.items() if v is not None}}).encode()
         headers = {"content-type": "application/json", "x-glyphh-api-key": f"Bearer {self._key}", **self._headers}
         try:
-            status, raw = self._transport(f"{self.base_url}/ada", headers, body, self.timeout)
+            sent = self._transport(f"{self.base_url}/ada", headers, body, self.timeout)
+            status, raw = sent[0], sent[1]
         except AdaError:
             raise
         except Exception as e:  # noqa: BLE001  # whatever the transport raises is one thing to a caller: unreachable
@@ -89,8 +106,9 @@ class Ada:
         refused = (answer.get("error") or answer.get("detail")) if isinstance(answer, dict) else None
         said: Dict[str, Any] = refused if isinstance(refused, dict) else {}
         message = refused if isinstance(refused, str) else str(said.get("message") or said.get("error") or "") or f"Ada answered {status}"
-        fallback = {401: "E_UNAUTHENTICATED", 402: "E_PAYMENT"}.get(status, "E_ADA")
-        raise AdaError(str(said.get("code") or fallback), message, status)
+        named = said.get("code")
+        code = named if isinstance(named, str) and named.startswith("E_") else BY_STATUS.get(status, "E_ADA")
+        raise AdaError(code, message, status, _seconds(sent[2]) if len(sent) > 2 else None)
 
     def model(self, model_id: str) -> "AdaModel":
         """One model, by its id (am_ and 12 hex digits)."""

@@ -123,3 +123,16 @@ test("a server that cannot be reached, or answers without a body, is an AdaError
   const unsigned = new Ada({ apiKey: "k", fetch: async () => new Response('{"detail": "bad key"}', { status: 401 }) });
   await assert.rejects(unsigned.models(), (e) => e instanceof AdaError && e.code === "E_UNAUTHENTICATED" && e.message === "bad key");
 });
+
+test("the gateway's own refusals get Ada's codes, and a rate limit says how long to wait", async () => {
+  const answering = (status, body, headers = {}) => new Ada({ apiKey: "k", fetch: async () => new Response(body, { status, headers }) });
+  const unknown = '{"error":{"message":"Authentication Error, Invalid proxy server token passed.","type":"token_not_found_in_db","param":"key","code":"401"}}';
+  await assert.rejects(answering(401, unknown).models(),
+    (e) => e instanceof AdaError && e.code === "E_UNAUTHENTICATED" && e.status === 401 && e.retryAfter === null && e.message.includes("Invalid proxy server token"));
+  const limited = '{"detail":"Rate limit exceeded for team: t. Limit type: requests. Current limit: 60, Remaining: 0."}';
+  await assert.rejects(answering(429, limited, { "retry-after": "60" }).models(),
+    (e) => e instanceof AdaError && e.code === "E_RATE_LIMITED" && e.retryAfter === 60 && e.message.startsWith("Rate limit exceeded"));
+  await assert.rejects(answering(429, '{"error": {"code": "E_RATE_LIMITED", "message": "slow down"}}', { "retry-after": "soon" }).models(),
+    (e) => e.code === "E_RATE_LIMITED" && e.retryAfter === null);
+  await assert.rejects(answering(403, '{"error": {"code": "403", "message": "no"}}').models(), (e) => e.code === "E_FORBIDDEN");
+});

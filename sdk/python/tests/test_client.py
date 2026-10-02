@@ -15,6 +15,10 @@ ROOT = Path(__file__).resolve().parents[3] / "contract"
 FIXTURES: Dict[str, Any] = json.loads((ROOT / "fixtures.json").read_text())
 CONTRACT: Dict[str, Any] = json.loads((ROOT / "contract.json").read_text())
 STATUS = {"E_VALIDATION": 400, "E_UNAUTHENTICATED": 401, "E_FORBIDDEN": 403, "E_NOT_FOUND": 404, "E_FAILED_PRECONDITION": 409}
+
+#: What the gateway in front of Ada answers, taken from a real server: a key it does not know, and a rate limit.
+GATEWAY_401 = b'{"error":{"message":"Authentication Error, Invalid proxy server token passed.","type":"token_not_found_in_db","param":"key","code":"401"}}'
+GATEWAY_429 = b'{"detail":"Rate limit exceeded for team: t. Limit type: requests. Current limit: 60, Remaining: 0."}'
 Sent = List[Tuple[str, Dict[str, str], Any]]
 
 
@@ -150,3 +154,24 @@ def test_a_server_that_cannot_be_reached_or_answers_without_a_body_is_an_ada_err
         with pytest.raises(AdaError) as e:
             Ada("k", transport=lambda *_, s=status, b=body: (s, b)).models()
         assert (e.value.code, e.value.status, e.value.message) == (code, status, message)
+
+
+def test_the_gateways_own_refusals_get_adas_codes_and_a_rate_limit_says_how_long_to_wait() -> None:
+    def answering(status: int, body: bytes, headers: Dict[str, str]) -> Ada:
+        return Ada("k", "http://ada", transport=lambda *_: (status, body, headers))
+
+    with pytest.raises(AdaError) as unknown:
+        answering(401, GATEWAY_401, {}).models()
+    assert (unknown.value.code, unknown.value.status, unknown.value.retry_after) == ("E_UNAUTHENTICATED", 401, None)
+    assert "Invalid proxy server token" in unknown.value.message
+    with pytest.raises(AdaError) as limited:
+        answering(429, GATEWAY_429, {"Retry-After": "60"}).models()
+    assert (limited.value.code, limited.value.status, limited.value.retry_after) == ("E_RATE_LIMITED", 429, 60.0)
+    assert limited.value.message.startswith("Rate limit exceeded")
+    with pytest.raises(AdaError) as named:
+        answering(429, b'{"error": {"code": "E_RATE_LIMITED", "message": "slow down"}}', {"retry-after": "soon"}).models()
+    assert (named.value.code, named.value.retry_after) == ("E_RATE_LIMITED", None)
+    with pytest.raises(AdaError) as old:
+        Ada("k", "http://ada", transport=lambda *_: (403, b'{"error": {"code": "403", "message": "no"}}')).models()
+    assert (old.value.code, old.value.retry_after) == ("E_FORBIDDEN", None), "a transport that gives no headers still works"
+

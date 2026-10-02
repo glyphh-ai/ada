@@ -23,18 +23,32 @@ export const DEFAULT_URL = "https://api.glyphh.ai";
 /** What a refusal's `code` can be. Others may be added. */
 export type ErrorCode =
   | "E_VALIDATION" | "E_NOT_FOUND" | "E_FORBIDDEN" | "E_FAILED_PRECONDITION" | "E_UNAUTHENTICATED" | "E_PAYMENT"
-  | "E_UNAVAILABLE" | "E_UNREACHABLE" | "E_ADA" | (string & {});
+  | "E_RATE_LIMITED" | "E_UNAVAILABLE" | "E_UNREACHABLE" | "E_ADA" | (string & {});
 
-/** Ada refused, or could not be reached. `code` says which kind; `status` is the HTTP status, 0 when there was none. */
+/**
+ * What a refusal is, by its HTTP status, when the answer names no code of Ada's own: the gateway in front
+ * of Ada (a key it does not know, a rate limit) answers in its own words.
+ */
+const BY_STATUS: Record<number, ErrorCode> = {
+  400: "E_VALIDATION", 401: "E_UNAUTHENTICATED", 402: "E_PAYMENT", 403: "E_FORBIDDEN", 404: "E_NOT_FOUND",
+  409: "E_FAILED_PRECONDITION", 429: "E_RATE_LIMITED",
+};
+
+/**
+ * Ada refused, or could not be reached. `code` says which kind; `status` is the HTTP status, 0 when there
+ * was none; `retryAfter` is how many seconds to wait before asking again, when Ada said (a rate limit).
+ */
 export class AdaError extends Error {
   readonly code: ErrorCode;
   readonly status: number;
+  readonly retryAfter: number | null;
 
-  constructor(code: ErrorCode, message: string, status: number) {
+  constructor(code: ErrorCode, message: string, status: number, retryAfter: number | null = null) {
     super(message);
     this.name = "AdaError";
     this.code = code;
     this.status = status;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -90,8 +104,9 @@ export class Ada {
     const refused = body?.error ?? body?.detail;
     const said = refused && typeof refused === "object" ? (refused as { code?: unknown; message?: unknown; error?: unknown }) : {};
     const message = typeof refused === "string" ? refused : String(said.message ?? said.error ?? "") || `Ada answered ${res.status}`;
-    const code = typeof said.code === "string" ? said.code : res.status === 401 ? "E_UNAUTHENTICATED" : res.status === 402 ? "E_PAYMENT" : "E_ADA";
-    throw new AdaError(code, message, res.status);
+    const code = typeof said.code === "string" && said.code.startsWith("E_") ? said.code : BY_STATUS[res.status] ?? "E_ADA";
+    const wait = Number(res.headers.get("retry-after"));
+    throw new AdaError(code, message, res.status, res.headers.has("retry-after") && Number.isFinite(wait) ? wait : null);
   }
 
   /** One model, by its id (am_ and 12 hex digits). */
