@@ -68,7 +68,7 @@ Data that does not fit a role's type is refused before it is stored or scored.
 | `procedures()`, `save_procedure(name, query)`, `delete_procedure(name)` | Stored procedures |
 | `info()`, `update(...)`, `delete()` | The model itself |
 | `records(...)`, `edit_record(id, ...)`, `delete_record(id)` | Its records |
-| `calibrate()`, `learn()` | Fit its probabilities; learn a flat model's weights |
+| `calibrate()`, `learn()` | Fit its probabilities; learn which keys or roles decide |
 | `contract()` | The JSON Schema of every answer and of a typed model's data |
 
 On the client: `ada.models()`, `ada.create_model(...)`, `ada.devices()`, `ada.contract()`, and `ada.op(name, **args)` for any operation by name.

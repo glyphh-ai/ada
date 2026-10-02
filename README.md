@@ -86,7 +86,7 @@ Each has its own README: [TypeScript](sdk/typescript/README.md), [Python](sdk/py
 - `act` is true only when confidence is at least 0.7, three or more records stand behind the answer and no recorded failure vetoes it, or when the same situation is on record.
 - A situation that carries a key or a value no win has recorded is not acted on. The answer's `reason` is `unseen`, `unseen` lists what was new, and the nearest answer is still returned. [When Ada acts](https://glyphh.ai/docs/ada-act) covers every case.
 - Two different values score 0. A typed model says how each role is compared: categories, sets, numbers on a scale, text, booleans, times and relations.
-- `ada_calibrate` fits a model's probabilities, and `ada_learn` works out which keys decide in a flat model from its own wins.
+- `ada_calibrate` fits a model's probabilities, and `ada_learn` works out what decides from a model's own wins: a flat model's key weights, a typed model's role weights.
 
 ## Tools
 
@@ -103,7 +103,7 @@ Each has its own README: [TypeScript](sdk/typescript/README.md), [Python](sdk/py
 | `ada_call`, `ada_procedures`, `ada_save_procedure`, `ada_delete_procedure` | Stored procedures: a GQL statement saved under a name, with parameters |
 | `ada_contract` | The JSON Schema of every answer, and of a typed model's data |
 | `ada_calibrate` | Fit a model's probabilities to its own records (10+ wins) |
-| `ada_learn` | Learn which keys decide from a flat model's wins (10+), save them as its weights and calibrate it (org admins) |
+| `ada_learn` | Learn which keys or roles decide from a model's wins (10+), save them as its weights or in its spec, and calibrate it (org admins) |
 | `ada_records` | Browse a model's records, newest first |
 | `ada_devices` | The registered devices that can hold a local model's records |
 | `ada_create_model`, `ada_update_model`, `ada_delete_model` | Manage models and their specs (organization admins) |

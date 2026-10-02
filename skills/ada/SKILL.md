@@ -52,9 +52,10 @@ why not:
 - `low_confidence`: the vote is split between outcomes.
 
 When `act` is false, ask the user or fall back. Do not act on `top`
-anyway. Two different values score 0, never "a little alike". In a flat
-model a query may use another word for a recorded value (`production`
-for `prod`); such a match is never exact.
+anyway. Two different values score 0, never "a little alike". A query
+may use another word for a recorded value (`production` for `prod`), in
+a flat model's top-level keys and a typed model's open categories; such
+a match is never exact.
 
 ## Building a model
 
@@ -69,6 +70,11 @@ segments and roles, each role with a type.
   them are versions of one thing, and the model answers from the newest.
 - A segment with `"together": true` scores its roles jointly: use it
   when the roles decide only in combination.
+- A category that lists its `values` is closed: nothing else is
+  accepted. One that lists none is open, and learns other ways its
+  values are said.
+- A spec is set before the first record. After that only its
+  similarity weights change, by `ada_learn` or by hand.
 - Data that does not fit is refused with the path of the role that was
   wrong. `ada_contract` with the model's id returns the JSON Schema of
   its data and of every answer.
@@ -104,7 +110,8 @@ lists them.
 
 `ada_check` (how close the nearest win and failure of one outcome are),
 `ada_calibrate` (fit the model's probabilities once it has 10+ wins),
-`ada_records` (browse), and for org admins `ada_learn` (which keys
-decide in a flat model, learned from its wins), `ada_update_model`,
+`ada_records` (browse), and for org admins `ada_learn` (which keys or
+roles decide, learned from the model's wins and saved: a typed model's
+role weights go into its spec), `ada_update_model`,
 `ada_delete_model`, `ada_edit_record`, `ada_delete_record`,
 `ada_delete_procedure`, `ada_devices`.

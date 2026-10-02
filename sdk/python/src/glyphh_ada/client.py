@@ -235,7 +235,9 @@ class AdaModel:
         return cast(Dict[str, Any], self._op("calibrate"))
 
     def learn(self) -> Dict[str, Any]:
-        """Learn which keys decide from a flat model's wins, and save them as its weights (org admins)."""
+        """Learn what decides from the model's wins (org admins). A flat model learns each top-level
+        key's weight, saved as its weights. A typed model learns each role's similarity weight, by
+        path, saved in its spec."""
         return cast(Dict[str, Any], self._op("learn"))
 
     def contract(self) -> Contract:

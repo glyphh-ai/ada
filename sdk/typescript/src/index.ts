@@ -12,7 +12,7 @@
  */
 
 import type {
-  Answer, Args, Check, Contract, Device, Edges, Facts, GqlResult, History, Model, ModelChange, NewModel, Prediction, Procedure,
+  Answer, Args, Check, Contract, Device, Edges, Facts, GqlResult, Learned, History, Model, ModelChange, NewModel, Prediction, Procedure,
   Recorded, Situation, Store, StoredRecord, Trend, Weights, When,
 } from "./types.js";
 
@@ -245,8 +245,11 @@ export class AdaModel {
     return this.#op("calibrate");
   }
 
-  /** Learn which keys decide from a flat model's wins, and save them as its weights (org admins). */
-  learn(): Promise<{ model_id: string; weights: Weights; tau: number; size: number; held_out_accuracy: { before: number; after: number } }> {
+  /**
+   * Learn what decides from the model's wins (org admins). A flat model learns each top-level key's weight,
+   * saved as its weights. A typed model learns each role's similarity weight, by path, saved in its spec.
+   */
+  learn(): Promise<Learned> {
     return this.#op("learn");
   }
 

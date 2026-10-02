@@ -98,6 +98,20 @@ export interface Model {
   vetoes?: number;
   things?: number;
   cache?: CacheStats;
+  /** A cloud model: the records its working copy has taken in, and how many the copy kept in the database covers. */
+  index?: { records: number; kept: number };
+}
+
+/** What `learn` found. `weights` is a flat model's weights tree, or a typed model's role weights by path. */
+export interface Learned {
+  model_id: string;
+  weights: Weights | Record<string, number>;
+  tau: number;
+  size: number;
+  held_out_accuracy: { before: number; after: number };
+  /** A typed model: the wins held out, and the wins they were scored against. */
+  held?: number;
+  scored?: number;
 }
 
 export interface CacheStats {
