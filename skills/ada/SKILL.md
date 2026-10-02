@@ -1,60 +1,110 @@
 ---
 name: ada
-description: Use Ada, Glyphh's typed language for AI work, through its ada_* tools - to build a model for a recurring kind of work, load data into it, and query it for answers explained as fact trees. Use it before repeating a decision this organization has made before (how to run something, how to fix a recurring error, which approach worked), whenever an outcome is known and worth keeping ("that worked", "that failed", "always/never do X when ..."), and whenever structured memory or classification would beat reasoning from scratch.
+description: Use Ada, Glyphh's typed language for AI work, through its ada_* tools - to build a typed model for a recurring kind of work, load records into it, and query it for answers explained as fact trees. Use it before repeating a decision this organization has made before (how to run something, how to fix a recurring error, which approach worked), whenever an outcome is known and worth keeping ("that worked", "that failed", "always/never do X when ..."), when things relate to each other or change over time and that should be asked about (what depends on this, what changed, where is it heading), and when building a model that software will call with no agent in the path.
 ---
 
 # Ada
 
-Ada is a typed language for AI work. A model holds typed data; a query in
-the same shape comes back as a fact tree: what matched, how closely, and
-why, part by part. Graded experience is one use (what was done in which
-situation, and whether it worked); classification and structured memory
-are others. Ada cites the records it stands on and says when it does not
+Ada is a typed language for AI work. A model holds typed records; a
+question in the same shape comes back as a fact tree: what matched, how
+closely, and why, part by part. The same question always gets the same
+answer, no language model is in the path, and Ada says when it does not
 know. It runs on Glyphh's servers; these tools reach it as the signed-in
 Glyphh member.
+
+There are two callers. You build a model: choose its types, load its
+records, test it. Software then calls it (the `@glyphh-ai/ada` and
+`glyphh-ada` packages, or `POST /ada`) and branches on the answer. So
+build models a program can trust: typed, with the same shape every time.
 
 ## Before acting on a recurring kind of decision
 
 1. `ada_models` to find the model that fits, if you do not know its id.
 2. `ada_query` with the situation. Act on the answer only when `act`
-   is true. A single record is not consensus unless it matches the
-   situation exactly.
-3. `ada_facts` when you need to show why: each close record explained as
-   a fact tree, per attribute its score, weight and share.
+   is true.
+3. `ada_facts` when you need to show why: each close situation as a
+   fact tree, per part its score, weight and share.
 
 ## Once the world has graded an outcome
 
 - It worked: `ada_record` (situation, outcome).
 - It failed or was rejected: `ada_veto`.
+- Loading something that happened earlier: pass `at`, when it happened.
 
 Record only outcomes the user or the world confirmed. Never grade your
 own work as a win.
 
 ## How answers are decided
 
-- `act` is true only when confidence is at least 0.7, three or more
-  records stand behind the answer and no recorded failure vetoes it.
-- A record that matches the situation exactly is the answer and acts
-  alone.
-- A query may use another word for a recorded value (`production` for
-  `prod`): cloud models match those through a lexicon built when the
-  record was written. Such a match is never exact, so it still needs
-  three records.
-- When `act` is false, read `reason` and ask the user or fall back. Do
-  not act on `top` anyway.
+`act` is true only when `reason` is `reflex`: confidence of 0.7 or
+more, three or more records behind the answer and no recorded failure
+against it, or the same situation on record. Otherwise `reason` says
+why not:
 
-## Describing a situation
+- `unseen`: the situation carries a key or a value no win has recorded.
+  `unseen` lists them (`target=main`). The nearest answer is still in
+  `top` and `receipts`, but nothing on record covers this case.
+- `insufficient`: nothing on record is close enough to answer from.
+- `uncalibrated`: fewer than three records stand behind the answer.
+- `mismatch`: the close records do not agree with the situation on the
+  keys the model says must match.
+- `vetoed`: a recorded failure stands against it.
+- `low_confidence`: the vote is split between outcomes.
 
-Give only the attributes that should decide, as short canonical values:
+When `act` is false, ask the user or fall back. Do not act on `top`
+anyway. Two different values score 0, never "a little alike". In a flat
+model a query may use another word for a recorded value (`production`
+for `prod`); such a match is never exact.
+
+## Building a model
+
+Prefer a typed model: `ada_create_model` with a `spec` of layers,
+segments and roles, each role with a type.
+
+- `category` (one value, same or not; `values` lists what it may hold),
+  `set`, `number` (a `numeric_config` scale, near numbers score near),
+  `text` (words, or n-grams so another spelling is near), `boolean`,
+  `time`, and `ref` (the key of another thing: a relation).
+- Roles marked `key_part` are a thing's identity. Records that share
+  them are versions of one thing, and the model answers from the newest.
+- A segment with `"together": true` scores its roles jointly: use it
+  when the roles decide only in combination.
+- Data that does not fit is refused with the path of the role that was
+  wrong. `ada_contract` with the model's id returns the JSON Schema of
+  its data and of every answer.
+
+A flat model (no spec) takes any JSON. Give it only the attributes that
+should decide, as short canonical values:
 `{"task": "deploy_service", "constraint": "canary_required"}`. Leave out
-ids, paths, names and timestamps: they make unrelated situations look
-alike. Use the same keys every time for the same kind of situation.
+ids, paths, names and timestamps, and use the same keys every time.
+
+## Time, likeness and the graph
+
+For a thing in a model with key parts:
+
+- `ada_history`: every version, each with what changed.
+- `ada_trend`: how far it has moved, how fast, each number's slope.
+- `ada_predict`: its next version, each role with what it stands on.
+- `ada_edges`: the things nearest it at a level (the whole, a layer, a
+  segment, a role), the change between its versions, and its relations
+  out and in.
+
+`ada_gql` runs one statement: `FIND SIMILAR TO`, `LIST`, `COUNT`,
+`AGGREGATE`, `COMPARE`, `DETECT DRIFT`, `INTROSPECT`, `TREND`,
+`PREDICT`, and over `ref` roles `FOLLOW glyph("db") IN DEPTH 3` (what
+depends on db) and `PATH FROM glyph("a") TO glyph("b")`. Name a thing
+with `glyph("key")`, a version with `glyph("key@2")`. Pass values as
+`$name` with `args`, never by building the statement's text.
+
+A statement worth running again is a stored procedure:
+`ada_save_procedure`, then `ada_call` with `args`. `ada_procedures`
+lists them.
 
 ## Other tools
 
 `ada_check` (how close the nearest win and failure of one outcome are),
 `ada_calibrate` (fit the model's probabilities once it has 10+ wins),
 `ada_records` (browse), and for org admins `ada_learn` (which keys
-decide, learned from the wins), `ada_create_model`,
-`ada_update_model`, `ada_delete_model`, `ada_edit_record`,
-`ada_delete_record`, `ada_devices`.
+decide in a flat model, learned from its wins), `ada_update_model`,
+`ada_delete_model`, `ada_edit_record`, `ada_delete_record`,
+`ada_delete_procedure`, `ada_devices`.

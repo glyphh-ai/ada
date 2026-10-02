@@ -1,6 +1,15 @@
-# Glyphh Ada Agent Skills
+# Glyphh Ada
 
-Agent skills for building with [Glyphh](https://glyphh.ai) Ada: typed models your agents build, feed and query, with every answer a fact tree.
+[Glyphh](https://glyphh.ai) Ada is a typed language for AI work: typed models your agents build, and your software then calls with no agent in the path. Every answer is a fact tree, the same question always gets the same answer, and Ada says when it does not know.
+
+This repository holds the agent skill and Claude Code plugin, and the SDKs:
+
+| | |
+|---|---|
+| [`skills/ada`](skills/ada/SKILL.md) | The skill: when to query Ada, how to build a model, when to record |
+| [`sdk/typescript`](sdk/typescript) | `@glyphh-ai/ada` for TypeScript and JavaScript |
+| [`sdk/python`](sdk/python) | `glyphh-ada` for Python |
+| [`contract`](contract) | The JSON Schema of every answer, and the request and response pairs both SDKs are tested against |
 
 Docs: [Ada models](https://glyphh.ai/docs/ada), [Install Ada](https://glyphh.ai/docs/ada-install), [Ada tools and API](https://glyphh.ai/docs/ada-tools).
 
@@ -42,30 +51,62 @@ In Claude Code you can invoke the skill explicitly with `/ada:ada`.
 
 | Skill | Purpose |
 |-------|---------|
-| `ada` | Decide when to query Ada, how to describe a situation, and when to record a win or a failure |
+| `ada` | Decide when to query Ada, how to build a typed model, and when to record a win or a failure |
+
+## SDKs
+
+Software calls a model through `POST /ada` with an API key. The SDKs wrap it, typed:
+
+```bash
+npm install @glyphh-ai/ada
+pip install glyphh-ada
+```
+
+```ts
+import { Ada } from "@glyphh-ai/ada";
+
+const tickets = new Ada().model("am_0123456789ab");
+const answer = await tickets.query({ ticket: { issue: { component: "kubelet" } } });
+if (answer.act) route(answer.top);
+```
+
+```python
+from glyphh_ada import Ada
+
+tickets = Ada().model("am_0123456789ab")
+answer = tickets.query({"ticket": {"issue": {"component": "kubelet"}}})
+if answer["act"]:
+    route(answer["top"])
+```
+
+Each has its own README: [TypeScript](sdk/typescript/README.md), [Python](sdk/python/README.md).
 
 ## How Ada decides
 
-- `act` is true only when confidence is at least 0.7, three or more records stand behind the answer, and no recorded failure vetoes it.
-- A record that matches the situation exactly is the answer and acts alone.
-- A query can use another word for a recorded value (`production` for `prod`). Cloud models match these through a lexicon built when the record is written; no model runs at query time, and such a match still needs three records to act.
-- `ada_learn` works out which keys decide from a model's own wins, and `ada_calibrate` fits its probabilities.
+- `act` is true only when confidence is at least 0.7, three or more records stand behind the answer and no recorded failure vetoes it, or when the same situation is on record.
+- A situation that carries a key or a value no win has recorded is not acted on. The answer's `reason` is `unseen`, `unseen` lists what was new, and the nearest answer is still returned. [When Ada acts](https://glyphh.ai/docs/ada-act) covers every case.
+- Two different values score 0. A typed model says how each role is compared: categories, sets, numbers on a scale, text, booleans, times and relations.
+- `ada_calibrate` fits a model's probabilities, and `ada_learn` works out which keys decide in a flat model from its own wins.
 
 ## Tools
 
 | Tool | Purpose |
 |------|---------|
 | `ada_models` | List the organization's Ada models, or one model with its record counts |
-| `ada_query` | Ask a model what worked in situations like this one, with confidence |
-| `ada_facts` | Explain the nearest wins and failures as fact trees |
-| `ada_record` | Record a graded win: this outcome worked in this situation |
-| `ada_veto` | Record a graded failure: this outcome failed or was rejected |
+| `ada_query` | Ask a model what worked in situations like this one: `act`, `reason`, and the records behind it |
+| `ada_facts` | Explain the nearest situations as fact trees |
+| `ada_record`, `ada_veto` | Record a graded win, or a failure |
 | `ada_check` | How close the nearest win and failure of one outcome are |
+| `ada_history`, `ada_trend`, `ada_predict` | A thing's versions and what changed, where it is heading, and its next version |
+| `ada_edges` | The things nearest a thing at a level, the change between its versions, and its relations |
+| `ada_gql` | One GQL statement: find, list, count, aggregate, compare, drift, and `FOLLOW` and `PATH` over the graph |
+| `ada_call`, `ada_procedures`, `ada_save_procedure`, `ada_delete_procedure` | Stored procedures: a GQL statement saved under a name, with parameters |
+| `ada_contract` | The JSON Schema of every answer, and of a typed model's data |
 | `ada_calibrate` | Fit a model's probabilities to its own records (10+ wins) |
-| `ada_learn` | Learn which keys decide from a model's wins (10+), save them as its weights and calibrate it (org admins) |
+| `ada_learn` | Learn which keys decide from a flat model's wins (10+), save them as its weights and calibrate it (org admins) |
 | `ada_records` | Browse a model's records, newest first |
 | `ada_devices` | The registered devices that can hold a local model's records |
-| `ada_create_model`, `ada_update_model`, `ada_delete_model` | Manage models (organization admins) |
+| `ada_create_model`, `ada_update_model`, `ada_delete_model` | Manage models and their specs (organization admins) |
 | `ada_edit_record`, `ada_delete_record` | Correct or delete a record (organization admins) |
 
 Every call names a `model_id` and is metered on your organization's Glyphh plan. Arguments, answer fields and the `POST /ada` endpoint are in the [tools reference](https://glyphh.ai/docs/ada-tools).

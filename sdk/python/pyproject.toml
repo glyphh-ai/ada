@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "glyphh-ada"
+version = "0.1.0"
+description = "Ada for Python: typed models your software queries without a language model in the path."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+authors = [{ name = "glyphh.ai" }]
+keywords = ["glyphh", "ada", "typed", "deterministic", "graph", "decision"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Typing :: Typed",
+]
+dependencies = ["typing_extensions>=4.4; python_version < '3.11'"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "jsonschema>=4.18"]
+
+[project.urls]
+Homepage = "https://glyphh.ai/docs/ada"
+Documentation = "https://glyphh.ai/docs/ada-tools"
+Source = "https://github.com/glyphh-ai/ada"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/glyphh_ada"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
