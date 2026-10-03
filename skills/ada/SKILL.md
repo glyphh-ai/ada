@@ -70,6 +70,13 @@ segments and roles, each role with a type.
   `set`, `number` (a `numeric_config` scale, near numbers score near),
   `text` (words, or n-grams so another spelling is near), `boolean`,
   `time`, and `ref` (the key of another thing: a relation).
+- A text role of words, or an open category, may name a `base`: another
+  model whose things are words (keyed by the word, with set roles of its
+  neighbours). Its words then take their neighbours from there, so
+  "receipt" scores close to "invoice" with no language model in the path.
+  The org's `english` model, built from WordNet, is the first base; a
+  model of your own jargon can be another. A closed category never takes
+  a base.
 - Roles marked `key_part` are a thing's identity. Records that share
   them are versions of one thing, and the model answers from the newest.
 - A segment with `"together": true` scores its roles jointly: use it
