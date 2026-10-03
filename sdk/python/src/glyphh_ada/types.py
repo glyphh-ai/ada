@@ -123,6 +123,29 @@ class Check(TypedDict):
     veto_match: float
 
 
+class LoadRecord(TypedDict, total=False):
+    """One record for `load` and `stream`: a win, or a failure under store "vetoes"."""
+
+    situation: Situation
+    outcome: str
+    store: Store
+    #: When the outcome happened. Now when left out, or the time a typed model's data carries.
+    at: When
+
+
+class Loaded(TypedDict, total=False):
+    """What a load answers. A load is all written or none: a refusal names the record and nothing lands."""
+
+    model_id: str
+    #: How many records were written.
+    loaded: int
+    #: The model's wins after the load: things, in a model with key parts.
+    wins: int
+    vetoes: int
+    #: In a streamed load: how many lines of the body were read.
+    lines: int
+
+
 class Recorded(TypedDict):
     model_id: str
     store: Store

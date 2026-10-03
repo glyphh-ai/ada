@@ -12,13 +12,15 @@
  */
 
 import type {
-  Answer, Args, Check, Contract, Device, Edges, Facts, GqlResult, Learned, History, Model, ModelChange, NewModel, Prediction, Procedure,
-  Recorded, Situation, Store, StoredRecord, Trend, Weights, When,
+  Answer, Args, Check, Contract, Device, Edges, Facts, GqlResult, Learned, History, Loaded, LoadRecord, Model, ModelChange, NewModel,
+  Prediction, Procedure, Recorded, Situation, Store, StoredRecord, Trend, Weights, When,
 } from "./types.js";
 
 export * from "./types.js";
 
 export const DEFAULT_URL = "https://api.glyphh.ai";
+/** Records one `load` call sends at once; a longer list goes in turns of this many. */
+export const LOAD_BATCH = 500;
 
 /** What a refusal's `code` can be. Others may be added. */
 export type ErrorCode =
@@ -42,13 +44,16 @@ export class AdaError extends Error {
   readonly code: ErrorCode;
   readonly status: number;
   readonly retryAfter: number | null;
+  /** When a load was refused part way: how many records had landed before the line it names. */
+  readonly loaded: number | null;
 
-  constructor(code: ErrorCode, message: string, status: number, retryAfter: number | null = null) {
+  constructor(code: ErrorCode, message: string, status: number, retryAfter: number | null = null, loaded: number | null = null) {
     super(message);
     this.name = "AdaError";
     this.code = code;
     this.status = status;
     this.retryAfter = retryAfter;
+    this.loaded = loaded;
   }
 }
 
@@ -88,25 +93,58 @@ export class Ada {
   }
 
   /** One Ada operation by name: the tool's name without `ada_`, and its arguments. The typed methods below call this. */
-  async op<T>(op: string, args: object = {}): Promise<T> {
+  op<T>(op: string, args: object = {}): Promise<T> {
+    return this.#send("/ada", "application/json", JSON.stringify({ op, ...without(args) }));
+  }
+
+  /**
+   * A file of records into one model, streamed to POST /ada/load as NDJSON: the first line names the model, every
+   * other line is one record. The server writes it in batches as it arrives, so a refusal part way names the line
+   * and says how many records landed before it (`loaded` on the error). An async iterable is sent as it is read;
+   * anything else is sent whole.
+   */
+  async upload(modelId: string, records: Iterable<LoadRecord> | AsyncIterable<LoadRecord>): Promise<Loaded> {
+    const lines = (async function* () {
+      yield `${JSON.stringify({ model_id: modelId })}\n`;
+      for await (const r of records) yield `${JSON.stringify(r)}\n`;
+    })();
+    if (!(Symbol.asyncIterator in Object(records))) {
+      let whole = "";
+      for await (const line of lines) whole += line;
+      return this.#send("/ada/load", "application/x-ndjson", whole);
+    }
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        const next = await lines.next();
+        if (next.done) controller.close();
+        else controller.enqueue(encoder.encode(next.value));
+      },
+    });
+    return this.#send("/ada/load", "application/x-ndjson", body, { duplex: "half" });
+  }
+
+  async #send<T>(path: string, contentType: string, body: BodyInit, extra: Record<string, unknown> = {}): Promise<T> {
     let res: Response;
     try {
-      res = await this.#fetch(`${this.baseUrl}/ada`, {
+      res = await this.#fetch(`${this.baseUrl}${path}`, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-glyphh-api-key": `Bearer ${this.#apiKey}`, ...this.#headers },
-        body: JSON.stringify({ op, ...without(args) }),
-      });
+        headers: { "content-type": contentType, "x-glyphh-api-key": `Bearer ${this.#apiKey}`, ...this.#headers },
+        body,
+        ...extra,
+      } as RequestInit);
     } catch (e) {
       throw new AdaError("E_UNREACHABLE", `Ada is unreachable: ${(e as Error).message}`, 0);
     }
-    const body = (await res.json().catch(() => null)) as { data?: T; error?: unknown; detail?: unknown } | null;
-    if (res.ok && body && typeof body === "object" && "data" in body) return body.data as T;
-    const refused = body?.error ?? body?.detail;
-    const said = refused && typeof refused === "object" ? (refused as { code?: unknown; message?: unknown; error?: unknown }) : {};
+    const answer = (await res.json().catch(() => null)) as { data?: T; error?: unknown; detail?: unknown } | null;
+    if (res.ok && answer && typeof answer === "object" && "data" in answer) return answer.data as T;
+    const refused = answer?.error ?? answer?.detail;
+    const said = refused && typeof refused === "object" ? (refused as { code?: unknown; message?: unknown; error?: unknown; loaded?: unknown }) : {};
     const message = typeof refused === "string" ? refused : String(said.message ?? said.error ?? "") || `Ada answered ${res.status}`;
     const code = typeof said.code === "string" && said.code.startsWith("E_") ? said.code : BY_STATUS[res.status] ?? "E_ADA";
     const wait = Number(res.headers.get("retry-after"));
-    throw new AdaError(code, message, res.status, res.headers.has("retry-after") && Number.isFinite(wait) ? wait : null);
+    throw new AdaError(code, message, res.status, res.headers.has("retry-after") && Number.isFinite(wait) ? wait : null,
+                       typeof said.loaded === "number" ? said.loaded : null);
   }
 
   /** One model, by its id (am_ and 12 hex digits). */
@@ -170,6 +208,27 @@ export class AdaModel {
   /** A graded failure: this outcome failed, or was rejected, here. */
   veto(situation: Situation, outcome: string, options: { at?: When } = {}): Promise<Recorded> {
     return this.#op("veto", { situation, outcome, ...options });
+  }
+
+  /**
+   * Many graded records in one call: the seed. Each is checked like `record` before any is written, so one bad
+   * record refuses the call by its index and nothing lands. Up to LOAD_BATCH go in one call; a longer list goes in
+   * turns, and the answer sums what landed. Call `calibrate` once at the end.
+   */
+  async load(records: LoadRecord[]): Promise<Loaded> {
+    if (records.length === 0) throw new AdaError("E_VALIDATION", "records must be a non-empty array", 0);
+    let loaded = 0;
+    let last!: Loaded;
+    for (let at = 0; at < records.length; at += LOAD_BATCH) {
+      last = await this.#op<Loaded>("load", { records: records.slice(at, at + LOAD_BATCH) });
+      loaded += last.loaded;
+    }
+    return { ...last, loaded };
+  }
+
+  /** A file of records, streamed as it is read: `Ada.upload` for this model. */
+  stream(records: Iterable<LoadRecord> | AsyncIterable<LoadRecord>): Promise<Loaded> {
+    return this.ada.upload(this.id, records);
   }
 
   // ── one thing, in time ──

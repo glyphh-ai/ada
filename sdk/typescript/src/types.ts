@@ -152,6 +152,27 @@ export interface StoredRecord {
   ts: number;
 }
 
+/** One record for `load` and `stream`: a win, or a failure under `store: "vetoes"`. */
+export interface LoadRecord {
+  situation: Situation;
+  outcome: string;
+  store?: Store;
+  /** When the outcome happened. Now when left out, or the time a typed model's data carries. */
+  at?: When;
+}
+
+/** What a load answers. A load is all written or none: a refusal names the record and nothing lands. */
+export interface Loaded {
+  model_id: string;
+  /** How many records were written. */
+  loaded: number;
+  /** The model's wins after the load: things, in a model with key parts. */
+  wins: number;
+  vetoes: number;
+  /** In a streamed load: how many lines of the body were read. */
+  lines?: number;
+}
+
 export interface Recorded {
   model_id: string;
   store: Store;

@@ -30,6 +30,10 @@ build models a program can trust: typed, with the same shape every time.
 - It worked: `ada_record` (situation, outcome).
 - It failed or was rejected: `ada_veto`.
 - Loading something that happened earlier: pass `at`, when it happened.
+- Loading history, the seed: `ada_load` takes up to 500 records in one
+  call, each with its own `at`, and refuses the whole call by index when
+  one does not fit. Call `ada_calibrate` once at the end. Software streams
+  a file through `POST /ada/load` as NDJSON (`load` and `stream` in the SDKs).
 
 Record only outcomes the user or the world confirmed. Never grade your
 own work as a win.

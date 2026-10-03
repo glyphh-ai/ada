@@ -30,6 +30,7 @@ const d1 = { deal: { identity: { deal_id: "d1" } } };
 const calls = {
   create_model: (ada, r) => ada.createModel({ name: r.name, storage: r.storage, spec: r.spec }).then((m) => m.created),
   record: (ada, r) => ada.model(r.model_id).record(r.situation, r.outcome),
+  load: (ada, r) => ada.model(r.model_id).load(r.records),
   models: (ada) => ada.models().then((models) => ({ models })),
   models_one: (ada, r) => ada.model(r.model_id).info().then((m) => ({ models: [m] })),
   query_act: (ada, r) => ada.model(r.model_id).query(r.situation),
@@ -135,4 +136,33 @@ test("the gateway's own refusals get Ada's codes, and a rate limit says how long
   await assert.rejects(answering(429, '{"error": {"code": "E_RATE_LIMITED", "message": "slow down"}}', { "retry-after": "soon" }).models(),
     (e) => e.code === "E_RATE_LIMITED" && e.retryAfter === null);
   await assert.rejects(answering(403, '{"error": {"code": "403", "message": "no"}}').models(), (e) => e.code === "E_FORBIDDEN");
+});
+
+test("a long load goes in turns of LOAD_BATCH, and the answer sums what landed", async () => {
+  const { ada, sent } = replaying("load");
+  const records = Array.from({ length: 501 }, (_, i) => ({ situation: { n: i }, outcome: "x" }));
+  const got = await ada.model(DEALS).load(records);
+  assert.deepEqual(sent.map((s) => s.body.records.length), [500, 1]);
+  assert.equal(got.loaded, 4);
+  await assert.rejects(ada.model(DEALS).load([]), { code: "E_VALIDATION" });
+});
+
+test("a streamed load is NDJSON to /ada/load, the model first, and a refusal says how many landed", async () => {
+  const sent = [];
+  const answer = { data: { model_id: DEALS, loaded: 2, wins: 2, vetoes: 0, lines: 3 } };
+  const ada = new Ada({ apiKey: "sk-test", fetch: async (url, init) => {
+    sent.push({ url, headers: init.headers, duplex: init.duplex, text: typeof init.body === "string" ? init.body : await new Response(init.body).text() });
+    return new Response(JSON.stringify(sent.length === 1 ? answer : { error: { code: "E_VALIDATION", message: "line 3: this record: situation must be a non-empty object", loaded: 1 } }),
+                        { status: sent.length === 1 ? 200 : 400 });
+  } });
+  const rows = [{ situation: { a: 1 }, outcome: "x" }, { situation: { a: 2 }, outcome: "y", store: "vetoes" }];
+  assert.deepEqual(await ada.model(DEALS).stream(rows), answer.data);
+  assert.equal(sent[0].url, `${DEFAULT_URL}/ada/load`);
+  assert.equal(sent[0].headers["content-type"], "application/x-ndjson");
+  assert.deepEqual(sent[0].text.trimEnd().split("\n").map((l) => JSON.parse(l)), [{ model_id: DEALS }, ...rows]);
+  assert.equal(sent[0].duplex, undefined, "an array is sent whole");
+  async function* late() { for (const r of rows) yield r; }
+  await assert.rejects(ada.upload(DEALS, late()), (e) => e instanceof AdaError && e.code === "E_VALIDATION" && e.loaded === 1 && e.status === 400);
+  assert.equal(sent[1].duplex, "half", "an async iterable streams");
+  assert.deepEqual(sent[1].text, sent[0].text);
 });

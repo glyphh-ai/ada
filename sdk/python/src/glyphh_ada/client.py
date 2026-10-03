@@ -6,22 +6,25 @@ import json
 import os
 import urllib.error
 import urllib.request
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, cast
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Tuple, Union, cast
 
 from .types import (
-    Answer, Args, Check, Contract, Device, Edges, Facts, GqlResult, History, Model, Prediction, Procedure, Recorded, Records,
-    Situation, Store, Trend, Weights, When,
+    Answer, Args, Check, Contract, Device, Edges, Facts, GqlResult, History, Loaded, LoadRecord, Model, Prediction, Procedure, Recorded,
+    Records, Situation, Store, Trend, Weights, When,
 )
 
 DEFAULT_URL = "https://api.glyphh.ai"
 DEFAULT_TIMEOUT = 30.0
+#: Records one `load` call sends at once; a longer list goes in turns of this many.
+LOAD_BATCH = 500
 
 #: An argument given as NULL is sent as null. One given as None is not sent.
 NULL = object()
 
 #: Sends one request: (url, headers, body, timeout seconds) -> (status, body). Give your own to use another HTTP library.
-#: (url, headers, body, timeout) -> (status, body), or (status, body, response headers).
-Transport = Callable[[str, Mapping[str, str], bytes, float], Tuple[Any, ...]]
+#: (url, headers, body, timeout) -> (status, body), or (status, body, response headers). A streamed load's body is an
+#: iterable of bytes, to be sent as it is read (chunked); the default transport does.
+Transport = Callable[[str, Mapping[str, str], Union[bytes, Iterable[bytes]], float], Tuple[Any, ...]]
 
 #: What a refusal is, by its HTTP status, when the answer names no code of Ada's own:
 #: the gateway in front of Ada (a key it does not know, a rate limit) answers in its own words.
@@ -36,18 +39,21 @@ class AdaError(Exception):
     `status` is the HTTP status, 0 when there was none. `retry_after` is how
     many seconds to wait before asking again, when Ada said (a rate limit)."""
 
-    def __init__(self, code: str, message: str, status: int = 0, retry_after: Optional[float] = None) -> None:
+    def __init__(self, code: str, message: str, status: int = 0, retry_after: Optional[float] = None,
+                 loaded: Optional[int] = None) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.status = status
         self.retry_after = retry_after
+        #: When a load was refused part way: how many records had landed before the line it names.
+        self.loaded = loaded
 
     def __repr__(self) -> str:
         return f"AdaError({self.code!r}, {self.message!r}, status={self.status})"
 
 
-def _urllib(url: str, headers: Mapping[str, str], body: bytes, timeout: float) -> Tuple[int, bytes, Mapping[str, str]]:
+def _urllib(url: str, headers: Mapping[str, str], body: Union[bytes, Iterable[bytes]], timeout: float) -> Tuple[int, bytes, Mapping[str, str]]:
     request = urllib.request.Request(url, data=body, headers=dict(headers), method="POST")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310  # the URL is the caller's Ada endpoint
@@ -89,9 +95,25 @@ class Ada:
         its arguments. An argument that is None is not sent; one that is
         NULL is sent as null. The typed methods call this."""
         body = json.dumps({"op": op, **{k: (None if v is NULL else v) for k, v in args.items() if v is not None}}).encode()
-        headers = {"content-type": "application/json", "x-glyphh-api-key": f"Bearer {self._key}", **self._headers}
+        return self._send("/ada", "application/json", body)
+
+    def upload(self, model_id: str, records: Iterable[LoadRecord]) -> Loaded:
+        """A file of records into one model, streamed to POST /ada/load as
+        NDJSON as it is read: the first line names the model, every other
+        line is one record. The server writes it in batches as it arrives,
+        so a refusal part way names the line and says how many records
+        landed before it (``loaded`` on the error)."""
+        def lines() -> Iterator[bytes]:
+            yield json.dumps({"model_id": model_id}).encode() + b"\n"
+            for r in records:
+                yield json.dumps(r).encode() + b"\n"
+
+        return cast(Loaded, self._send("/ada/load", "application/x-ndjson", lines()))
+
+    def _send(self, path: str, content_type: str, body: Union[bytes, Iterable[bytes]]) -> Any:
+        headers = {"content-type": content_type, "x-glyphh-api-key": f"Bearer {self._key}", **self._headers}
         try:
-            sent = self._transport(f"{self.base_url}/ada", headers, body, self.timeout)
+            sent = self._transport(f"{self.base_url}{path}", headers, body, self.timeout)
             status, raw = sent[0], sent[1]
         except AdaError:
             raise
@@ -108,7 +130,8 @@ class Ada:
         message = refused if isinstance(refused, str) else str(said.get("message") or said.get("error") or "") or f"Ada answered {status}"
         named = said.get("code")
         code = named if isinstance(named, str) and named.startswith("E_") else BY_STATUS.get(status, "E_ADA")
-        raise AdaError(code, message, status, _seconds(sent[2]) if len(sent) > 2 else None)
+        landed = said.get("loaded")
+        raise AdaError(code, message, status, _seconds(sent[2]) if len(sent) > 2 else None, landed if isinstance(landed, int) else None)
 
     def model(self, model_id: str) -> "AdaModel":
         """One model, by its id (am_ and 12 hex digits)."""
@@ -174,6 +197,24 @@ class AdaModel:
     def veto(self, situation: Situation, outcome: str, *, at: Optional[When] = None) -> Recorded:
         """A graded failure: this outcome failed, or was rejected, here."""
         return cast(Recorded, self._op("veto", situation=situation, outcome=outcome, at=at))
+
+    def load(self, records: List[LoadRecord]) -> Loaded:
+        """Many graded records in one call: the seed. Each is checked like
+        ``record`` before any is written, so one bad record refuses the call
+        by its index and nothing lands. Up to LOAD_BATCH go in one call; a
+        longer list goes in turns, and the answer sums what landed. Call
+        ``calibrate`` once at the end."""
+        total: Optional[Loaded] = None
+        for at in range(0, len(records), LOAD_BATCH):
+            part = cast(Loaded, self._op("load", records=records[at:at + LOAD_BATCH]))
+            total = cast(Loaded, {**part, "loaded": (total["loaded"] if total else 0) + part["loaded"]})
+        if total is None:
+            raise AdaError("E_VALIDATION", "records must be a non-empty list")
+        return total
+
+    def stream(self, records: Iterable[LoadRecord]) -> Loaded:
+        """A file of records, streamed as it is read: ``Ada.upload`` for this model."""
+        return self._ada.upload(self.id, records)
 
     # -- one thing, in time --
 

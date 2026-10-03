@@ -2660,5 +2660,42 @@
     ],
     "title": "ada_trend",
     "type": "object"
+  },
+  "load": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "ada_load",
+    "type": "object",
+    "description": "What a load answers. A load is all written or none: a refusal names the record by its index and nothing lands.",
+    "required": [
+      "model_id",
+      "loaded",
+      "wins",
+      "vetoes"
+    ],
+    "properties": {
+      "model_id": {
+        "type": "string"
+      },
+      "loaded": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "How many records this call wrote."
+      },
+      "wins": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "The model's wins after the load: things, in a model with key parts."
+      },
+      "vetoes": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "The model's failures after the load."
+      },
+      "lines": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "In a streamed load: how many lines of the body were read."
+      }
+    }
   }
 }

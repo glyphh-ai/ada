@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List, Tuple
 import jsonschema
 import pytest
 
-from glyphh_ada import DEFAULT_URL, Ada, AdaError, AdaModel
+from glyphh_ada import DEFAULT_URL, LOAD_BATCH, Ada, AdaError, AdaModel
 
 ROOT = Path(__file__).resolve().parents[3] / "contract"
 FIXTURES: Dict[str, Any] = json.loads((ROOT / "fixtures.json").read_text())
@@ -42,6 +42,7 @@ CALLS: Dict[str, Callable[[Ada, Dict[str, Any]], Any]] = {
     "create_model": lambda ada, r: ada.create_model(r["name"], r["storage"], spec=r["spec"]).created,
     "create_accounts": lambda ada, r: ada.create_model(r["name"], r["storage"], spec=r["spec"]).created,
     "record": lambda ada, r: m(ada, r).record(r["situation"], r["outcome"]),
+    "load": lambda ada, r: m(ada, r).load(r["records"]),
     "models": lambda ada, r: {"models": ada.models()},
     "models_one": lambda ada, r: {"models": [m(ada, r).info()]},
     "query_act": lambda ada, r: m(ada, r).query(r["situation"]),
@@ -175,3 +176,36 @@ def test_the_gateways_own_refusals_get_adas_codes_and_a_rate_limit_says_how_long
         Ada("k", "http://ada", transport=lambda *_: (403, b'{"error": {"code": "403", "message": "no"}}')).models()
     assert (old.value.code, old.value.retry_after) == ("E_FORBIDDEN", None), "a transport that gives no headers still works"
 
+
+
+def test_a_long_load_goes_in_turns_of_load_batch_and_the_answer_sums_what_landed() -> None:
+    ada, sent = replaying("load")
+    records: List[Any] = [{"situation": {"n": i}, "outcome": "x"} for i in range(LOAD_BATCH + 1)]
+    got = m(ada, FIXTURES["load"]["request"]).load(records)
+    assert [len(body["records"]) for _, _, body in sent] == [LOAD_BATCH, 1] and got["loaded"] == 4
+    with pytest.raises(AdaError) as e:
+        m(ada, FIXTURES["load"]["request"]).load([])
+    assert e.value.code == "E_VALIDATION"
+
+
+def test_a_streamed_load_is_ndjson_to_ada_load_the_model_first_and_a_refusal_says_how_many_landed() -> None:
+    model_id = FIXTURES["load"]["request"]["model_id"]
+    sent: List[Tuple[str, Dict[str, str], bytes]] = []
+    answers = [(200, {"data": {"model_id": model_id, "loaded": 2, "wins": 2, "vetoes": 0, "lines": 3}}),
+               (400, {"error": {"code": "E_VALIDATION", "message": "line 3: this record: situation must be a non-empty object", "loaded": 1}})]
+
+    def transport(url: str, headers: Any, body: Any, timeout: float) -> Tuple[int, bytes]:
+        assert not isinstance(body, bytes), "a streamed body is an iterable of lines, sent as it is read"
+        sent.append((url, dict(headers), b"".join(body)))
+        status, answer = answers[len(sent) - 1]
+        return status, json.dumps(answer).encode()
+
+    ada = Ada(api_key="sk-test", transport=transport)
+    rows: List[Any] = [{"situation": {"a": 1}, "outcome": "x"}, {"situation": {"a": 2}, "outcome": "y", "store": "vetoes"}]
+    assert ada.model(model_id).stream(rows) == answers[0][1]["data"]
+    url, headers, body = sent[0]
+    assert (url, headers["content-type"]) == (f"{DEFAULT_URL}/ada/load", "application/x-ndjson")
+    assert [json.loads(line) for line in body.decode().splitlines()] == [{"model_id": model_id}, *rows]
+    with pytest.raises(AdaError) as e:
+        ada.upload(model_id, iter(rows))
+    assert (e.value.code, e.value.status, e.value.loaded) == ("E_VALIDATION", 400, 1) and sent[1][2] == body

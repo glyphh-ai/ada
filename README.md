@@ -97,6 +97,7 @@ Each has its own README: [TypeScript](sdk/typescript/README.md), [Python](sdk/py
 | `ada_query` | Ask a model what worked in situations like this one: `act`, `reason`, and the records behind it |
 | `ada_facts` | Explain the nearest situations as fact trees |
 | `ada_record`, `ada_veto` | Record a graded win, or a failure |
+| `ada_load` | Load up to 500 graded records in one call, all or none; software streams a file through `POST /ada/load` as NDJSON |
 | `ada_check` | How close the nearest win and failure of one outcome are |
 | `ada_history`, `ada_trend`, `ada_predict` | A thing's versions and what changed, where it is heading, and its next version |
 | `ada_edges` | The things nearest a thing at a level, the change between its versions, and its relations |
@@ -110,7 +111,7 @@ Each has its own README: [TypeScript](sdk/typescript/README.md), [Python](sdk/py
 | `ada_create_model`, `ada_update_model`, `ada_delete_model` | Manage models and their specs (organization admins) |
 | `ada_edit_record`, `ada_delete_record` | Correct or delete a record (organization admins) |
 
-Every call names a `model_id` and is metered on your organization's Glyphh plan. Arguments, answer fields and the `POST /ada` endpoint are in the [tools reference](https://docs.glyphh.ai/ada-tools).
+Every call names a `model_id` and is metered on your organization's Glyphh plan, on the JSON in and out, so a load of 500 records costs what 500 calls would. The seed goes in bulk: `load` for a list, `stream` for a file. Arguments, answer fields and the `POST /ada` endpoint are in the [tools reference](https://docs.glyphh.ai/ada-tools).
 
 ## License
 

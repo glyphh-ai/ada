@@ -33,6 +33,8 @@ if (answer.act) {
 await tickets.record({ ticket: { issue: { component: "kubelet", symptom: "crash_on_boot", severity: 7 } } }, "route_to_platform");
 await tickets.veto(situation, "route_to_network"); // this outcome failed here
 await tickets.record(situation, "route_to_platform", { at: "2026-01-03T10:00:00Z" }); // when it happened, for past records
+await tickets.load(history.map((h) => ({ situation: h.situation, outcome: h.outcome, at: h.when }))); // the seed, all or none
+await tickets.stream(readRecords("tickets.ndjson")); // a file, streamed; a refusal names the line and says how many landed (error.loaded)
 ```
 
 ## Create a typed model
@@ -61,6 +63,8 @@ Data that does not fit a role's type is refused before it is stored or scored.
 | `facts(situation, { top })` | The nearest situations as fact trees: which parts matched, and how closely |
 | `check(situation, outcome)` | How close the nearest win and failure of one outcome are |
 | `record(situation, outcome, { at })`, `veto(...)` | The record's id, key and version |
+| `load(records)` | Up to 500 records in one call, all or none; a longer list goes in turns. `{ loaded, wins, vetoes }` |
+| `stream(records)` | A file of records as NDJSON to `POST /ada/load`, written in batches as it arrives; an async iterable is sent as it is read |
 | `history(thing)` | Every version of a thing, each with what changed |
 | `trend(thing)` | How far it has moved, how fast, and each number's slope |
 | `predict(thing, { at })` | Its next version, and what the model's other things say of it |

@@ -34,6 +34,8 @@ An answer is the JSON the server sent, as a dictionary. The package's `TypedDict
 tickets.record({"ticket": {"issue": {"component": "kubelet", "symptom": "crash_on_boot", "severity": 7}}}, "route_to_platform")
 tickets.veto(situation, "route_to_network")  # this outcome failed here
 tickets.record(situation, "route_to_platform", at="2026-01-03T10:00:00Z")  # when it happened, for past records
+tickets.load([{"situation": h.situation, "outcome": h.outcome, "at": h.when} for h in history])  # the seed, all or none
+tickets.stream(read_records("tickets.ndjson"))  # a file, streamed; a refusal names the line and says how many landed (error.loaded)
 ```
 
 ## Create a typed model
@@ -59,6 +61,8 @@ Data that does not fit a role's type is refused before it is stored or scored.
 | `facts(situation, top=3)` | The nearest situations as fact trees: which parts matched, and how closely |
 | `check(situation, outcome)` | How close the nearest win and failure of one outcome are |
 | `record(situation, outcome, at=None)`, `veto(...)` | The record's id, key and version |
+| `load(records)` | Up to 500 records in one call, all or none; a longer list goes in turns. `{loaded, wins, vetoes}` |
+| `stream(records)` | A file of records as NDJSON to `POST /ada/load`, sent as it is read and written in batches as it arrives |
 | `history(thing)` | Every version of a thing, each with what changed |
 | `trend(thing)` | How far it has moved, how fast, and each number's slope |
 | `predict(thing, at=None)` | Its next version, and what the model's other things say of it |
