@@ -74,9 +74,13 @@ segments and roles, each role with a type.
   model whose things are words (keyed by the word, with set roles of its
   neighbours). Its words then take their neighbours from there, so
   "receipt" scores close to "invoice" with no language model in the path.
-  The org's `english` model, built from WordNet, is the first base; a
-  model of your own jargon can be another. A closed category never takes
-  a base.
+  Glyphh's `glyphh-ada-eng-1.0` model, English built from WordNet, is
+  the first base: name it by that row. A model of your own jargon can be
+  another. A closed category never takes a base.
+- `ada_models` lists the models Glyphh shares beside the org's own: a
+  shared one has `own` false and `shared` true, every organization reads
+  it, and only Glyphh writes it; `version` and `source` say where it was
+  loaded from.
 - Roles marked `key_part` are a thing's identity. Records that share
   them are versions of one thing, and the model answers from the newest.
 - A segment with `"together": true` scores its roles jointly: use it
@@ -168,4 +172,4 @@ lists them.
 roles decide, learned from the model's wins and saved: a typed model's
 role weights go into its spec), `ada_update_model`,
 `ada_delete_model`, `ada_edit_record`, `ada_delete_record`,
-`ada_delete_procedure`, `ada_devices`.
+`ada_delete_procedure`.

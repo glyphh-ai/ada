@@ -39,8 +39,8 @@ def m(ada: Ada, r: Dict[str, Any]) -> AdaModel:
 
 
 CALLS: Dict[str, Callable[[Ada, Dict[str, Any]], Any]] = {
-    "create_model": lambda ada, r: ada.create_model(r["name"], r["storage"], spec=r["spec"]).created,
-    "create_accounts": lambda ada, r: ada.create_model(r["name"], r["storage"], spec=r["spec"]).created,
+    "create_model": lambda ada, r: ada.create_model(r["name"], spec=r["spec"]).created,
+    "create_accounts": lambda ada, r: ada.create_model(r["name"], spec=r["spec"]).created,
     "record": lambda ada, r: m(ada, r).record(r["situation"], r["outcome"]),
     "load": lambda ada, r: m(ada, r).load(r["records"]),
     "models": lambda ada, r: {"models": ada.models()},

@@ -28,7 +28,7 @@ const d1 = { deal: { identity: { deal_id: "d1" } } };
 
 /** Each call the client makes, by the fixture it should reproduce. */
 const calls = {
-  create_model: (ada, r) => ada.createModel({ name: r.name, storage: r.storage, spec: r.spec }).then((m) => m.created),
+  create_model: (ada, r) => ada.createModel({ name: r.name, spec: r.spec }).then((m) => m.created),
   record: (ada, r) => ada.model(r.model_id).record(r.situation, r.outcome),
   load: (ada, r) => ada.model(r.model_id).load(r.records),
   models: (ada) => ada.models().then((models) => ({ models })),
@@ -53,7 +53,7 @@ const calls = {
   records: (ada, r) => ada.model(r.model_id).records({ limit: r.limit }),
   contract_model: (ada, r) => ada.model(r.model_id).contract(),
   delete_model: (ada, r) => ada.model(r.model_id).delete(),
-  create_accounts: (ada, r) => ada.createModel({ name: r.name, storage: r.storage, spec: r.spec }).then((m) => m.created),
+  create_accounts: (ada, r) => ada.createModel({ name: r.name, spec: r.spec }).then((m) => m.created),
 };
 
 for (const [name, run] of Object.entries(calls)) {

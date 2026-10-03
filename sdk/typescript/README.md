@@ -42,7 +42,6 @@ await tickets.stream(readRecords("tickets.ndjson")); // a file, streamed; a refu
 ```ts
 const model = await ada.createModel({
   name: "tickets",
-  storage: "cloud",
   spec: {
     name: "tickets",
     layers: [{ name: "ticket", segments: [{ name: "issue", roles: [
@@ -77,7 +76,7 @@ Data that does not fit a role's type is refused before it is stored or scored.
 | `calibrate()`, `learn()` | Fit its probabilities; learn which keys or roles decide |
 | `contract()` | The JSON Schema of every answer and of a typed model's data |
 
-On the client: `ada.models()`, `ada.createModel(model)`, `ada.devices()`, `ada.contract()`, and `ada.op(name, args)` for any operation by name.
+On the client: `ada.models()`, `ada.createModel(model)`, `ada.contract()`, and `ada.op(name, args)` for any operation by name.
 
 ## GQL and the graph
 

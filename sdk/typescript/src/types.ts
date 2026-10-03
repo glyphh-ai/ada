@@ -46,6 +46,8 @@ export interface Role {
   many?: boolean;
   /** A ref role: a record that names a thing not on record is refused. */
   strict?: boolean;
+  /** A text role of words, or an open category: the model of words its values take their neighbours from, by its catalog row (`glyphh-ada-eng-1.0`) or model id. */
+  base?: string;
 }
 
 export interface Segment {
@@ -81,8 +83,14 @@ export interface Spec {
 export interface Model {
   model_id: string;
   name: string;
-  storage: "cloud" | "local";
-  device_id: string | null;
+  /** This organization's own. False for a model Glyphh shares with every organization. */
+  own: boolean;
+  /** Shared with every organization: read by all, written by Glyphh alone. */
+  shared: boolean;
+  /** A shared model: the version it was loaded from. */
+  version: string | null;
+  /** A shared model: where it was loaded from, e.g. models:english. */
+  source: string | null;
   weights: Weights | null;
   tau: number | null;
   calibrated: boolean;
@@ -98,7 +106,7 @@ export interface Model {
   vetoes?: number;
   things?: number;
   cache?: CacheStats;
-  /** A cloud model: the records its working copy has taken in, and how many the copy kept in the database covers. */
+  /** The records the model's working copy has taken in, and how many the copy kept in the database covers. */
   index?: { records: number; kept: number };
 }
 
@@ -125,8 +133,6 @@ export interface CacheStats {
 
 export interface NewModel {
   name: string;
-  storage: "cloud" | "local";
-  device_id?: string;
   weights?: Weights;
   spec?: Spec;
 }
@@ -182,14 +188,6 @@ export interface Recorded {
   /** In a model with key parts: which version of the thing this record is, in time. */
   version: number | null;
   size: number;
-}
-
-export interface Device {
-  device_id: string;
-  owner_user_id: string;
-  name: string;
-  created_at: string;
-  online: boolean;
 }
 
 // ── a query's answer ─────────────────────────────────────────────────────────

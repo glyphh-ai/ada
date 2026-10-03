@@ -968,7 +968,7 @@
   },
   "gql": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "title": "ada_gql",
+    "title": "gql",
     "type": "object",
     "description": "What one GQL statement returns. `statement` says which, and which of the other fields are there.",
     "required": [

@@ -71,7 +71,7 @@ const show = (title: string, value: unknown) => console.log(`\n--- ${title}\n${J
 const brief = (a: Answer) => ({ act: a.act, reason: a.reason, top: a.top, confidence: a.confidence, count: a.count, outcomes: a.outcomes, unseen: a.unseen });
 const T0 = Date.UTC(2026, 0, 1) / 1000, MONTH = 30 * 86400;
 
-const model = await ada.createModel({ name: "renewals", storage: "cloud", spec: SPEC });
+const model = await ada.createModel({ name: "renewals", spec: SPEC });
 console.log("model", model.id);
 
 // 3. Record each snapshot with when it was taken. Records that share an account_id are versions of one account.

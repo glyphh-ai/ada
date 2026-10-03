@@ -185,8 +185,10 @@ class CacheStats(TypedDict):
 class Model(TypedDict):
     model_id: str
     name: str
-    storage: Literal["cloud", "local"]
-    device_id: Optional[str]
+    own: bool
+    shared: bool
+    version: Optional[str]
+    source: Optional[str]
     weights: Optional[Weights]
     tau: Optional[float]
     calibrated: bool
@@ -200,14 +202,6 @@ class Model(TypedDict):
     vetoes: NotRequired[int]
     things: NotRequired[int]
     cache: NotRequired[CacheStats]
-
-
-class Device(TypedDict):
-    device_id: str
-    owner_user_id: str
-    name: str
-    created_at: str
-    online: bool
 
 
 class Change(TypedDict("Change", {"from": Any})):
