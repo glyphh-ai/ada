@@ -1,2526 +1,18 @@
 {
   "contract": 2,
-  "edges": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "properties": {
-      "key": {
-        "type": "string"
-      },
-      "level": {
-        "description": "cortex, or the path of a layer, a segment or a role.",
-        "type": "string"
-      },
-      "model_id": {
-        "type": "string"
-      },
-      "neural": {
-        "description": "The things nearest this one at the level, nearest first.",
-        "items": {
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "outcome": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "parts": {
-              "description": "The thing's key parts as written, in the spec's order. Only in a model with key parts, and only when the reader may see them.",
-              "type": "array"
-            },
-            "score": {
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            },
-            "store": {
-              "enum": [
-                "wins",
-                "vetoes"
-              ]
-            },
-            "target": {
-              "description": "The other thing's key.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "target",
-            "id",
-            "store",
-            "outcome",
-            "score"
-          ],
-          "type": "object"
-        },
-        "type": "array"
-      },
-      "relations": {
-        "description": "The relations this thing's ref roles make, and the ones that name it.",
-        "properties": {
-          "in": {
-            "items": {
-              "description": "One relation: the thing that has the ref role, the role's path, and the thing it names.",
-              "properties": {
-                "from": {
-                  "required": [
-                    "model_id",
-                    "key"
-                  ],
-                  "type": "object"
-                },
-                "missing": {
-                  "description": "True when the relation names a thing that is not on record.",
-                  "type": "boolean"
-                },
-                "relation": {
-                  "description": "The ref role's path: layer.segment.role.",
-                  "type": "string"
-                },
-                "to": {
-                  "properties": {
-                    "key": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "model_id": {
-                      "type": "string"
-                    },
-                    "parts": {
-                      "type": "array"
-                    }
-                  },
-                  "required": [
-                    "model_id",
-                    "key",
-                    "parts"
-                  ],
-                  "type": "object"
-                }
-              },
-              "required": [
-                "from",
-                "relation",
-                "to",
-                "missing"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "out": {
-            "items": {
-              "description": "One relation: the thing that has the ref role, the role's path, and the thing it names.",
-              "properties": {
-                "from": {
-                  "required": [
-                    "model_id",
-                    "key"
-                  ],
-                  "type": "object"
-                },
-                "missing": {
-                  "description": "True when the relation names a thing that is not on record.",
-                  "type": "boolean"
-                },
-                "relation": {
-                  "description": "The ref role's path: layer.segment.role.",
-                  "type": "string"
-                },
-                "to": {
-                  "properties": {
-                    "key": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "model_id": {
-                      "type": "string"
-                    },
-                    "parts": {
-                      "type": "array"
-                    }
-                  },
-                  "required": [
-                    "model_id",
-                    "key",
-                    "parts"
-                  ],
-                  "type": "object"
-                }
-              },
-              "required": [
-                "from",
-                "relation",
-                "to",
-                "missing"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "out",
-          "in"
-        ],
-        "type": "object"
-      },
-      "temporal": {
-        "description": "Each version of this thing to the next, oldest first.",
-        "items": {
-          "properties": {
-            "change": {
-              "description": "1 - the two versions' score at the level.",
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            },
-            "changes": {
-              "items": {
-                "description": "One role that differs between two versions of a thing. A side that does not carry the role is null.",
-                "properties": {
-                  "from": {},
-                  "path": {
-                    "description": "layer.segment.role",
-                    "type": "string"
-                  },
-                  "score": {
-                    "description": "How close the two values are. 0 for two different categories.",
-                    "maximum": 1,
-                    "minimum": 0,
-                    "type": "number"
-                  },
-                  "to": {}
-                },
-                "required": [
-                  "path",
-                  "from",
-                  "to",
-                  "score"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            },
-            "from": {
-              "minimum": 1,
-              "type": "integer"
-            },
-            "to": {
-              "minimum": 2,
-              "type": "integer"
-            },
-            "ts": {
-              "description": "Epoch seconds.",
-              "type": "number"
-            }
-          },
-          "required": [
-            "from",
-            "to",
-            "ts",
-            "change",
-            "changes"
-          ],
-          "type": "object"
-        },
-        "type": "array"
-      }
-    },
-    "required": [
-      "model_id",
-      "key",
-      "level",
-      "neural",
-      "temporal",
-      "relations"
-    ],
-    "title": "ada_edges",
-    "type": "object"
-  },
-  "facts": {
-    "$defs": {
-      "fact": {
-        "properties": {
-          "children": {
-            "items": {
-              "$ref": "#/$defs/fact"
-            },
-            "type": "array"
-          },
-          "key": {
-            "type": "string"
-          },
-          "match": {
-            "description": "At a leaf both sides carry: how the two values compare. partial is two sets or texts that share some of their items; near is two numbers some bins apart on one scale.",
-            "enum": [
-              "same",
-              "lexical",
-              "partial",
-              "near",
-              "different"
-            ]
-          },
-          "score": {
-            "maximum": 1,
-            "minimum": 0,
-            "type": "number"
-          },
-          "share": {
-            "maximum": 1,
-            "minimum": 0,
-            "type": "number"
-          },
-          "sim": {
-            "type": "number"
-          },
-          "status": {
-            "enum": [
-              "both",
-              "query_only",
-              "record_only"
-            ]
-          },
-          "weight": {
-            "minimum": 0,
-            "type": "number"
-          }
-        },
-        "required": [
-          "key",
-          "weight",
-          "score",
-          "share",
-          "sim",
-          "status"
-        ],
-        "type": "object"
-      }
-    },
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "properties": {
-      "model_id": {
-        "type": "string"
-      },
-      "vetoes": {
-        "items": {
-          "properties": {
-            "author": {
-              "type": "string"
-            },
-            "count": {
-              "minimum": 1,
-              "type": "integer"
-            },
-            "first": {
-              "description": "Epoch seconds.",
-              "type": "number"
-            },
-            "hash": {
-              "type": "string"
-            },
-            "id": {
-              "type": "string"
-            },
-            "key": {
-              "type": "string"
-            },
-            "latest": {
-              "description": "Epoch seconds.",
-              "type": "number"
-            },
-            "outcome": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "parts": {
-              "description": "The thing's key parts as written, in the spec's order. Only in a model with key parts, and only when the reader may see them.",
-              "type": "array"
-            },
-            "probability": {
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            },
-            "score": {
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            },
-            "sim": {
-              "type": "number"
-            },
-            "tree": {
-              "$ref": "#/$defs/fact"
-            },
-            "ts": {
-              "description": "Epoch seconds.",
-              "type": "number"
-            }
-          },
-          "required": [
-            "id",
-            "key",
-            "outcome",
-            "probability",
-            "score",
-            "sim",
-            "count",
-            "first",
-            "latest",
-            "author",
-            "ts",
-            "hash",
-            "tree"
-          ],
-          "type": "object"
-        },
-        "type": "array"
-      },
-      "wins": {
-        "items": {
-          "properties": {
-            "author": {
-              "type": "string"
-            },
-            "count": {
-              "minimum": 1,
-              "type": "integer"
-            },
-            "first": {
-              "description": "Epoch seconds.",
-              "type": "number"
-            },
-            "hash": {
-              "type": "string"
-            },
-            "id": {
-              "type": "string"
-            },
-            "key": {
-              "type": "string"
-            },
-            "latest": {
-              "description": "Epoch seconds.",
-              "type": "number"
-            },
-            "outcome": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "parts": {
-              "description": "The thing's key parts as written, in the spec's order. Only in a model with key parts, and only when the reader may see them.",
-              "type": "array"
-            },
-            "probability": {
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            },
-            "score": {
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            },
-            "sim": {
-              "type": "number"
-            },
-            "tree": {
-              "$ref": "#/$defs/fact"
-            },
-            "ts": {
-              "description": "Epoch seconds.",
-              "type": "number"
-            }
-          },
-          "required": [
-            "id",
-            "key",
-            "outcome",
-            "probability",
-            "score",
-            "sim",
-            "count",
-            "first",
-            "latest",
-            "author",
-            "ts",
-            "hash",
-            "tree"
-          ],
-          "type": "object"
-        },
-        "type": "array"
-      }
-    },
-    "required": [
-      "model_id",
-      "wins",
-      "vetoes"
-    ],
-    "title": "ada_facts",
-    "type": "object"
-  },
-  "gql": {
-    "$defs": {
-      "fact": {
-        "properties": {
-          "children": {
-            "items": {
-              "$ref": "#/$defs/fact"
-            },
-            "type": "array"
-          },
-          "key": {
-            "type": "string"
-          },
-          "match": {
-            "description": "At a leaf both sides carry: how the two values compare. partial is two sets or texts that share some of their items; near is two numbers some bins apart on one scale.",
-            "enum": [
-              "same",
-              "lexical",
-              "partial",
-              "near",
-              "different"
-            ]
-          },
-          "score": {
-            "maximum": 1,
-            "minimum": 0,
-            "type": "number"
-          },
-          "share": {
-            "maximum": 1,
-            "minimum": 0,
-            "type": "number"
-          },
-          "sim": {
-            "type": "number"
-          },
-          "status": {
-            "enum": [
-              "both",
-              "query_only",
-              "record_only"
-            ]
-          },
-          "weight": {
-            "minimum": 0,
-            "type": "number"
-          }
-        },
-        "required": [
-          "key",
-          "weight",
-          "score",
-          "share",
-          "sim",
-          "status"
-        ],
-        "type": "object"
-      }
-    },
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "allOf": [
-      {
-        "if": {
-          "properties": {
-            "statement": {
-              "const": "find"
-            }
-          },
-          "required": [
-            "statement"
-          ]
-        },
-        "then": {
-          "properties": {
-            "count": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "level": {
-              "description": "cortex, or the path of a layer, a segment or a role.",
-              "type": "string"
-            },
-            "matches": {
-              "description": "Nearest first, one per situation and outcome.",
-              "items": {
-                "properties": {
-                  "count": {
-                    "minimum": 1,
-                    "type": "integer"
-                  },
-                  "first": {
-                    "description": "Epoch seconds.",
-                    "type": "number"
-                  },
-                  "id": {
-                    "type": "string"
-                  },
-                  "key": {
-                    "type": "string"
-                  },
-                  "latest": {
-                    "description": "Epoch seconds.",
-                    "type": "number"
-                  },
-                  "outcome": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "parts": {
-                    "description": "The thing's key parts as written, in the spec's order. Only in a model with key parts, and only when the reader may see them.",
-                    "type": "array"
-                  },
-                  "score": {
-                    "maximum": 1,
-                    "minimum": 0,
-                    "type": "number"
-                  },
-                  "store": {
-                    "enum": [
-                      "wins",
-                      "vetoes"
-                    ]
-                  }
-                },
-                "required": [
-                  "key",
-                  "id",
-                  "store",
-                  "outcome",
-                  "score",
-                  "count",
-                  "first",
-                  "latest"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            },
-            "threshold": {
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            }
-          },
-          "required": [
-            "level",
-            "threshold",
-            "count",
-            "matches"
-          ]
-        }
-      },
-      {
-        "if": {
-          "properties": {
-            "statement": {
-              "const": "list"
-            }
-          },
-          "required": [
-            "statement"
-          ]
-        },
-        "then": {
-          "properties": {
-            "count": {
-              "description": "How many records the condition holds for, before LIMIT.",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "records": {
-              "description": "Newest first.",
-              "items": {
-                "required": [
-                  "key",
-                  "id",
-                  "store",
-                  "outcome",
-                  "author",
-                  "ts",
-                  "data"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "count",
-            "records"
-          ]
-        }
-      },
-      {
-        "if": {
-          "properties": {
-            "statement": {
-              "const": "count"
-            }
-          },
-          "required": [
-            "statement"
-          ]
-        },
-        "then": {
-          "properties": {
-            "count": {
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "count"
-          ]
-        }
-      },
-      {
-        "if": {
-          "properties": {
-            "statement": {
-              "const": "compare"
-            }
-          },
-          "required": [
-            "statement"
-          ]
-        },
-        "then": {
-          "properties": {
-            "level": {
-              "description": "cortex, or the path of a layer, a segment or a role.",
-              "type": "string"
-            },
-            "score": {
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            },
-            "tree": {
-              "$ref": "#/$defs/fact"
-            }
-          },
-          "required": [
-            "level",
-            "score",
-            "tree"
-          ]
-        }
-      },
-      {
-        "if": {
-          "properties": {
-            "statement": {
-              "const": "drift"
-            }
-          },
-          "required": [
-            "statement"
-          ]
-        },
-        "then": {
-          "properties": {
-            "changes": {
-              "items": {
-                "description": "One role that differs between two versions of a thing. A side that does not carry the role is null.",
-                "properties": {
-                  "from": {},
-                  "path": {
-                    "description": "layer.segment.role",
-                    "type": "string"
-                  },
-                  "score": {
-                    "description": "How close the two values are. 0 for two different categories.",
-                    "maximum": 1,
-                    "minimum": 0,
-                    "type": "number"
-                  },
-                  "to": {}
-                },
-                "required": [
-                  "path",
-                  "from",
-                  "to",
-                  "score"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            },
-            "drift": {
-              "description": "1 - the two things' score at the level.",
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            },
-            "drifted": {
-              "description": "drift > threshold. Null when no THRESHOLD was given.",
-              "type": [
-                "boolean",
-                "null"
-              ]
-            },
-            "level": {
-              "description": "cortex, or the path of a layer, a segment or a role.",
-              "type": "string"
-            },
-            "threshold": {
-              "type": [
-                "number",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "level",
-            "drift",
-            "threshold",
-            "drifted",
-            "changes"
-          ]
-        }
-      },
-      {
-        "if": {
-          "properties": {
-            "statement": {
-              "const": "introspect"
-            }
-          },
-          "required": [
-            "statement"
-          ]
-        },
-        "then": {
-          "properties": {
-            "by": {
-              "enum": [
-                "layer",
-                "segment",
-                "role"
-              ]
-            },
-            "parts": {
-              "items": {
-                "required": [
-                  "path",
-                  "weight",
-                  "value"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "by",
-            "parts"
-          ]
-        }
-      },
-      {
-        "if": {
-          "properties": {
-            "statement": {
-              "const": "trend"
-            }
-          },
-          "required": [
-            "statement"
-          ]
-        },
-        "then": {
-          "properties": {
-            "alert": {
-              "properties": {
-                "fired": {
-                  "type": "boolean"
-                },
-                "on": {
-                  "type": "string"
-                },
-                "value": {
-                  "type": "number"
-                }
-              },
-              "required": [
-                "on",
-                "value",
-                "fired"
-              ],
-              "type": [
-                "object",
-                "null"
-              ]
-            },
-            "level": {
-              "description": "cortex, or the path of a layer, a segment or a role.",
-              "type": "string"
-            },
-            "over": {
-              "description": "The window, in seconds.",
-              "type": "number"
-            }
-          },
-          "required": [
-            "key",
-            "level",
-            "over",
-            "versions",
-            "drift",
-            "pace",
-            "period",
-            "roles",
-            "alert"
-          ]
-        }
-      },
-      {
-        "if": {
-          "properties": {
-            "statement": {
-              "const": "predict"
-            }
-          },
-          "required": [
-            "statement"
-          ]
-        },
-        "then": {
-          "properties": {},
-          "required": [
-            "key",
-            "versions",
-            "at",
-            "data",
-            "roles",
-            "answer"
-          ]
-        }
-      },
-      {
-        "if": {
-          "properties": {
-            "statement": {
-              "const": "follow"
-            }
-          },
-          "required": [
-            "statement"
-          ]
-        },
-        "then": {
-          "properties": {
-            "count": {
-              "description": "The things reached that the condition holds for, before LIMIT.",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "depth": {
-              "minimum": 1,
-              "type": "integer"
-            },
-            "direction": {
-              "enum": [
-                "out",
-                "in",
-                "both"
-              ]
-            },
-            "edges": {
-              "description": "Every relation the walk went along.",
-              "items": {
-                "description": "One relation: the thing that has the ref role, the role's path, and the thing it names.",
-                "properties": {
-                  "from": {
-                    "required": [
-                      "model_id",
-                      "key"
-                    ],
-                    "type": "object"
-                  },
-                  "missing": {
-                    "description": "True when the relation names a thing that is not on record.",
-                    "type": "boolean"
-                  },
-                  "relation": {
-                    "description": "The ref role's path: layer.segment.role.",
-                    "type": "string"
-                  },
-                  "to": {
-                    "properties": {
-                      "key": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "model_id": {
-                        "type": "string"
-                      },
-                      "parts": {
-                        "type": "array"
-                      }
-                    },
-                    "required": [
-                      "model_id",
-                      "key",
-                      "parts"
-                    ],
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "from",
-                  "relation",
-                  "to",
-                  "missing"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            },
-            "from": {
-              "description": "A thing: the model it is in, its key there, and its newest version as the reader may see it.",
-              "properties": {
-                "data": {
-                  "type": "object"
-                },
-                "hops": {
-                  "minimum": 1,
-                  "type": "integer"
-                },
-                "id": {
-                  "type": "string"
-                },
-                "key": {
-                  "type": "string"
-                },
-                "missing": {
-                  "type": "boolean"
-                },
-                "model_id": {
-                  "type": "string"
-                },
-                "outcome": {
-                  "type": "string"
-                },
-                "store": {
-                  "enum": [
-                    "wins",
-                    "vetoes"
-                  ]
-                },
-                "ts": {
-                  "description": "Epoch seconds.",
-                  "type": "number"
-                }
-              },
-              "required": [
-                "model_id",
-                "key",
-                "missing"
-              ],
-              "type": "object"
-            },
-            "nodes": {
-              "description": "Nearest first: by how many relations away, then in a fixed order.",
-              "items": {
-                "description": "A thing: the model it is in, its key there, and its newest version as the reader may see it.",
-                "properties": {
-                  "data": {
-                    "type": "object"
-                  },
-                  "hops": {
-                    "minimum": 1,
-                    "type": "integer"
-                  },
-                  "id": {
-                    "type": "string"
-                  },
-                  "key": {
-                    "type": "string"
-                  },
-                  "missing": {
-                    "type": "boolean"
-                  },
-                  "model_id": {
-                    "type": "string"
-                  },
-                  "outcome": {
-                    "type": "string"
-                  },
-                  "store": {
-                    "enum": [
-                      "wins",
-                      "vetoes"
-                    ]
-                  },
-                  "ts": {
-                    "description": "Epoch seconds.",
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "model_id",
-                  "key",
-                  "missing",
-                  "hops"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            },
-            "truncated": {
-              "description": "True when the walk stopped at its limit of things before the depth.",
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "from",
-            "direction",
-            "depth",
-            "count",
-            "nodes",
-            "edges",
-            "truncated"
-          ]
-        }
-      },
-      {
-        "if": {
-          "properties": {
-            "statement": {
-              "const": "path"
-            }
-          },
-          "required": [
-            "statement"
-          ]
-        },
-        "then": {
-          "properties": {
-            "edges": {
-              "description": "The relations between them, in order.",
-              "items": {
-                "description": "One relation: the thing that has the ref role, the role's path, and the thing it names.",
-                "properties": {
-                  "from": {
-                    "required": [
-                      "model_id",
-                      "key"
-                    ],
-                    "type": "object"
-                  },
-                  "missing": {
-                    "description": "True when the relation names a thing that is not on record.",
-                    "type": "boolean"
-                  },
-                  "relation": {
-                    "description": "The ref role's path: layer.segment.role.",
-                    "type": "string"
-                  },
-                  "to": {
-                    "properties": {
-                      "key": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "model_id": {
-                        "type": "string"
-                      },
-                      "parts": {
-                        "type": "array"
-                      }
-                    },
-                    "required": [
-                      "model_id",
-                      "key",
-                      "parts"
-                    ],
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "from",
-                  "relation",
-                  "to",
-                  "missing"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            },
-            "found": {
-              "type": "boolean"
-            },
-            "hops": {
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "nodes": {
-              "description": "The things on the path, in order.",
-              "items": {
-                "description": "A thing: the model it is in, its key there, and its newest version as the reader may see it.",
-                "properties": {
-                  "data": {
-                    "type": "object"
-                  },
-                  "hops": {
-                    "minimum": 1,
-                    "type": "integer"
-                  },
-                  "id": {
-                    "type": "string"
-                  },
-                  "key": {
-                    "type": "string"
-                  },
-                  "missing": {
-                    "type": "boolean"
-                  },
-                  "model_id": {
-                    "type": "string"
-                  },
-                  "outcome": {
-                    "type": "string"
-                  },
-                  "store": {
-                    "enum": [
-                      "wins",
-                      "vetoes"
-                    ]
-                  },
-                  "ts": {
-                    "description": "Epoch seconds.",
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "model_id",
-                  "key",
-                  "missing"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "found",
-            "hops",
-            "direction",
-            "depth",
-            "nodes",
-            "edges"
-          ]
-        }
-      },
-      {
-        "if": {
-          "properties": {
-            "statement": {
-              "const": "aggregate"
-            }
-          },
-          "required": [
-            "statement"
-          ]
-        },
-        "then": {
-          "properties": {
-            "function": {
-              "enum": [
-                "count",
-                "avg",
-                "min",
-                "max",
-                "sum"
-              ]
-            },
-            "groups": {
-              "items": {
-                "properties": {
-                  "by": {
-                    "type": "object"
-                  },
-                  "count": {
-                    "minimum": 1,
-                    "type": "integer"
-                  },
-                  "value": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "by",
-                  "value",
-                  "count"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            },
-            "path": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "function",
-            "path",
-            "groups"
-          ]
-        }
-      }
-    ],
-    "description": "What one GQL statement returns. `statement` says which, and which of the other fields are there.",
-    "properties": {
-      "cached": {
-        "description": "True when this is the answer given before, and nothing it stood on has changed.",
-        "type": "boolean"
-      },
-      "model_id": {
-        "type": "string"
-      },
-      "procedure": {
-        "description": "The stored procedure that was called, when one was.",
-        "type": "string"
-      },
-      "statement": {
-        "enum": [
-          "find",
-          "list",
-          "count",
-          "compare",
-          "drift",
-          "introspect",
-          "trend",
-          "predict",
-          "aggregate",
-          "follow",
-          "path"
-        ]
-      }
-    },
-    "required": [
-      "statement",
-      "model_id",
-      "cached"
-    ],
-    "title": "ada_gql",
-    "type": "object"
-  },
-  "history": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "properties": {
-      "count": {
-        "minimum": 0,
-        "type": "integer"
-      },
-      "first": {
-        "type": [
-          "number",
-          "null"
-        ]
-      },
-      "key": {
-        "type": "string"
-      },
-      "latest": {
-        "type": [
-          "number",
-          "null"
-        ]
-      },
-      "model_id": {
-        "type": "string"
-      },
-      "observations": {
-        "description": "Oldest first.",
-        "items": {
-          "properties": {
-            "author": {
-              "type": "string"
-            },
-            "change": {
-              "description": "How far this version is from the one before: 1 - their score.",
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            },
-            "changes": {
-              "description": "What differs from the version before.",
-              "items": {
-                "description": "One role that differs between two versions of a thing. A side that does not carry the role is null.",
-                "properties": {
-                  "from": {},
-                  "path": {
-                    "description": "layer.segment.role",
-                    "type": "string"
-                  },
-                  "score": {
-                    "description": "How close the two values are. 0 for two different categories.",
-                    "maximum": 1,
-                    "minimum": 0,
-                    "type": "number"
-                  },
-                  "to": {}
-                },
-                "required": [
-                  "path",
-                  "from",
-                  "to",
-                  "score"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            },
-            "data": {
-              "description": "The version as it was recorded.",
-              "type": "object"
-            },
-            "id": {
-              "type": "string"
-            },
-            "outcome": {
-              "type": "string"
-            },
-            "store": {
-              "enum": [
-                "wins",
-                "vetoes"
-              ]
-            },
-            "ts": {
-              "description": "Epoch seconds.",
-              "type": "number"
-            },
-            "version": {
-              "description": "In a model with key parts: which version of the thing.",
-              "minimum": 1,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "id",
-            "store",
-            "outcome",
-            "author",
-            "ts"
-          ],
-          "type": "object"
-        },
-        "type": "array"
-      }
-    },
-    "required": [
-      "model_id",
-      "key",
-      "count",
-      "first",
-      "latest",
-      "observations"
-    ],
-    "title": "ada_history",
-    "type": "object"
-  },
-  "ops": {
-    "calibrate": {
-      "description": "Fit an Ada model's probabilities to its own records (needs 10+ wins); saved with the model.",
-      "input": {
-        "properties": {
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "weights": {
-            "description": "How much each key decides, mirroring the situation: {\"risk\": 1, \"team\": 0.1, \"plan\": {\"*\": 2, \"owner\": 0}}. A number weighs a key; an object weighs inside it, its own weight under \"*\". Unlisted keys weigh 1. \"~all\": true inside an object makes its keys decide together: all have to agree. Defaults to the model's.",
-            "type": "object"
-          }
-        },
-        "required": [
-          "model_id"
-        ],
-        "type": "object"
-      }
-    },
-    "call": {
-      "description": "Run a stored procedure of an Ada model: a GQL statement saved under a name, with its $parameters given in `args`. The answer is the statement's, with `cached` true when nothing it stood on has changed since it was last asked.",
-      "input": {
-        "properties": {
-          "args": {
-            "description": "The statement's $parameters, by name: {\"min\": 5, \"stage\": \"closed\"}.",
-            "type": "object"
-          },
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "name": {
-            "description": "The procedure's name: a letter, then letters, digits and _.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "model_id",
-          "name"
-        ],
-        "type": "object"
-      }
-    },
-    "check": {
-      "description": "How close the nearest recorded win and failure of THIS outcome are to this situation.",
-      "input": {
-        "properties": {
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "outcome": {
-            "description": "The approach or answer, as a short label.",
-            "type": "string"
-          },
-          "situation": {
-            "description": "What the decision is about. For a flat model, JSON of any shape: only attributes that should decide; ids and timestamps poison recall; arrays are sets. For a typed model, data in its spec's shape (layer > segment > role); ada_contract with the model_id returns that shape as JSON Schema.",
-            "type": "object"
-          },
-          "weights": {
-            "description": "How much each key decides, mirroring the situation: {\"risk\": 1, \"team\": 0.1, \"plan\": {\"*\": 2, \"owner\": 0}}. A number weighs a key; an object weighs inside it, its own weight under \"*\". Unlisted keys weigh 1. \"~all\": true inside an object makes its keys decide together: all have to agree. Defaults to the model's.",
-            "type": "object"
-          }
-        },
-        "required": [
-          "model_id",
-          "situation",
-          "outcome"
-        ],
-        "type": "object"
-      }
-    },
-    "contract": {
-      "description": "What Ada's reads return, as JSON Schema, and what each `reason` means. With a typed model's model_id, also the shape of its data: what to send it. For software that calls a model with no agent in the path.",
-      "input": {
-        "properties": {
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          }
-        },
-        "required": [],
-        "type": "object"
-      }
-    },
-    "create_model": {
-      "description": "Create an Ada model (org admins). storage \"cloud\" keeps its records with Glyphh; \"local\" keeps them on a registered device, and needs that device_id (register a device with `glyphh ada register`; list them with ada_devices).",
-      "input": {
-        "properties": {
-          "device_id": {
-            "description": "Required for local storage (dev_\u2026).",
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "spec": {
-            "description": "Makes the model typed: {\"name\", \"layers\": [{\"name\", \"segments\": [{\"name\", \"roles\": [role]}]}], \"temporal_source\": \"layer.segment.role\"}. A role is {\"name\", \"type\": category | set | number | text | boolean | time, \"values\": [what a category or set may hold], \"numeric_config\": {\"min_value\", \"max_value\", \"bin_width\"} for a number, \"text_encoding\": bag_of_words | ngrams for text, \"key_part\": true for the roles that are a record's identity, \"similarity_weight\" and \"security_weight\" from 0 to 1}. A role of type ref is a relation to another thing: its value is that thing's key part (\"many\": true takes a list), \"to\": \"am_\u2026\" points into another model, \"strict\": true refuses a record that names a thing not on record. Layers and segments take the two weights too, and a segment with \"together\": true scores its roles as one: all have to agree. Every record and question is then checked against it, and records sharing their key parts are versions of one thing.",
-            "type": "object"
-          },
-          "storage": {
-            "enum": [
-              "cloud",
-              "local"
-            ],
-            "type": "string"
-          },
-          "weights": {
-            "description": "How much each key decides, mirroring the situation: {\"risk\": 1, \"team\": 0.1, \"plan\": {\"*\": 2, \"owner\": 0}}. A number weighs a key; an object weighs inside it, its own weight under \"*\". Unlisted keys weigh 1. \"~all\": true inside an object makes its keys decide together: all have to agree. Defaults to the model's.",
-            "type": "object"
-          }
-        },
-        "required": [
-          "name",
-          "storage"
-        ],
-        "type": "object"
-      }
-    },
-    "delete_model": {
-      "description": "Delete an Ada model and its records, wherever they live (org admins).",
-      "input": {
-        "properties": {
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "model_id"
-        ],
-        "type": "object"
-      }
-    },
-    "delete_procedure": {
-      "description": "Delete a stored procedure (org admins).",
-      "input": {
-        "properties": {
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "name": {
-            "description": "The procedure's name: a letter, then letters, digits and _.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "model_id",
-          "name"
-        ],
-        "type": "object"
-      }
-    },
-    "delete_record": {
-      "description": "Delete one record (org admins).",
-      "input": {
-        "properties": {
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "record_id": {
-            "description": "A record's id (from ada_records or a receipt).",
-            "type": "string"
-          }
-        },
-        "required": [
-          "model_id",
-          "record_id"
-        ],
-        "type": "object"
-      }
-    },
-    "devices": {
-      "description": "The organization's registered devices that can hold local models' records, and whether each is online.",
-      "input": {
-        "properties": {},
-        "required": [],
-        "type": "object"
-      }
-    },
-    "edges": {
-      "description": "One thing's edges: at a level, the things nearest it there (neural) and the change between each of its versions and the next (temporal); and the relations its ref roles make and the ones that name it (relations). The level is cortex (the whole, the default) or the path of a layer, a segment or a role.",
-      "input": {
-        "properties": {
-          "level": {
-            "description": "cortex, or layer, layer.segment or layer.segment.role.",
-            "type": "string"
-          },
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "situation": {
-            "description": "What the decision is about. For a flat model, JSON of any shape: only attributes that should decide; ids and timestamps poison recall; arrays are sets. For a typed model, data in its spec's shape (layer > segment > role); ada_contract with the model_id returns that shape as JSON Schema.",
-            "type": "object"
-          },
-          "top": {
-            "description": "Neural edges to return (default 5).",
-            "maximum": 50,
-            "minimum": 1,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "model_id",
-          "situation"
-        ],
-        "type": "object"
-      }
-    },
-    "edit_record": {
-      "description": "Correct a record's situation or outcome (org admins).",
-      "input": {
-        "properties": {
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "outcome": {
-            "description": "The approach or answer, as a short label.",
-            "type": "string"
-          },
-          "record_id": {
-            "description": "A record's id (from ada_records or a receipt).",
-            "type": "string"
-          },
-          "situation": {
-            "description": "What the decision is about. For a flat model, JSON of any shape: only attributes that should decide; ids and timestamps poison recall; arrays are sets. For a typed model, data in its spec's shape (layer > segment > role); ada_contract with the model_id returns that shape as JSON Schema.",
-            "type": "object"
-          }
-        },
-        "required": [
-          "model_id",
-          "record_id"
-        ],
-        "type": "object"
-      }
-    },
-    "facts": {
-      "description": "Why, not just what: the nearest situations among the wins and vetoes, each explained against this one as a fact tree (per key its score, weight, share and whether the two values are the same, lexically close or different), with how often and when it was recorded, its citation and the probability of its outcome.",
-      "input": {
-        "properties": {
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "situation": {
-            "description": "What the decision is about. For a flat model, JSON of any shape: only attributes that should decide; ids and timestamps poison recall; arrays are sets. For a typed model, data in its spec's shape (layer > segment > role); ada_contract with the model_id returns that shape as JSON Schema.",
-            "type": "object"
-          },
-          "top": {
-            "description": "Records per store (default 3).",
-            "maximum": 50,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "weights": {
-            "description": "How much each key decides, mirroring the situation: {\"risk\": 1, \"team\": 0.1, \"plan\": {\"*\": 2, \"owner\": 0}}. A number weighs a key; an object weighs inside it, its own weight under \"*\". Unlisted keys weigh 1. \"~all\": true inside an object makes its keys decide together: all have to agree. Defaults to the model's.",
-            "type": "object"
-          }
-        },
-        "required": [
-          "model_id",
-          "situation"
-        ],
-        "type": "object"
-      }
-    },
-    "gql": {
-      "description": "Run one GQL statement against an Ada model. FIND SIMILAR TO (data | glyph) [AT level] [WHERE condition] [LIMIT n] [THRESHOLD x]; LIST ALL [WHERE condition] [LIMIT n]; COUNT ALL [WHERE condition]; COMPARE glyph TO glyph [AT level]; DETECT DRIFT FROM glyph TO glyph [AT level] [THRESHOLD x]; INTROSPECT glyph DECOMPOSE BY LAYER|SEGMENT|ROLE; TREND glyph OVER 30d [AT level] [ALERT ON drift > 0.3]; PREDICT glyph [AT ROLE path] [WINDOW 7d]; AGGREGATE COUNT|AVG|MIN|MAX|SUM [path] [WHERE condition] [GROUP BY path, ...]; FOLLOW glyph [OUT|IN|BOTH] [VIA path, ...] [DEPTH n] [WHERE condition] [LIMIT n] walks the relations a thing's ref roles make; PATH FROM glyph TO glyph [OUT|IN|BOTH] [VIA path, ...] [DEPTH n] finds the shortest chain between two things. A level is CORTEX, LAYER a, SEGMENT a.b or ROLE a.b.c. glyph(\"d1\") is a thing by its key parts, glyph(\"d1@2\") its second version. A condition compares a path with = != < > <= >=, joined by AND, OR, NOT; outcome, store and ts are paths too.",
-      "input": {
-        "properties": {
-          "args": {
-            "description": "The statement's $parameters, by name: {\"min\": 5, \"stage\": \"closed\"}.",
-            "type": "object"
-          },
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "query": {
-            "description": "One GQL statement.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "model_id",
-          "query"
-        ],
-        "type": "object"
-      }
-    },
-    "history": {
-      "description": "Every record of exactly this situation in an Ada model, wins and failures, oldest first: what was seen, and when. In a typed model with key parts: every version of the thing they name, each with the roles that changed since the one before.",
-      "input": {
-        "properties": {
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "situation": {
-            "description": "What the decision is about. For a flat model, JSON of any shape: only attributes that should decide; ids and timestamps poison recall; arrays are sets. For a typed model, data in its spec's shape (layer > segment > role); ada_contract with the model_id returns that shape as JSON Schema.",
-            "type": "object"
-          }
-        },
-        "required": [
-          "model_id",
-          "situation"
-        ],
-        "type": "object"
-      }
-    },
-    "learn": {
-      "description": "Learn which keys decide from an Ada model's own wins (needs 10+), then fit its probabilities: saves the model's default weights and returns how often it predicts its own held-out records, before and after (org admins).",
-      "input": {
-        "properties": {
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "model_id"
-        ],
-        "type": "object"
-      }
-    },
-    "models": {
-      "description": "The organization's Ada models: id, name, where their records live, calibration. With model_id, that model and its record counts.",
-      "input": {
-        "properties": {
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          }
-        },
-        "required": [],
-        "type": "object"
-      }
-    },
-    "predict": {
-      "description": "The next version of one thing in a typed, keyed Ada model, and what the model answers for it: each number goes where its line through time goes, each category where it went from its present value before (in this thing's own history, else in the model's), and every role says what it stands on. Needs two versions.",
-      "input": {
-        "properties": {
-          "at": {
-            "description": "The time to predict for. One usual step after the latest version when left out.",
-            "type": [
-              "number",
-              "string"
-            ]
-          },
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "situation": {
-            "description": "The thing to follow, as data in the model's shape carrying at least its key_part roles.",
-            "type": "object"
-          }
-        },
-        "required": [
-          "model_id",
-          "situation"
-        ],
-        "type": "object"
-      }
-    },
-    "procedures": {
-      "description": "An Ada model's stored procedures: each one's name, statement, description and the parameters it takes.",
-      "input": {
-        "properties": {
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "model_id"
-        ],
-        "type": "object"
-      }
-    },
-    "query": {
-      "description": "Ask an Ada model what worked in situations like this one: the top outcome with confidence, the situations on record behind it, what the situation carries that was never recorded (`unseen`), and `act`: true when the records back the outcome, nothing in the situation is unseen and no newer failure stands against it. `reason` says why `act` is false.",
-      "input": {
-        "properties": {
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "situation": {
-            "description": "What the decision is about. For a flat model, JSON of any shape: only attributes that should decide; ids and timestamps poison recall; arrays are sets. For a typed model, data in its spec's shape (layer > segment > role); ada_contract with the model_id returns that shape as JSON Schema.",
-            "type": "object"
-          },
-          "weights": {
-            "description": "How much each key decides, mirroring the situation: {\"risk\": 1, \"team\": 0.1, \"plan\": {\"*\": 2, \"owner\": 0}}. A number weighs a key; an object weighs inside it, its own weight under \"*\". Unlisted keys weigh 1. \"~all\": true inside an object makes its keys decide together: all have to agree. Defaults to the model's.",
-            "type": "object"
-          }
-        },
-        "required": [
-          "model_id",
-          "situation"
-        ],
-        "type": "object"
-      }
-    },
-    "record": {
-      "description": "Record a graded WIN in an Ada model: this outcome worked in this situation. Only once the outcome is known. In a typed model with key parts the record is a new version of the thing they name.",
-      "input": {
-        "properties": {
-          "at": {
-            "description": "When the outcome happened, as epoch seconds or an ISO 8601 time. Now when left out; set it when loading past records.",
-            "type": [
-              "number",
-              "string"
-            ]
-          },
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "outcome": {
-            "description": "The approach or answer, as a short label.",
-            "type": "string"
-          },
-          "situation": {
-            "description": "What the decision is about. For a flat model, JSON of any shape: only attributes that should decide; ids and timestamps poison recall; arrays are sets. For a typed model, data in its spec's shape (layer > segment > role); ada_contract with the model_id returns that shape as JSON Schema.",
-            "type": "object"
-          }
-        },
-        "required": [
-          "model_id",
-          "situation",
-          "outcome"
-        ],
-        "type": "object"
-      }
-    },
-    "records": {
-      "description": "Browse an Ada model's records, newest first.",
-      "input": {
-        "properties": {
-          "limit": {
-            "maximum": 500,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "offset": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "store": {
-            "enum": [
-              "wins",
-              "vetoes"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "model_id"
-        ],
-        "type": "object"
-      }
-    },
-    "save_procedure": {
-      "description": "Save a stored procedure with an Ada model, new or replaced (org admins): a name and one GQL statement, which may take $parameters where a value is given: in a comparison, a glyph's key part, FIND's target, LIMIT, THRESHOLD and DEPTH. The statement is checked now, so a procedure on record is one that runs.",
-      "input": {
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "name": {
-            "description": "The procedure's name: a letter, then letters, digits and _.",
-            "type": "string"
-          },
-          "query": {
-            "description": "One GQL statement.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "model_id",
-          "name",
-          "query"
-        ],
-        "type": "object"
-      }
-    },
-    "trend": {
-      "description": "Where one thing in a typed, keyed Ada model has been going: how far it has moved since its first version (`drift`), how much per step (`pace`), after how many steps it repeats (`period`), and per role its slope per day (a number) or how often and when it last changed (anything else).",
-      "input": {
-        "properties": {
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "situation": {
-            "description": "The thing to follow, as data in the model's shape carrying at least its key_part roles.",
-            "type": "object"
-          }
-        },
-        "required": [
-          "model_id",
-          "situation"
-        ],
-        "type": "object"
-      }
-    },
-    "update_model": {
-      "description": "Rename an Ada model, set its default weights, set the similarity ranges its space draws edges in, set its measurement scale (what `act` takes), or set its spec while it has no records (org admins). weights null clears them.",
-      "input": {
-        "properties": {
-          "edges": {
-            "description": "{\"neural\": [low, high], \"semantic\": [low, high]}, each inside 0..1.",
-            "type": "object"
-          },
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "scale": {
-            "description": "What `act` takes for this model; a part left out keeps its default: {\"similarity\": 0.4, \"confidence\": 0.7, \"records\": 3, \"exact\": true, \"must_match\": [], \"unseen\": false}. A record backs an outcome only at `similarity` or closer, it takes `records` of them and `confidence` in the outcome, `exact` lets one identical record stand in for them, a record has to share the situation's value under every `must_match` key to count, and `unseen` true lets the model act on a situation that carries a key or a value none of its wins has recorded.",
-            "type": "object"
-          },
-          "spec": {
-            "description": "Makes the model typed: {\"name\", \"layers\": [{\"name\", \"segments\": [{\"name\", \"roles\": [role]}]}], \"temporal_source\": \"layer.segment.role\"}. A role is {\"name\", \"type\": category | set | number | text | boolean | time, \"values\": [what a category or set may hold], \"numeric_config\": {\"min_value\", \"max_value\", \"bin_width\"} for a number, \"text_encoding\": bag_of_words | ngrams for text, \"key_part\": true for the roles that are a record's identity, \"similarity_weight\" and \"security_weight\" from 0 to 1}. A role of type ref is a relation to another thing: its value is that thing's key part (\"many\": true takes a list), \"to\": \"am_\u2026\" points into another model, \"strict\": true refuses a record that names a thing not on record. Layers and segments take the two weights too, and a segment with \"together\": true scores its roles as one: all have to agree. Every record and question is then checked against it, and records sharing their key parts are versions of one thing.",
-            "type": "object"
-          },
-          "weights": {
-            "type": [
-              "object",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "model_id"
-        ],
-        "type": "object"
-      }
-    },
-    "veto": {
-      "description": "Record a graded FAILURE in an Ada model: this outcome failed, or was rejected, in this situation.",
-      "input": {
-        "properties": {
-          "at": {
-            "description": "When the outcome happened, as epoch seconds or an ISO 8601 time. Now when left out; set it when loading past records.",
-            "type": [
-              "number",
-              "string"
-            ]
-          },
-          "model_id": {
-            "description": "The Ada model to use (am_\u2026). List the organization's models with ada_models.",
-            "type": "string"
-          },
-          "outcome": {
-            "description": "The approach or answer, as a short label.",
-            "type": "string"
-          },
-          "situation": {
-            "description": "What the decision is about. For a flat model, JSON of any shape: only attributes that should decide; ids and timestamps poison recall; arrays are sets. For a typed model, data in its spec's shape (layer > segment > role); ada_contract with the model_id returns that shape as JSON Schema.",
-            "type": "object"
-          }
-        },
-        "required": [
-          "model_id",
-          "situation",
-          "outcome"
-        ],
-        "type": "object"
-      }
-    }
-  },
-  "predict": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "properties": {
-      "answer": {
-        "description": "What ada_query returns for the predicted version, without its key parts.",
-        "properties": {
-          "act": {
-            "description": "Branch on this. True only when `reason` is reflex.",
-            "type": "boolean"
-          },
-          "calibrated": {
-            "type": "boolean"
-          },
-          "confidence": {
-            "description": "The top outcome's share of the vote among the records that clear the floor.",
-            "maximum": 1,
-            "minimum": 0,
-            "type": "number"
-          },
-          "contract": {
-            "const": 2
-          },
-          "count": {
-            "description": "How many records voted.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "exact": {
-            "description": "The same situation is on record. A lexical match is never exact.",
-            "type": "boolean"
-          },
-          "key": {
-            "description": "The queried situation's identity.",
-            "type": "string"
-          },
-          "lifted": {
-            "description": "A close failure exists, and a newer win outranks it.",
-            "type": "boolean"
-          },
-          "model_id": {
-            "type": "string"
-          },
-          "outcomes": {
-            "additionalProperties": {
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            },
-            "type": "object"
-          },
-          "reason": {
-            "description": "Why `act` is what it is.",
-            "enum": [
-              "reflex",
-              "insufficient",
-              "unseen",
-              "vetoed",
-              "uncalibrated",
-              "mismatch",
-              "low_confidence"
-            ]
-          },
-          "receipts": {
-            "description": "The nearest situations on record, nearest first.",
-            "items": {
-              "description": "One situation on record with one outcome, however many times it was recorded.",
-              "properties": {
-                "author": {
-                  "type": "string"
-                },
-                "count": {
-                  "description": "How many times it was recorded.",
-                  "minimum": 1,
-                  "type": "integer"
-                },
-                "first": {
-                  "description": "Epoch seconds.",
-                  "type": "number"
-                },
-                "hash": {
-                  "type": "string"
-                },
-                "id": {
-                  "description": "The newest of those records.",
-                  "type": "string"
-                },
-                "key": {
-                  "description": "The situation's identity: the same for the same data in any key order.",
-                  "type": "string"
-                },
-                "latest": {
-                  "description": "Epoch seconds.",
-                  "type": "number"
-                },
-                "outcome": {
-                  "type": "string"
-                },
-                "parts": {
-                  "description": "The thing's key parts as written, in the spec's order. Only in a model with key parts, and only when the reader may see them.",
-                  "type": "array"
-                },
-                "score": {
-                  "description": "The exact weighted share of the query this situation agrees with. 1 is the same situation.",
-                  "maximum": 1,
-                  "minimum": 0,
-                  "type": "number"
-                },
-                "sim": {
-                  "description": "The same number as `score`, under its earlier name.",
-                  "maximum": 1,
-                  "minimum": 0,
-                  "type": "number"
-                }
-              },
-              "required": [
-                "key",
-                "outcome",
-                "score",
-                "sim",
-                "count",
-                "first",
-                "latest",
-                "id",
-                "hash",
-                "author"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "scale": {
-            "properties": {
-              "confidence": {
-                "maximum": 1,
-                "minimum": 0,
-                "type": "number"
-              },
-              "exact": {
-                "type": "boolean"
-              },
-              "must_match": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "records": {
-                "minimum": 1,
-                "type": "integer"
-              },
-              "similarity": {
-                "maximum": 1,
-                "minimum": 0,
-                "type": "number"
-              },
-              "unseen": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "similarity",
-              "confidence",
-              "records",
-              "exact",
-              "must_match",
-              "unseen"
-            ],
-            "type": "object"
-          },
-          "sufficient": {
-            "description": "Some record clears the model's similarity floor.",
-            "type": "boolean"
-          },
-          "support": {
-            "description": "How close those records are, on average.",
-            "maximum": 1,
-            "minimum": 0,
-            "type": "number"
-          },
-          "top": {
-            "description": "The leading outcome. Null when nothing is close enough.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "unseen": {
-            "description": "What the situation carries that no win has recorded: a key (\"force\") or a value (\"target=main\").",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "veto_match": {
-            "description": "How close the nearest recorded failure of the top outcome is.",
-            "maximum": 1,
-            "minimum": 0,
-            "type": "number"
-          }
-        },
-        "required": [
-          "contract",
-          "model_id",
-          "key",
-          "act",
-          "reason",
-          "top",
-          "sufficient",
-          "exact",
-          "unseen",
-          "confidence",
-          "support",
-          "count",
-          "outcomes",
-          "receipts",
-          "veto_match",
-          "lifted",
-          "calibrated",
-          "scale"
-        ],
-        "type": "object"
-      },
-      "at": {
-        "description": "The time the prediction is for.",
-        "type": "number"
-      },
-      "data": {
-        "description": "The predicted version, in the model's shape.",
-        "type": "object"
-      },
-      "key": {
-        "type": "string"
-      },
-      "model_id": {
-        "type": "string"
-      },
-      "roles": {
-        "additionalProperties": {
-          "properties": {
-            "basis": {
-              "description": "trend: the line through this thing's numbers. own_history: what followed this value in this thing before. model: what followed it in the model's other things. unchanged: nothing says it moves.",
-              "enum": [
-                "trend",
-                "own_history",
-                "model",
-                "unchanged"
-              ]
-            },
-            "confidence": {
-              "description": "trend: how well the line fits. own_history, model: the share of times that value followed. Null when unchanged.",
-              "maximum": 1,
-              "minimum": 0,
-              "type": [
-                "number",
-                "null"
-              ]
-            },
-            "from": {},
-            "to": {}
-          },
-          "required": [
-            "from",
-            "to",
-            "basis",
-            "confidence"
-          ],
-          "type": "object"
-        },
-        "type": "object"
-      },
-      "versions": {
-        "minimum": 2,
-        "type": "integer"
-      }
-    },
-    "required": [
-      "model_id",
-      "key",
-      "versions",
-      "at",
-      "data",
-      "roles",
-      "answer"
-    ],
-    "title": "ada_predict",
-    "type": "object"
+  "reasons": {
+    "reflex": "act: the records back the top outcome and nothing stands against it",
+    "insufficient": "no record is close enough to this situation, or too few of the top outcome are",
+    "unseen": "the situation carries a key or a value no win has recorded; they are listed in `unseen`",
+    "vetoed": "a recorded failure of the top outcome is as close as its wins and newer than them",
+    "uncalibrated": "fewer records than the model's scale takes, and none is the same situation",
+    "mismatch": "the records differ from the situation under a key the model's scale says must match",
+    "low_confidence": "the records disagree on the outcome"
   },
   "query": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "properties": {
-      "act": {
-        "description": "Branch on this. True only when `reason` is reflex.",
-        "type": "boolean"
-      },
-      "calibrated": {
-        "type": "boolean"
-      },
-      "confidence": {
-        "description": "The top outcome's share of the vote among the records that clear the floor.",
-        "maximum": 1,
-        "minimum": 0,
-        "type": "number"
-      },
-      "contract": {
-        "const": 2
-      },
-      "count": {
-        "description": "How many records voted.",
-        "minimum": 0,
-        "type": "integer"
-      },
-      "exact": {
-        "description": "The same situation is on record. A lexical match is never exact.",
-        "type": "boolean"
-      },
-      "key": {
-        "description": "The queried situation's identity.",
-        "type": "string"
-      },
-      "lifted": {
-        "description": "A close failure exists, and a newer win outranks it.",
-        "type": "boolean"
-      },
-      "model_id": {
-        "type": "string"
-      },
-      "outcomes": {
-        "additionalProperties": {
-          "maximum": 1,
-          "minimum": 0,
-          "type": "number"
-        },
-        "type": "object"
-      },
-      "reason": {
-        "description": "Why `act` is what it is.",
-        "enum": [
-          "reflex",
-          "insufficient",
-          "unseen",
-          "vetoed",
-          "uncalibrated",
-          "mismatch",
-          "low_confidence"
-        ]
-      },
-      "receipts": {
-        "description": "The nearest situations on record, nearest first.",
-        "items": {
-          "description": "One situation on record with one outcome, however many times it was recorded.",
-          "properties": {
-            "author": {
-              "type": "string"
-            },
-            "count": {
-              "description": "How many times it was recorded.",
-              "minimum": 1,
-              "type": "integer"
-            },
-            "first": {
-              "description": "Epoch seconds.",
-              "type": "number"
-            },
-            "hash": {
-              "type": "string"
-            },
-            "id": {
-              "description": "The newest of those records.",
-              "type": "string"
-            },
-            "key": {
-              "description": "The situation's identity: the same for the same data in any key order.",
-              "type": "string"
-            },
-            "latest": {
-              "description": "Epoch seconds.",
-              "type": "number"
-            },
-            "outcome": {
-              "type": "string"
-            },
-            "parts": {
-              "description": "The thing's key parts as written, in the spec's order. Only in a model with key parts, and only when the reader may see them.",
-              "type": "array"
-            },
-            "score": {
-              "description": "The exact weighted share of the query this situation agrees with. 1 is the same situation.",
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            },
-            "sim": {
-              "description": "The same number as `score`, under its earlier name.",
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            }
-          },
-          "required": [
-            "key",
-            "outcome",
-            "score",
-            "sim",
-            "count",
-            "first",
-            "latest",
-            "id",
-            "hash",
-            "author"
-          ],
-          "type": "object"
-        },
-        "type": "array"
-      },
-      "scale": {
-        "properties": {
-          "confidence": {
-            "maximum": 1,
-            "minimum": 0,
-            "type": "number"
-          },
-          "exact": {
-            "type": "boolean"
-          },
-          "must_match": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "records": {
-            "minimum": 1,
-            "type": "integer"
-          },
-          "similarity": {
-            "maximum": 1,
-            "minimum": 0,
-            "type": "number"
-          },
-          "unseen": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "similarity",
-          "confidence",
-          "records",
-          "exact",
-          "must_match",
-          "unseen"
-        ],
-        "type": "object"
-      },
-      "sufficient": {
-        "description": "Some record clears the model's similarity floor.",
-        "type": "boolean"
-      },
-      "support": {
-        "description": "How close those records are, on average.",
-        "maximum": 1,
-        "minimum": 0,
-        "type": "number"
-      },
-      "top": {
-        "description": "The leading outcome. Null when nothing is close enough.",
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "unseen": {
-        "description": "What the situation carries that no win has recorded: a key (\"force\") or a value (\"target=main\").",
-        "items": {
-          "type": "string"
-        },
-        "type": "array"
-      },
-      "veto_match": {
-        "description": "How close the nearest recorded failure of the top outcome is.",
-        "maximum": 1,
-        "minimum": 0,
-        "type": "number"
-      }
-    },
+    "title": "ada_query",
+    "type": "object",
     "required": [
       "contract",
       "model_id",
@@ -2541,112 +33,548 @@
       "calibrated",
       "scale"
     ],
-    "title": "ada_query",
-    "type": "object"
-  },
-  "reasons": {
-    "insufficient": "no record is close enough to this situation, or too few of the top outcome are",
-    "low_confidence": "the records disagree on the outcome",
-    "mismatch": "the records differ from the situation under a key the model's scale says must match",
-    "reflex": "act: the records back the top outcome and nothing stands against it",
-    "uncalibrated": "fewer records than the model's scale takes, and none is the same situation",
-    "unseen": "the situation carries a key or a value no win has recorded; they are listed in `unseen`",
-    "vetoed": "a recorded failure of the top outcome is as close as its wins and newer than them"
-  },
-  "trend": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "properties": {
-      "drift": {
-        "description": "How far the latest version is from the first: 1 - their score.",
-        "maximum": 1,
-        "minimum": 0,
-        "type": "number"
-      },
-      "first": {
-        "description": "Epoch seconds.",
-        "type": "number"
-      },
-      "key": {
-        "type": "string"
-      },
-      "latest": {
-        "description": "Epoch seconds.",
-        "type": "number"
+      "contract": {
+        "const": 2
       },
       "model_id": {
         "type": "string"
       },
-      "pace": {
-        "description": "How far one version is from the one before, on average.",
-        "maximum": 1,
-        "minimum": 0,
-        "type": "number"
+      "key": {
+        "type": "string",
+        "description": "The queried situation's identity."
       },
-      "period": {
-        "description": "After how many steps the thing is back where it was, every time. Null when it does not repeat.",
-        "minimum": 2,
+      "act": {
+        "type": "boolean",
+        "description": "Branch on this. True only when `reason` is reflex."
+      },
+      "reason": {
+        "enum": [
+          "reflex",
+          "insufficient",
+          "unseen",
+          "vetoed",
+          "uncalibrated",
+          "mismatch",
+          "low_confidence"
+        ],
+        "description": "Why `act` is what it is."
+      },
+      "top": {
         "type": [
-          "integer",
+          "string",
           "null"
-        ]
+        ],
+        "description": "The leading outcome. Null when nothing is close enough."
       },
-      "roles": {
+      "sufficient": {
+        "type": "boolean",
+        "description": "Some record clears the model's similarity floor."
+      },
+      "exact": {
+        "type": "boolean",
+        "description": "The same situation is on record. A lexical match is never exact."
+      },
+      "unseen": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "What the situation carries that no win has recorded: a key (\"force\") or a value (\"target=main\")."
+      },
+      "confidence": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "The top outcome's share of the vote among the records that clear the floor."
+      },
+      "support": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "How close those records are, on average."
+      },
+      "count": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "How many records voted."
+      },
+      "outcomes": {
+        "type": "object",
         "additionalProperties": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "receipts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "description": "One situation on record with one outcome, however many times it was recorded.",
+          "required": [
+            "key",
+            "outcome",
+            "score",
+            "sim",
+            "count",
+            "first",
+            "latest",
+            "id",
+            "hash",
+            "author"
+          ],
           "properties": {
-            "changes": {
-              "description": "How many times the value changed.",
+            "key": {
+              "type": "string",
+              "description": "The situation's identity: the same for the same data in any key order."
+            },
+            "outcome": {
+              "type": "string"
+            },
+            "score": {
+              "type": "number",
               "minimum": 0,
-              "type": "integer"
-            },
-            "direction": {
-              "enum": [
-                "up",
-                "down",
-                "flat"
-              ]
-            },
-            "first": {},
-            "fit": {
-              "description": "How well a line fits it: 1 is exactly.",
               "maximum": 1,
+              "description": "The exact weighted share of the query this situation agrees with. 1 is the same situation."
+            },
+            "sim": {
+              "type": "number",
               "minimum": 0,
-              "type": [
-                "number",
-                "null"
-              ]
+              "maximum": 1,
+              "description": "The same number as `score`, under its earlier name."
             },
-            "latest": {},
-            "since": {
-              "description": "When it took its latest value.",
-              "type": "number"
+            "count": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "How many times it was recorded."
             },
-            "slope_per_day": {
-              "description": "A number's least-squares slope. Null when its times do not differ.",
-              "type": [
-                "number",
-                "null"
-              ]
+            "first": {
+              "type": "number",
+              "description": "Epoch seconds."
             },
-            "type": {
+            "latest": {
+              "type": "number",
+              "description": "Epoch seconds."
+            },
+            "id": {
+              "type": "string",
+              "description": "The newest of those records."
+            },
+            "hash": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            },
+            "parts": {
+              "type": "array",
+              "description": "The thing's key parts as written, in the spec's order. Only in a model with key parts, and only when the reader may see them."
+            }
+          }
+        },
+        "description": "The nearest situations on record, nearest first."
+      },
+      "veto_match": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "How close the nearest recorded failure of the top outcome is."
+      },
+      "lifted": {
+        "type": "boolean",
+        "description": "A close failure exists, and a newer win outranks it."
+      },
+      "calibrated": {
+        "type": "boolean"
+      },
+      "scale": {
+        "type": "object",
+        "required": [
+          "similarity",
+          "confidence",
+          "records",
+          "exact",
+          "must_match",
+          "unseen"
+        ],
+        "properties": {
+          "similarity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "records": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "exact": {
+            "type": "boolean"
+          },
+          "must_match": {
+            "type": "array",
+            "items": {
               "type": "string"
             }
           },
+          "unseen": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  },
+  "facts": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "ada_facts",
+    "type": "object",
+    "required": [
+      "model_id",
+      "wins",
+      "vetoes"
+    ],
+    "properties": {
+      "model_id": {
+        "type": "string"
+      },
+      "wins": {
+        "type": "array",
+        "items": {
+          "type": "object",
           "required": [
-            "type",
+            "id",
+            "key",
+            "outcome",
+            "probability",
+            "score",
+            "sim",
+            "count",
             "first",
             "latest",
-            "changes",
-            "since"
+            "author",
+            "ts",
+            "hash",
+            "tree"
           ],
-          "type": "object"
-        },
-        "type": "object"
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "outcome": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "probability": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "sim": {
+              "type": "number"
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "first": {
+              "type": "number",
+              "description": "Epoch seconds."
+            },
+            "latest": {
+              "type": "number",
+              "description": "Epoch seconds."
+            },
+            "ts": {
+              "type": "number",
+              "description": "Epoch seconds."
+            },
+            "author": {
+              "type": "string"
+            },
+            "hash": {
+              "type": "string"
+            },
+            "tree": {
+              "$ref": "#/$defs/fact"
+            },
+            "parts": {
+              "type": "array",
+              "description": "The thing's key parts as written, in the spec's order. Only in a model with key parts, and only when the reader may see them."
+            }
+          }
+        }
       },
-      "versions": {
-        "minimum": 1,
-        "type": "integer"
+      "vetoes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "id",
+            "key",
+            "outcome",
+            "probability",
+            "score",
+            "sim",
+            "count",
+            "first",
+            "latest",
+            "author",
+            "ts",
+            "hash",
+            "tree"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "outcome": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "probability": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "sim": {
+              "type": "number"
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "first": {
+              "type": "number",
+              "description": "Epoch seconds."
+            },
+            "latest": {
+              "type": "number",
+              "description": "Epoch seconds."
+            },
+            "ts": {
+              "type": "number",
+              "description": "Epoch seconds."
+            },
+            "author": {
+              "type": "string"
+            },
+            "hash": {
+              "type": "string"
+            },
+            "tree": {
+              "$ref": "#/$defs/fact"
+            },
+            "parts": {
+              "type": "array",
+              "description": "The thing's key parts as written, in the spec's order. Only in a model with key parts, and only when the reader may see them."
+            }
+          }
+        }
       }
     },
+    "$defs": {
+      "fact": {
+        "type": "object",
+        "required": [
+          "key",
+          "weight",
+          "score",
+          "share",
+          "sim",
+          "status"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "number",
+            "minimum": 0
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "share": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "sim": {
+            "type": "number"
+          },
+          "status": {
+            "enum": [
+              "both",
+              "query_only",
+              "record_only"
+            ]
+          },
+          "match": {
+            "enum": [
+              "same",
+              "lexical",
+              "partial",
+              "near",
+              "different"
+            ],
+            "description": "At a leaf both sides carry: how the two values compare. partial is two sets or texts that share some of their items; near is two numbers some bins apart on one scale."
+          },
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/fact"
+            }
+          }
+        }
+      }
+    }
+  },
+  "history": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "ada_history",
+    "type": "object",
+    "required": [
+      "model_id",
+      "key",
+      "count",
+      "first",
+      "latest",
+      "observations"
+    ],
+    "properties": {
+      "model_id": {
+        "type": "string"
+      },
+      "key": {
+        "type": "string"
+      },
+      "count": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "first": {
+        "type": [
+          "number",
+          "null"
+        ]
+      },
+      "latest": {
+        "type": [
+          "number",
+          "null"
+        ]
+      },
+      "observations": {
+        "type": "array",
+        "description": "Oldest first.",
+        "items": {
+          "type": "object",
+          "required": [
+            "id",
+            "store",
+            "outcome",
+            "author",
+            "ts"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "store": {
+              "enum": [
+                "wins",
+                "vetoes"
+              ]
+            },
+            "outcome": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            },
+            "ts": {
+              "type": "number",
+              "description": "Epoch seconds."
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "In a model with key parts: which version of the thing."
+            },
+            "data": {
+              "type": "object",
+              "description": "The version as it was recorded."
+            },
+            "changes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "One role that differs between two versions of a thing. A side that does not carry the role is null.",
+                "required": [
+                  "path",
+                  "from",
+                  "to",
+                  "score"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "layer.segment.role"
+                  },
+                  "from": {},
+                  "to": {},
+                  "score": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How close the two values are. 0 for two different categories."
+                  }
+                }
+              },
+              "description": "What differs from the version before."
+            },
+            "change": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How far this version is from the one before: 1 - their score."
+            }
+          }
+        }
+      }
+    }
+  },
+  "trend": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "ada_trend",
+    "type": "object",
     "required": [
       "model_id",
       "key",
@@ -2658,8 +586,1491 @@
       "period",
       "roles"
     ],
-    "title": "ada_trend",
-    "type": "object"
+    "properties": {
+      "model_id": {
+        "type": "string"
+      },
+      "key": {
+        "type": "string"
+      },
+      "versions": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "first": {
+        "type": "number",
+        "description": "Epoch seconds."
+      },
+      "latest": {
+        "type": "number",
+        "description": "Epoch seconds."
+      },
+      "drift": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "How far the latest version is from the first: 1 - their score."
+      },
+      "pace": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "How far one version is from the one before, on average."
+      },
+      "period": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 2,
+        "description": "After how many steps the thing is back where it was, every time. Null when it does not repeat."
+      },
+      "roles": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "required": [
+            "type",
+            "first",
+            "latest",
+            "changes",
+            "since"
+          ],
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "first": {},
+            "latest": {},
+            "changes": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "How many times the value changed."
+            },
+            "since": {
+              "type": "number",
+              "description": "When it took its latest value."
+            },
+            "slope_per_day": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "A number's least-squares slope. Null when its times do not differ."
+            },
+            "fit": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How well a line fits it: 1 is exactly."
+            },
+            "direction": {
+              "enum": [
+                "up",
+                "down",
+                "flat"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "predict": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "ada_predict",
+    "type": "object",
+    "required": [
+      "model_id",
+      "key",
+      "versions",
+      "at",
+      "data",
+      "roles",
+      "answer"
+    ],
+    "properties": {
+      "model_id": {
+        "type": "string"
+      },
+      "key": {
+        "type": "string"
+      },
+      "versions": {
+        "type": "integer",
+        "minimum": 2
+      },
+      "at": {
+        "type": "number",
+        "description": "The time the prediction is for."
+      },
+      "data": {
+        "type": "object",
+        "description": "The predicted version, in the model's shape."
+      },
+      "roles": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "required": [
+            "from",
+            "to",
+            "basis",
+            "confidence"
+          ],
+          "properties": {
+            "from": {},
+            "to": {},
+            "basis": {
+              "enum": [
+                "trend",
+                "own_history",
+                "model",
+                "unchanged"
+              ],
+              "description": "trend: the line through this thing's numbers. own_history: what followed this value in this thing before. model: what followed it in the model's other things. unchanged: nothing says it moves."
+            },
+            "confidence": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1,
+              "description": "trend: how well the line fits. own_history, model: the share of times that value followed. Null when unchanged."
+            }
+          }
+        }
+      },
+      "answer": {
+        "type": "object",
+        "required": [
+          "contract",
+          "model_id",
+          "key",
+          "act",
+          "reason",
+          "top",
+          "sufficient",
+          "exact",
+          "unseen",
+          "confidence",
+          "support",
+          "count",
+          "outcomes",
+          "receipts",
+          "veto_match",
+          "lifted",
+          "calibrated",
+          "scale"
+        ],
+        "properties": {
+          "contract": {
+            "const": 2
+          },
+          "model_id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string",
+            "description": "The queried situation's identity."
+          },
+          "act": {
+            "type": "boolean",
+            "description": "Branch on this. True only when `reason` is reflex."
+          },
+          "reason": {
+            "enum": [
+              "reflex",
+              "insufficient",
+              "unseen",
+              "vetoed",
+              "uncalibrated",
+              "mismatch",
+              "low_confidence"
+            ],
+            "description": "Why `act` is what it is."
+          },
+          "top": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The leading outcome. Null when nothing is close enough."
+          },
+          "sufficient": {
+            "type": "boolean",
+            "description": "Some record clears the model's similarity floor."
+          },
+          "exact": {
+            "type": "boolean",
+            "description": "The same situation is on record. A lexical match is never exact."
+          },
+          "unseen": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the situation carries that no win has recorded: a key (\"force\") or a value (\"target=main\")."
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The top outcome's share of the vote among the records that clear the floor."
+          },
+          "support": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "How close those records are, on average."
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many records voted."
+          },
+          "outcomes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "receipts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One situation on record with one outcome, however many times it was recorded.",
+              "required": [
+                "key",
+                "outcome",
+                "score",
+                "sim",
+                "count",
+                "first",
+                "latest",
+                "id",
+                "hash",
+                "author"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "The situation's identity: the same for the same data in any key order."
+                },
+                "outcome": {
+                  "type": "string"
+                },
+                "score": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The exact weighted share of the query this situation agrees with. 1 is the same situation."
+                },
+                "sim": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The same number as `score`, under its earlier name."
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "How many times it was recorded."
+                },
+                "first": {
+                  "type": "number",
+                  "description": "Epoch seconds."
+                },
+                "latest": {
+                  "type": "number",
+                  "description": "Epoch seconds."
+                },
+                "id": {
+                  "type": "string",
+                  "description": "The newest of those records."
+                },
+                "hash": {
+                  "type": "string"
+                },
+                "author": {
+                  "type": "string"
+                },
+                "parts": {
+                  "type": "array",
+                  "description": "The thing's key parts as written, in the spec's order. Only in a model with key parts, and only when the reader may see them."
+                }
+              }
+            },
+            "description": "The nearest situations on record, nearest first."
+          },
+          "veto_match": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "How close the nearest recorded failure of the top outcome is."
+          },
+          "lifted": {
+            "type": "boolean",
+            "description": "A close failure exists, and a newer win outranks it."
+          },
+          "calibrated": {
+            "type": "boolean"
+          },
+          "scale": {
+            "type": "object",
+            "required": [
+              "similarity",
+              "confidence",
+              "records",
+              "exact",
+              "must_match",
+              "unseen"
+            ],
+            "properties": {
+              "similarity": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "records": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "exact": {
+                "type": "boolean"
+              },
+              "must_match": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "unseen": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "description": "What ada_query returns for the predicted version, without its key parts."
+      }
+    }
+  },
+  "gql": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "ada_gql",
+    "type": "object",
+    "description": "What one GQL statement returns. `statement` says which, and which of the other fields are there.",
+    "required": [
+      "statement",
+      "model_id",
+      "cached"
+    ],
+    "properties": {
+      "statement": {
+        "enum": [
+          "find",
+          "list",
+          "count",
+          "compare",
+          "drift",
+          "introspect",
+          "trend",
+          "predict",
+          "aggregate",
+          "follow",
+          "path"
+        ]
+      },
+      "model_id": {
+        "type": "string"
+      },
+      "cached": {
+        "type": "boolean",
+        "description": "True when this is the answer given before, and nothing it stood on has changed."
+      },
+      "procedure": {
+        "type": "string",
+        "description": "The stored procedure that was called, when one was."
+      }
+    },
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "statement": {
+              "const": "find"
+            }
+          },
+          "required": [
+            "statement"
+          ]
+        },
+        "then": {
+          "required": [
+            "level",
+            "threshold",
+            "count",
+            "matches"
+          ],
+          "properties": {
+            "level": {
+              "type": "string",
+              "description": "cortex, or the path of a layer, a segment or a role."
+            },
+            "threshold": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "matches": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "key",
+                  "id",
+                  "store",
+                  "outcome",
+                  "score",
+                  "count",
+                  "first",
+                  "latest"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "store": {
+                    "enum": [
+                      "wins",
+                      "vetoes"
+                    ]
+                  },
+                  "outcome": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "score": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "first": {
+                    "type": "number",
+                    "description": "Epoch seconds."
+                  },
+                  "latest": {
+                    "type": "number",
+                    "description": "Epoch seconds."
+                  },
+                  "parts": {
+                    "type": "array",
+                    "description": "The thing's key parts as written, in the spec's order. Only in a model with key parts, and only when the reader may see them."
+                  }
+                }
+              },
+              "description": "Nearest first, one per situation and outcome."
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "statement": {
+              "const": "list"
+            }
+          },
+          "required": [
+            "statement"
+          ]
+        },
+        "then": {
+          "required": [
+            "count",
+            "records"
+          ],
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "How many records the condition holds for, before LIMIT."
+            },
+            "records": {
+              "type": "array",
+              "description": "Newest first.",
+              "items": {
+                "type": "object",
+                "required": [
+                  "key",
+                  "id",
+                  "store",
+                  "outcome",
+                  "author",
+                  "ts",
+                  "data"
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "statement": {
+              "const": "count"
+            }
+          },
+          "required": [
+            "statement"
+          ]
+        },
+        "then": {
+          "required": [
+            "count"
+          ],
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "statement": {
+              "const": "compare"
+            }
+          },
+          "required": [
+            "statement"
+          ]
+        },
+        "then": {
+          "required": [
+            "level",
+            "score",
+            "tree"
+          ],
+          "properties": {
+            "level": {
+              "type": "string",
+              "description": "cortex, or the path of a layer, a segment or a role."
+            },
+            "score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "tree": {
+              "$ref": "#/$defs/fact"
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "statement": {
+              "const": "drift"
+            }
+          },
+          "required": [
+            "statement"
+          ]
+        },
+        "then": {
+          "required": [
+            "level",
+            "drift",
+            "threshold",
+            "drifted",
+            "changes"
+          ],
+          "properties": {
+            "level": {
+              "type": "string",
+              "description": "cortex, or the path of a layer, a segment or a role."
+            },
+            "drift": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "1 - the two things' score at the level."
+            },
+            "threshold": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "drifted": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "drift > threshold. Null when no THRESHOLD was given."
+            },
+            "changes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "One role that differs between two versions of a thing. A side that does not carry the role is null.",
+                "required": [
+                  "path",
+                  "from",
+                  "to",
+                  "score"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "layer.segment.role"
+                  },
+                  "from": {},
+                  "to": {},
+                  "score": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How close the two values are. 0 for two different categories."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "statement": {
+              "const": "introspect"
+            }
+          },
+          "required": [
+            "statement"
+          ]
+        },
+        "then": {
+          "required": [
+            "by",
+            "parts"
+          ],
+          "properties": {
+            "by": {
+              "enum": [
+                "layer",
+                "segment",
+                "role"
+              ]
+            },
+            "parts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "weight",
+                  "value"
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "statement": {
+              "const": "trend"
+            }
+          },
+          "required": [
+            "statement"
+          ]
+        },
+        "then": {
+          "required": [
+            "key",
+            "level",
+            "over",
+            "versions",
+            "drift",
+            "pace",
+            "period",
+            "roles",
+            "alert"
+          ],
+          "properties": {
+            "level": {
+              "type": "string",
+              "description": "cortex, or the path of a layer, a segment or a role."
+            },
+            "over": {
+              "type": "number",
+              "description": "The window, in seconds."
+            },
+            "alert": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "required": [
+                "on",
+                "value",
+                "fired"
+              ],
+              "properties": {
+                "on": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "number"
+                },
+                "fired": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "statement": {
+              "const": "predict"
+            }
+          },
+          "required": [
+            "statement"
+          ]
+        },
+        "then": {
+          "required": [
+            "key",
+            "versions",
+            "at",
+            "data",
+            "roles",
+            "answer"
+          ],
+          "properties": {}
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "statement": {
+              "const": "follow"
+            }
+          },
+          "required": [
+            "statement"
+          ]
+        },
+        "then": {
+          "required": [
+            "from",
+            "direction",
+            "depth",
+            "count",
+            "nodes",
+            "edges",
+            "truncated"
+          ],
+          "properties": {
+            "from": {
+              "type": "object",
+              "description": "A thing: the model it is in, its key there, and its newest version as the reader may see it.",
+              "required": [
+                "model_id",
+                "key",
+                "missing"
+              ],
+              "properties": {
+                "model_id": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "missing": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "store": {
+                  "enum": [
+                    "wins",
+                    "vetoes"
+                  ]
+                },
+                "outcome": {
+                  "type": "string"
+                },
+                "ts": {
+                  "type": "number",
+                  "description": "Epoch seconds."
+                },
+                "data": {
+                  "type": "object"
+                },
+                "hops": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "direction": {
+              "enum": [
+                "out",
+                "in",
+                "both"
+              ]
+            },
+            "depth": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "The things reached that the condition holds for, before LIMIT."
+            },
+            "nodes": {
+              "type": "array",
+              "description": "Nearest first: by how many relations away, then in a fixed order.",
+              "items": {
+                "type": "object",
+                "description": "A thing: the model it is in, its key there, and its newest version as the reader may see it.",
+                "required": [
+                  "model_id",
+                  "key",
+                  "missing",
+                  "hops"
+                ],
+                "properties": {
+                  "model_id": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "missing": {
+                    "type": "boolean"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "store": {
+                    "enum": [
+                      "wins",
+                      "vetoes"
+                    ]
+                  },
+                  "outcome": {
+                    "type": "string"
+                  },
+                  "ts": {
+                    "type": "number",
+                    "description": "Epoch seconds."
+                  },
+                  "data": {
+                    "type": "object"
+                  },
+                  "hops": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            },
+            "edges": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "One relation: the thing that has the ref role, the role's path, and the thing it names.",
+                "required": [
+                  "from",
+                  "relation",
+                  "to",
+                  "missing"
+                ],
+                "properties": {
+                  "from": {
+                    "type": "object",
+                    "required": [
+                      "model_id",
+                      "key"
+                    ]
+                  },
+                  "relation": {
+                    "type": "string",
+                    "description": "The ref role's path: layer.segment.role."
+                  },
+                  "to": {
+                    "type": "object",
+                    "required": [
+                      "model_id",
+                      "key",
+                      "parts"
+                    ],
+                    "properties": {
+                      "model_id": {
+                        "type": "string"
+                      },
+                      "key": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "parts": {
+                        "type": "array"
+                      }
+                    }
+                  },
+                  "missing": {
+                    "type": "boolean",
+                    "description": "True when the relation names a thing that is not on record."
+                  }
+                }
+              },
+              "description": "Every relation the walk went along."
+            },
+            "truncated": {
+              "type": "boolean",
+              "description": "True when the walk stopped at its limit of things before the depth."
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "statement": {
+              "const": "path"
+            }
+          },
+          "required": [
+            "statement"
+          ]
+        },
+        "then": {
+          "required": [
+            "found",
+            "hops",
+            "direction",
+            "depth",
+            "nodes",
+            "edges"
+          ],
+          "properties": {
+            "found": {
+              "type": "boolean"
+            },
+            "hops": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "nodes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "A thing: the model it is in, its key there, and its newest version as the reader may see it.",
+                "required": [
+                  "model_id",
+                  "key",
+                  "missing"
+                ],
+                "properties": {
+                  "model_id": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "missing": {
+                    "type": "boolean"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "store": {
+                    "enum": [
+                      "wins",
+                      "vetoes"
+                    ]
+                  },
+                  "outcome": {
+                    "type": "string"
+                  },
+                  "ts": {
+                    "type": "number",
+                    "description": "Epoch seconds."
+                  },
+                  "data": {
+                    "type": "object"
+                  },
+                  "hops": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              },
+              "description": "The things on the path, in order."
+            },
+            "edges": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "One relation: the thing that has the ref role, the role's path, and the thing it names.",
+                "required": [
+                  "from",
+                  "relation",
+                  "to",
+                  "missing"
+                ],
+                "properties": {
+                  "from": {
+                    "type": "object",
+                    "required": [
+                      "model_id",
+                      "key"
+                    ]
+                  },
+                  "relation": {
+                    "type": "string",
+                    "description": "The ref role's path: layer.segment.role."
+                  },
+                  "to": {
+                    "type": "object",
+                    "required": [
+                      "model_id",
+                      "key",
+                      "parts"
+                    ],
+                    "properties": {
+                      "model_id": {
+                        "type": "string"
+                      },
+                      "key": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "parts": {
+                        "type": "array"
+                      }
+                    }
+                  },
+                  "missing": {
+                    "type": "boolean",
+                    "description": "True when the relation names a thing that is not on record."
+                  }
+                }
+              },
+              "description": "The relations between them, in order."
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "statement": {
+              "const": "aggregate"
+            }
+          },
+          "required": [
+            "statement"
+          ]
+        },
+        "then": {
+          "required": [
+            "function",
+            "path",
+            "groups"
+          ],
+          "properties": {
+            "function": {
+              "enum": [
+                "count",
+                "avg",
+                "min",
+                "max",
+                "sum"
+              ]
+            },
+            "path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "groups": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "by",
+                  "value",
+                  "count"
+                ],
+                "properties": {
+                  "by": {
+                    "type": "object"
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "$defs": {
+      "fact": {
+        "type": "object",
+        "required": [
+          "key",
+          "weight",
+          "score",
+          "share",
+          "sim",
+          "status"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "number",
+            "minimum": 0
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "share": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "sim": {
+            "type": "number"
+          },
+          "status": {
+            "enum": [
+              "both",
+              "query_only",
+              "record_only"
+            ]
+          },
+          "match": {
+            "enum": [
+              "same",
+              "lexical",
+              "partial",
+              "near",
+              "different"
+            ],
+            "description": "At a leaf both sides carry: how the two values compare. partial is two sets or texts that share some of their items; near is two numbers some bins apart on one scale."
+          },
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/fact"
+            }
+          }
+        }
+      }
+    }
+  },
+  "edges": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "ada_edges",
+    "type": "object",
+    "required": [
+      "model_id",
+      "key",
+      "level",
+      "neural",
+      "temporal",
+      "relations"
+    ],
+    "properties": {
+      "model_id": {
+        "type": "string"
+      },
+      "key": {
+        "type": "string"
+      },
+      "level": {
+        "type": "string",
+        "description": "cortex, or the path of a layer, a segment or a role."
+      },
+      "neural": {
+        "type": "array",
+        "description": "The things nearest this one at the level, nearest first.",
+        "items": {
+          "type": "object",
+          "required": [
+            "target",
+            "id",
+            "store",
+            "outcome",
+            "score"
+          ],
+          "properties": {
+            "target": {
+              "type": "string",
+              "description": "The other thing's key."
+            },
+            "id": {
+              "type": "string"
+            },
+            "store": {
+              "enum": [
+                "wins",
+                "vetoes"
+              ]
+            },
+            "outcome": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "parts": {
+              "type": "array",
+              "description": "The thing's key parts as written, in the spec's order. Only in a model with key parts, and only when the reader may see them."
+            }
+          }
+        }
+      },
+      "temporal": {
+        "type": "array",
+        "description": "Each version of this thing to the next, oldest first.",
+        "items": {
+          "type": "object",
+          "required": [
+            "from",
+            "to",
+            "ts",
+            "change",
+            "changes"
+          ],
+          "properties": {
+            "from": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "to": {
+              "type": "integer",
+              "minimum": 2
+            },
+            "ts": {
+              "type": "number",
+              "description": "Epoch seconds."
+            },
+            "change": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "1 - the two versions' score at the level."
+            },
+            "changes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "One role that differs between two versions of a thing. A side that does not carry the role is null.",
+                "required": [
+                  "path",
+                  "from",
+                  "to",
+                  "score"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "layer.segment.role"
+                  },
+                  "from": {},
+                  "to": {},
+                  "score": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How close the two values are. 0 for two different categories."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "relations": {
+        "type": "object",
+        "required": [
+          "out",
+          "in"
+        ],
+        "description": "The relations this thing's ref roles make, and the ones that name it.",
+        "properties": {
+          "out": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One relation: the thing that has the ref role, the role's path, and the thing it names.",
+              "required": [
+                "from",
+                "relation",
+                "to",
+                "missing"
+              ],
+              "properties": {
+                "from": {
+                  "type": "object",
+                  "required": [
+                    "model_id",
+                    "key"
+                  ]
+                },
+                "relation": {
+                  "type": "string",
+                  "description": "The ref role's path: layer.segment.role."
+                },
+                "to": {
+                  "type": "object",
+                  "required": [
+                    "model_id",
+                    "key",
+                    "parts"
+                  ],
+                  "properties": {
+                    "model_id": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "parts": {
+                      "type": "array"
+                    }
+                  }
+                },
+                "missing": {
+                  "type": "boolean",
+                  "description": "True when the relation names a thing that is not on record."
+                }
+              }
+            }
+          },
+          "in": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One relation: the thing that has the ref role, the role's path, and the thing it names.",
+              "required": [
+                "from",
+                "relation",
+                "to",
+                "missing"
+              ],
+              "properties": {
+                "from": {
+                  "type": "object",
+                  "required": [
+                    "model_id",
+                    "key"
+                  ]
+                },
+                "relation": {
+                  "type": "string",
+                  "description": "The ref role's path: layer.segment.role."
+                },
+                "to": {
+                  "type": "object",
+                  "required": [
+                    "model_id",
+                    "key",
+                    "parts"
+                  ],
+                  "properties": {
+                    "model_id": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "parts": {
+                      "type": "array"
+                    }
+                  }
+                },
+                "missing": {
+                  "type": "boolean",
+                  "description": "True when the relation names a thing that is not on record."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   },
   "load": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
