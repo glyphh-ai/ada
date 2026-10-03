@@ -46,7 +46,7 @@ export interface Role {
   many?: boolean;
   /** A ref role: a record that names a thing not on record is refused. */
   strict?: boolean;
-  /** A text role of words, or an open category: the model of words its values take their neighbours from, by its catalog row (`glyphh-ada-eng-1.0`) or model id. */
+  /** A text role of words, or an open category: a model of your own words its values take their neighbours from, on top of Ada's own English. */
   base?: string;
 }
 

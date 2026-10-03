@@ -86,7 +86,7 @@ Each has its own README: [TypeScript](sdk/typescript/README.md), [Python](sdk/py
 
 - `act` is true only when confidence is at least 0.7, three or more records stand behind the answer and no recorded failure vetoes it, or when the same situation is on record.
 - A situation that carries a key or a value no win has recorded is not acted on. The answer's `reason` is `unseen`, `unseen` lists what was new, and the nearest answer is still returned. [When Ada acts](https://docs.glyphh.ai/ada-act) covers every case.
-- A text role can name a `base`, a model of words whose set roles are each word's neighbours; its words then score close to their neighbours with no language model in the path. Glyphh's `glyphh-ada-eng-1.0` base is English, built from WordNet, and every organization's models may name it.
+- Ada reads English by itself: a text role of words or an open category scores a word close to its synonyms and near words, and two words that share a part of speech a little alike, with no language model in the path. A role may name a `base`, a model of your own jargon, read on top.
 - Two different values score 0. A typed model says how each role is compared: categories, sets, numbers on a scale, text, booleans, times and relations.
 - `ada_calibrate` fits a model's probabilities, and `ada_learn` works out what decides from a model's own wins: a flat model's key weights, a typed model's role weights.
 
