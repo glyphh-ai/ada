@@ -70,13 +70,13 @@ segments and roles, each role with a type.
   `set`, `number` (a `numeric_config` scale, near numbers score near),
   `text` (words, or n-grams so another spelling is near), `boolean`,
   `time`, and `ref` (the key of another thing: a relation).
-- A text role of words, or an open category, may name a `base`: another
-  model whose things are words (keyed by the word, with set roles of its
-  neighbours). Its words then take their neighbours from there, so
-  "receipt" scores close to "invoice" with no language model in the path.
-  Glyphh's `glyphh-ada-eng-1.0` model, English built from WordNet, is
-  the first base: name it by that row. A model of your own jargon can be
-  another. A closed category never takes a base.
+- Ada reads English by itself. A text role of words, or an open category,
+  scores a word close to its synonyms and near words, and two words that
+  share a part of speech score a little alike, with no language model in
+  the path: "receipt" is close to "invoice", and "gently" sits with
+  "please". Nothing is named for this. A role may also name a `base`, a
+  model of your own jargon whose things are words (keyed by the word, with
+  set roles of its neighbours), read on top. A closed category never reads.
 - `ada_models` lists the models Glyphh shares beside the org's own: a
   shared one has `own` false and `shared` true, every organization reads
   it, and only Glyphh writes it; `version` and `source` say where it was
