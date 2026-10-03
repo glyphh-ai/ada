@@ -84,6 +84,49 @@ should decide, as short canonical values:
 `{"task": "deploy_service", "constraint": "canary_required"}`. Leave out
 ids, paths, names and timestamps, and use the same keys every time.
 
+## Modelling: the data is the model
+
+Ada compares exactly, by type. The shape you give a record is the
+model, and the fact tree shows at once when the shape is wrong. Learned
+the hard way; follow these before the first record:
+
+- **An absent value is not a zero.** Record only what a thing has. A
+  field set to 0 on every record agrees with every question, and the
+  vote fills with records that share nothing real. Twelve hue bins of
+  which ten are 0 made every image look alike.
+- **A histogram or a profile is a set, not a row of numbers.** Encode
+  each part as tokens by its size (`orange1 ... orange8`, `red1`) in a
+  `set` role: two things then score by what they share over what
+  either has. A row of independent numbers scores a 1% trace against a
+  missing value as 0 and rewards agreeing on the small bins.
+- **Drop traces before you compare.** A 1% presence should not be in
+  the record or the question. Threshold on the way in, the same way
+  both times.
+- **A number needs the right scale.** `bin_width` is the difference
+  that counts as "near": one step apart scores 1 - 1/bins. Too fine and
+  nothing is near; too coarse and everything is.
+- **A category that may grow is open** (no `values`): a new value is
+  `unseen`, the model says so, and a person decides. A category that
+  must not grow is closed: list its `values`.
+- **Identity is a key part with weight 0**, and a thing that changes is
+  recorded again under the same key parts: versions, not new things.
+  Ask about the thing by its key parts for history, trend and predict;
+  leave them out to ask what the thing is like.
+- **Roles that only mean something together go in one segment with
+  `together: true`** (door open and alarm armed).
+- **Weigh what decides.** Give identity, timestamps and noise weight 0.
+  Once there are 10 or more wins, `ada_calibrate` fits the vote and
+  `ada_learn` finds the weights from the records; read what it learned,
+  a role at 0 no longer guards `unseen`.
+- **Read the fact tree when an answer is off.** It names the role, both
+  values and the score. A wrong answer with the right nearest records
+  is a weighting or `together` problem; wrong nearest records are a
+  representation problem; `unseen` on something that is not new is a
+  threshold or a closed category.
+- **Test with what it must refuse** as well as what it must answer, and
+  iterate the spec before loading everything: a spec is fixed after the
+  first record, bar its weights.
+
 ## Time, likeness and the graph
 
 For a thing in a model with key parts:
