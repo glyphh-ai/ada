@@ -3,7 +3,6 @@
     "request": {
       "op": "create_model",
       "name": "deals",
-      "storage": "cloud",
       "spec": {
         "name": "deals",
         "temporal_source": "meta.time.seen",
@@ -100,8 +99,10 @@
       "data": {
         "model_id": "am_3e6ce47eb910",
         "name": "deals",
-        "storage": "cloud",
-        "device_id": null,
+        "own": true,
+        "shared": false,
+        "version": null,
+        "source": null,
         "weights": null,
         "tau": null,
         "calibrated": false,
@@ -314,8 +315,10 @@
           {
             "model_id": "am_3e6ce47eb910",
             "name": "deals",
-            "storage": "cloud",
-            "device_id": null,
+            "own": true,
+            "shared": false,
+            "version": null,
+            "source": null,
             "weights": null,
             "tau": null,
             "calibrated": false,
@@ -480,6 +483,10 @@
             "wins": 3,
             "vetoes": 0,
             "things": 3,
+            "index": {
+              "records": 3,
+              "kept": 3
+            },
             "cache": {
               "hits": 0,
               "misses": 0,
@@ -503,8 +510,10 @@
           {
             "model_id": "am_3e6ce47eb910",
             "name": "deals",
-            "storage": "cloud",
-            "device_id": null,
+            "own": true,
+            "shared": false,
+            "version": null,
+            "source": null,
             "weights": null,
             "tau": null,
             "calibrated": false,
@@ -768,8 +777,10 @@
       "data": {
         "model_id": "am_3e6ce47eb910",
         "name": "deals",
-        "storage": "cloud",
-        "device_id": null,
+        "own": true,
+        "shared": false,
+        "version": null,
+        "source": null,
         "weights": null,
         "tau": null,
         "calibrated": false,
@@ -4121,7 +4132,6 @@
     "request": {
       "op": "create_model",
       "name": "accounts",
-      "storage": "cloud",
       "spec": {
         "name": "accounts",
         "layers": [
@@ -4157,8 +4167,10 @@
       "data": {
         "model_id": "am_a6de04b63e8b",
         "name": "accounts",
-        "storage": "cloud",
-        "device_id": null,
+        "own": true,
+        "shared": false,
+        "version": null,
+        "source": null,
         "weights": null,
         "tau": null,
         "calibrated": false,

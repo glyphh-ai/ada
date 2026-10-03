@@ -86,7 +86,7 @@ Each has its own README: [TypeScript](sdk/typescript/README.md), [Python](sdk/py
 
 - `act` is true only when confidence is at least 0.7, three or more records stand behind the answer and no recorded failure vetoes it, or when the same situation is on record.
 - A situation that carries a key or a value no win has recorded is not acted on. The answer's `reason` is `unseen`, `unseen` lists what was new, and the nearest answer is still returned. [When Ada acts](https://docs.glyphh.ai/ada-act) covers every case.
-- A text role can name a `base`, a model of words whose set roles are each word's neighbours; its words then score close to their neighbours with no language model in the path. The `english` base is built from WordNet.
+- A text role can name a `base`, a model of words whose set roles are each word's neighbours; its words then score close to their neighbours with no language model in the path. Glyphh's `glyphh-ada-eng-1.0` base is English, built from WordNet, and every organization's models may name it.
 - Two different values score 0. A typed model says how each role is compared: categories, sets, numbers on a scale, text, booleans, times and relations.
 - `ada_calibrate` fits a model's probabilities, and `ada_learn` works out what decides from a model's own wins: a flat model's key weights, a typed model's role weights.
 
@@ -94,7 +94,7 @@ Each has its own README: [TypeScript](sdk/typescript/README.md), [Python](sdk/py
 
 | Tool | Purpose |
 |------|---------|
-| `ada_models` | List the organization's Ada models, or one model with its record counts |
+| `ada_models` | List the organization's Ada models and the ones Glyphh shares, or one model with its record counts |
 | `ada_query` | Ask a model what worked in situations like this one: `act`, `reason`, and the records behind it |
 | `ada_facts` | Explain the nearest situations as fact trees |
 | `ada_record`, `ada_veto` | Record a graded win, or a failure |
@@ -108,7 +108,6 @@ Each has its own README: [TypeScript](sdk/typescript/README.md), [Python](sdk/py
 | `ada_calibrate` | Fit a model's probabilities to its own records (10+ wins) |
 | `ada_learn` | Learn which keys or roles decide from a model's wins (10+), save them as its weights or in its spec, and calibrate it (org admins) |
 | `ada_records` | Browse a model's records, newest first |
-| `ada_devices` | The registered devices that can hold a local model's records |
 | `ada_create_model`, `ada_update_model`, `ada_delete_model` | Manage models and their specs (organization admins) |
 | `ada_edit_record`, `ada_delete_record` | Correct or delete a record (organization admins) |
 

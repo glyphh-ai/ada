@@ -12,7 +12,7 @@
  */
 
 import type {
-  Answer, Args, Check, Contract, Device, Edges, Facts, GqlResult, Learned, History, Loaded, LoadRecord, Model, ModelChange, NewModel,
+  Answer, Args, Check, Contract, Edges, Facts, GqlResult, Learned, History, Loaded, LoadRecord, Model, ModelChange, NewModel,
   Prediction, Procedure, Recorded, Situation, Store, StoredRecord, Trend, Weights, When,
 } from "./types.js";
 
@@ -152,7 +152,7 @@ export class Ada {
     return new AdaModel(this, modelId);
   }
 
-  /** The organization's models. */
+  /** The organization's models, and the ones Glyphh shares with every organization. */
   async models(): Promise<Model[]> {
     return (await this.op<{ models: Model[] }>("models")).models;
   }
@@ -161,11 +161,6 @@ export class Ada {
   async createModel(model: NewModel): Promise<AdaModel & { created: Model }> {
     const created = await this.op<Model>("create_model", model);
     return Object.assign(this.model(created.model_id), { created });
-  }
-
-  /** The registered devices that can hold a local model's records. */
-  async devices(): Promise<Device[]> {
-    return (await this.op<{ devices: Device[] }>("devices")).devices;
   }
 
   /** The JSON Schema of every answer, and what each reason means. */

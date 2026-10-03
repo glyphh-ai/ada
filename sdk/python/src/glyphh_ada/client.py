@@ -9,7 +9,7 @@ import urllib.request
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Tuple, Union, cast
 
 from .types import (
-    Answer, Args, Check, Contract, Device, Edges, Facts, GqlResult, History, Loaded, LoadRecord, Model, Prediction, Procedure, Recorded,
+    Answer, Args, Check, Contract, Edges, Facts, GqlResult, History, Loaded, LoadRecord, Model, Prediction, Procedure, Recorded,
     Records, Situation, Store, Trend, Weights, When,
 )
 
@@ -138,21 +138,16 @@ class Ada:
         return AdaModel(self, model_id)
 
     def models(self) -> List[Model]:
-        """The organization's models."""
+        """The organization's models, and the ones Glyphh shares with every organization."""
         return cast(List[Model], self.op("models")["models"])
 
-    def create_model(self, name: str, storage: str = "cloud", *, spec: Optional[Dict[str, Any]] = None,
-                     weights: Optional[Weights] = None, device_id: Optional[str] = None) -> "AdaModel":
+    def create_model(self, name: str, *, spec: Optional[Dict[str, Any]] = None, weights: Optional[Weights] = None) -> "AdaModel":
         """Create a model (org admins). With a spec it is typed; without, it
         takes any JSON. The model it returns carries what was created in `created`."""
-        created = self.op("create_model", name=name, storage=storage, spec=spec, weights=weights, device_id=device_id)
+        created = self.op("create_model", name=name, spec=spec, weights=weights)
         model = self.model(created["model_id"])
         model.created = cast(Model, created)
         return model
-
-    def devices(self) -> List[Device]:
-        """The registered devices that can hold a local model's records."""
-        return cast(List[Device], self.op("devices")["devices"])
 
     def contract(self) -> Contract:
         """The JSON Schema of every answer, and what each reason means."""
