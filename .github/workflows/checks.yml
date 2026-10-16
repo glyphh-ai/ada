@@ -1,0 +1,32 @@
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  sdks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: TypeScript
+        working-directory: sdk/typescript
+        run: npm install && npm test
+      - name: Python
+        working-directory: sdk/python
+        run: python -m pip install '.[dev]' && python -m pytest -q
+      - name: The two packages carry one version
+        run: |
+          ts="$(node -p "require('./sdk/typescript/package.json').version")"
+          py="$(python -c "import tomllib; print(tomllib.load(open('sdk/python/pyproject.toml', 'rb'))['project']['version'])")"
+          [ "$ts" = "$py" ] || { echo "npm $ts, PyPI $py"; exit 1; }

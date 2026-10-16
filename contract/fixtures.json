@@ -1,0 +1,39 @@
+{
+  "contract": 3,
+  "cases": [
+    {
+      "name": "a call that is done",
+      "request": { "method": "POST", "path": "/v1/runs", "body": { "model": "incidents", "function": "decide", "inputs": { "data": { "error": { "what": { "class": "TimeoutError" } } } }, "clearance": 0.5 } },
+      "response": { "status": 200, "body": { "run_id": "7e2a1c", "model": "incidents", "version": 1, "function": "decide", "status": "done", "data": { "fix": "raise circuit breaker", "confidence": 1.0, "from": 3, "last_time": {} }, "step": null, "prompt": null, "seconds": 0.21 } }
+    },
+    {
+      "name": "a call that needs input, then continued",
+      "request": { "method": "POST", "path": "/v1/runs", "body": { "model": "incidents", "function": "decide", "inputs": { "data": { "error": { "what": { "class": "SSLError" } } } } } },
+      "response": { "status": 200, "body": { "run_id": "9b0d44", "model": "incidents", "version": 1, "function": "decide", "status": "needs_input", "data": { "schema": null, "options": null }, "step": null, "prompt": "No past incident is close enough. How was this one fixed?", "seconds": 0.2 } },
+      "then": {
+        "request": { "method": "POST", "path": "/v1/runs/9b0d44/continue", "body": { "answer": "rotate certificate" } },
+        "response": { "status": 200, "body": { "run_id": "9b0d44", "model": "incidents", "version": 1, "function": "decide", "status": "done", "data": { "fix": "rotate certificate", "confidence": null, "from": 0, "last_time": {}, "recorded": "c6d607f7e0f2" }, "step": null, "prompt": null, "seconds": 0.4 } }
+      }
+    },
+    {
+      "name": "a query",
+      "request": { "method": "POST", "path": "/v1/runs", "body": { "model": "incidents", "function": "query", "inputs": { "data": { "error": { "what": { "class": "SSLError", "message": "certificate has expired" } } } } } },
+      "response": { "status": 200, "body": { "run_id": "c1", "model": "incidents", "version": 1, "function": "query", "status": "done", "data": { "sufficient": true, "confidence": 1.0, "support": 0.8535, "count": 1, "top": "rotate certificate", "outcomes": { "rotate certificate": 1.0 }, "receipts": [{ "id": "c6d607f7e0f2", "sim": 0.8535, "outcome": "rotate certificate", "hash": "cbd90cd4e8f751b3", "author": "claude" }] }, "step": null, "prompt": null, "seconds": 0.2 } }
+    },
+    {
+      "name": "a wrong key",
+      "request": { "method": "POST", "path": "/v1/runs", "body": { "model": "incidents", "function": "start", "inputs": {} } },
+      "response": { "status": 401, "body": { "error": { "code": "E_AUTH", "message": "Send a runtime key: Authorization: Bearer <key>." } } }
+    },
+    {
+      "name": "a paused runtime",
+      "request": { "method": "POST", "path": "/v1/runs", "body": { "model": "incidents", "function": "start", "inputs": {} } },
+      "response": { "status": 402, "body": { "error": { "code": "E_LIMIT", "message": "This runtime is paused: its plan's hosted hours for the month are spent.", "limit": "runtime_hours" } } }
+    },
+    {
+      "name": "a model that is not there",
+      "request": { "method": "POST", "path": "/v1/runs", "body": { "model": "nothing", "function": "start", "inputs": {} } },
+      "response": { "status": 404, "body": { "error": { "code": "E_MODEL_MISSING", "message": "No model named nothing is deployed." } } }
+    }
+  ]
+}
