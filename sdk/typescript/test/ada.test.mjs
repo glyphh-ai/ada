@@ -43,7 +43,7 @@ test("a run that needs input is resumed", async () => {
 
 test("a query, and the other functions name themselves", async () => {
   const c = byName("a query");
-  const { ada, calls } = fake(...Array(5).fill([200, c.response.body]));
+  const { ada, calls } = fake(...Array(7).fill([200, c.response.body]));
   const m = ada.model("incidents");
   const r = await m.query(c.request.body.inputs.data);
   assert.equal(r.data.top, "rotate certificate");
@@ -51,6 +51,8 @@ test("a query, and the other functions name themselves", async () => {
   await m.record({ a: 1 });
   await m.facts({ a: 1 }, { top: 2, clearance: 0.5 });
   await m.probabilities({ a: 1 });
+  await m.learn();
+  await m.learn({ sample: 50, clearance: 0.5 });
   assert.deepEqual(
     calls.map((k) => [k.body.function, k.body.inputs, k.body.clearance]),
     [
@@ -59,6 +61,8 @@ test("a query, and the other functions name themselves", async () => {
       ["record", { data: { a: 1 } }, undefined],
       ["facts", { data: { a: 1 }, top: 2 }, 0.5],
       ["probabilities", { data: { a: 1 } }, undefined],
+      ["learn", {}, undefined],
+      ["learn", { sample: 50 }, 0.5],
     ],
   );
 });

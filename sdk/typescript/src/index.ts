@@ -198,4 +198,10 @@ export class AdaModel {
   decide<T = unknown>(data: Record<string, unknown>, options: CallOptions = {}): Promise<Result<T>> {
     return this.call("decide", { data }, options);
   }
+
+  /** The model weighs its roles from its own precedents and calibrates; `sample` is how many of the newest to calibrate on. */
+  learn(options: CallOptions & { sample?: number } = {}): Promise<Result<{ roles: Record<string, number>; tau: number; precedents: number }>> {
+    const { sample, ...rest } = options;
+    return this.call("learn", sample === undefined ? {} : { sample }, rest);
+  }
 }

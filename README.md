@@ -56,10 +56,11 @@ Bearer <runtime key>`, answered with the first `Result`:
 | `step`, `prompt` | What a waiting run asks |
 | `seconds` | How long it ran |
 
-An Ada model's functions (`record`, `query`, `facts`, `probabilities`, `decide`) are what `spec.json` and
+An Ada model's functions (`record`, `query`, `facts`, `probabilities`, `learn`, `decide`) are what `spec.json` and
 `model.py` make them; the SDKs name them for convenience, and `call(function, inputs)` reaches any function. `query`
 answers `{sufficient, confidence, support, count, top, outcomes, receipts}`; `facts` the nearest precedents as fact
-trees. `clearance` (0 to 1) is who asks: the model's secured layers are cut from the answer below their weight.
+trees; `learn` makes the model weigh its roles by what its own precedents say and calibrate its probabilities.
+`clearance` (0 to 1) is who asks: the model's secured layers are cut from the answer below their weight.
 
 A refusal is `{"error": {"code", "message"}}`: `E_AUTH` (401, the key), `E_LIMIT` (402, the runtime is paused: its
 plan's hours are spent this month), `E_MODEL_MISSING`, `E_RUN_MISSING`, `E_BAD_REQUEST`. The SDKs raise `AdaError`

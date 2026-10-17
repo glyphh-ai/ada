@@ -64,7 +64,7 @@ def test_a_run_that_needs_input_is_resumed():
 def test_a_query_answers_the_contracts_answer_and_the_other_functions_name_themselves():
     c = case("a query")
     body = c["response"]["body"]
-    client, fake = ada((200, body), (200, body), (200, body), (200, body), (200, body))
+    client, fake = ada(*[(200, body)] * 7)
     m = client.model("incidents")
     r = m.query(c["request"]["body"]["inputs"]["data"])
     validate(r.data, CONTRACT["answer"])
@@ -73,6 +73,8 @@ def test_a_query_answers_the_contracts_answer_and_the_other_functions_name_thems
     m.record({"a": 1})
     m.facts({"a": 1}, top=2, clearance=0.5)
     m.probabilities({"a": 1})
+    m.learn()
+    m.learn(sample=50, clearance=0.5)
     sent = [(call[3]["function"], call[3]["inputs"], call[3].get("clearance")) for call in fake.calls]
     assert sent == [
         ("query", {"data": c["request"]["body"]["inputs"]["data"]}, None),
@@ -80,6 +82,8 @@ def test_a_query_answers_the_contracts_answer_and_the_other_functions_name_thems
         ("record", {"data": {"a": 1}}, None),
         ("facts", {"data": {"a": 1}, "top": 2}, 0.5),
         ("probabilities", {"data": {"a": 1}}, None),
+        ("learn", {}, None),
+        ("learn", {"sample": 50}, 0.5),
     ]
 
 

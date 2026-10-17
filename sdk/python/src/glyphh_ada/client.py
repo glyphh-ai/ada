@@ -195,3 +195,8 @@ class Model:
 
     def decide(self, data: Mapping[str, Any], *, clearance: Optional[float] = None) -> Result:
         return self.call("decide", {"data": dict(data)}, clearance=clearance)
+
+    def learn(self, *, sample: Optional[int] = None, clearance: Optional[float] = None) -> Result:
+        """The model weighs its roles from its own precedents and calibrates; `sample` is how many of the newest
+        to calibrate on."""
+        return self.call("learn", {} if sample is None else {"sample": sample}, clearance=clearance)
