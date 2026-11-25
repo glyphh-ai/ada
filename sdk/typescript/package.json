@@ -15,7 +15,7 @@
   "keywords": ["glyphh", "ada", "typed", "deterministic", "precedent", "decision"],
   "homepage": "https://glyphh.ai",
   "repository": { "type": "git", "url": "git+https://github.com/glyphh-ai/ada.git", "directory": "sdk/typescript" },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "publishConfig": { "access": "public" },
   "devDependencies": { "typescript": "^5.6.0" }
 }

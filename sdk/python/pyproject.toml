@@ -7,7 +7,7 @@ name = "glyphh-ada"
 version = "0.4.0"
 description = "Ada for Python: typed models in your own Glyphh runtime, called by your software with a runtime key."
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 license-files = ["../../LICENSE"]
 requires-python = ">=3.9"
 authors = [{ name = "Glyphh AI" }]
